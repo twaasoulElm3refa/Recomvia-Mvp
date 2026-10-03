@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import Link from "next/link";
+import { NavigationLink as Link } from "@/app/components/navigation-link";
 import { ArrowRight, BarChart3, Bot, Check, CircleAlert, Clock3, FileSearch, Globe2, Repeat2, Scale, ShieldCheck } from "lucide-react";
 import { PublicShell } from "@/app/components/public-shell";
 import { Button } from "@/components/ui/button";

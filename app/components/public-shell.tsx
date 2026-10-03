@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import Link from "next/link";
+import { NavigationLink as Link } from "@/app/components/navigation-link";
 import { BrandMark } from "@/app/scan-experience";
 import { KnowledgeAssistant } from "@/app/components/knowledge-assistant";
 import { MobileSiteMenu, type SiteNavItem } from "@/app/components/mobile-site-menu";

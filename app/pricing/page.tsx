@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import Link from "next/link";
+import { NavigationLink as Link } from "@/app/components/navigation-link";
 import { ArrowRight, Check, CircleAlert, Coins, Sparkles, UsersRound } from "lucide-react";
 import { PublicShell } from "@/app/components/public-shell";
 import { Button } from "@/components/ui/button";

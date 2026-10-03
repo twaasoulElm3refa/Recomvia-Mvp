@@ -1,7 +1,7 @@
 "use client";
 
 import type { ReactNode } from "react";
-import Link from "next/link";
+import { NavigationLink as Link } from "@/app/components/navigation-link";
 import { usePathname } from "next/navigation";
 import { BarChart3, BookOpen, BookOpenCheck, ChevronDown, CircleHelp, CreditCard, FileSearch, LayoutDashboard, LogOut, Mail, Menu, Sparkles, Wrench } from "lucide-react";
 import { BrandMark } from "@/app/scan-experience";

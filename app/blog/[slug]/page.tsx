@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import Link from "next/link";
+import { NavigationLink as Link } from "@/app/components/navigation-link";
 import { notFound } from "next/navigation";
 import { ArrowLeft, ArrowRight, BookOpen, CalendarDays, Check, Clock3, ExternalLink, RefreshCw } from "lucide-react";
 import { PublicShell } from "@/app/components/public-shell";
@@ -35,4 +35,3 @@ export default async function ArticlePage({params}:{params:Promise<{slug:string}
     <section className="border-t border-slate-200 bg-white"><div className="mx-auto max-w-[1100px] px-5 py-16 sm:px-8"><div className="mb-7 flex items-end justify-between"><div><p className="text-sm font-bold uppercase tracking-[.14em] text-blue-600">Continue reading</p><h2 className="mt-2 text-3xl font-extrabold">Related guides</h2></div><Link href="/blog" className="hidden items-center gap-2 text-sm font-bold text-blue-700 sm:flex">View all <ArrowRight className="size-4"/></Link></div><div className="grid gap-4 md:grid-cols-3">{related.map(item=><Card key={item.slug} className="rounded-[20px] border-slate-200 py-0 shadow-none"><CardContent className="flex h-full flex-col p-5"><StatusPill tone="info">{item.category}</StatusPill><h3 className="mt-5 flex-1 font-extrabold leading-6">{item.title}</h3><Link href={`/blog/${item.slug}`} className="mt-5 flex items-center gap-2 text-sm font-bold text-blue-700">Read guide <ArrowRight className="size-4"/></Link></CardContent></Card>)}</div></div></section>
   </main></PublicShell>
 }
-

@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import Link from "next/link";
+import { NavigationLink as Link } from "@/app/components/navigation-link";
 import { ArrowRight, BookOpen, Bot, Headphones, ShieldCheck } from "lucide-react";
 import { PublicShell } from "@/app/components/public-shell";
 import { Card, CardContent } from "@/components/ui/card";

@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import Link from "next/link";
+import { NavigationLink as Link } from "@/app/components/navigation-link";
 import { ArrowRight, Bot, ChevronRight, Eye, LockKeyhole, RotateCcw, ShieldCheck, UserRoundCheck, WandSparkles } from "lucide-react";
 import { AppShell, StatusPill } from "@/app/components/app-shell";
 import { Button } from "@/components/ui/button";

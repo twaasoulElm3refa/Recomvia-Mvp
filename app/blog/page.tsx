@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import Link from "next/link";
+import { NavigationLink as Link } from "@/app/components/navigation-link";
 import { ArrowRight, BookOpen, CalendarDays, Clock3, Radar } from "lucide-react";
 import { PublicShell } from "@/app/components/public-shell";
 import { StatusPill } from "@/app/components/app-shell";

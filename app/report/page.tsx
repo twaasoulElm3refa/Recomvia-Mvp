@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import Link from "next/link";
+import { NavigationLink as Link } from "@/app/components/navigation-link";
 import { ArrowRight, Check, CircleAlert, Clock3, Download, ExternalLink, FileSearch, LockKeyhole, Radar, ShieldCheck, X } from "lucide-react";
 import { AppShell, StatusPill } from "@/app/components/app-shell";
 import { requireAuthenticatedUser } from "@/app/auth";

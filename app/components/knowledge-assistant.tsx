@@ -1,7 +1,7 @@
 "use client";
 
 import { FormEvent, useCallback, useEffect, useState } from "react";
-import Link from "next/link";
+import { NavigationLink as Link } from "@/app/components/navigation-link";
 import {
   ArrowRight,
   Bot,

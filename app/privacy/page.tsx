@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import Link from "next/link";
+import { NavigationLink as Link } from "@/app/components/navigation-link";
 import { PolicyPage, PolicySection } from "@/app/components/policy-page";
 import { SITE_URL } from "@/lib/articles";
 
