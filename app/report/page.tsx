@@ -3,7 +3,7 @@ import { NavigationLink as Link } from "@/app/components/navigation-link";
 import { ArrowRight, Check, CircleAlert, Clock3, Download, ExternalLink, FileSearch, LockKeyhole, Radar, ShieldCheck, X } from "lucide-react";
 import { AppShell, StatusPill } from "@/app/components/app-shell";
 import { requireAuthenticatedUser } from "@/app/auth";
-import { getLatestScanForUser, getScanForUser } from "@/db/product";
+import { getLatestScanForUser, getScanForUser, type StoredScan } from "@/db/product";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
@@ -29,6 +29,44 @@ function tone(status: string): "good" | "warn" | "bad" {
   return status === "pass" ? "good" : status === "partial" ? "warn" : "bad";
 }
 
+function surfaceLabel(value: string) {
+  if (value === "api_with_search") return "API with search";
+  if (value === "api_without_search") return "API without search";
+  return "Consumer experience";
+}
+
+function costLabel(value: number | null) {
+  return value === null ? "Unavailable" : `$${(value / 1_000_000).toFixed(5)}`;
+}
+
+function ActualVisibilityPanel({ scan }: { scan: StoredScan }) {
+  if (!scan.engineRuns.length) {
+    return <Card className="rounded-[26px] border-amber-200 bg-amber-50/60 py-0 shadow-none"><CardContent className="grid min-h-80 place-items-center p-8 text-center"><div><span className="mx-auto grid size-14 place-items-center rounded-2xl bg-white text-amber-700"><Radar className="size-6" /></span><p className="mt-5 text-xs font-bold uppercase tracking-[.14em] text-amber-700">{scan.actualVisibilityStatus === "not_configured" ? "OpenAI API not configured" : "Not measured"}</p><h2 className="mt-2 text-2xl font-extrabold">No AI answer-surface result is claimed.</h2><p className="mx-auto mt-3 max-w-2xl text-sm leading-7 text-slate-600">The AEO/GEO readiness result remains available, but Actual AI Visibility requires completed, stored engine runs. No result is inferred or fabricated.</p><div className="mx-auto mt-6 flex max-w-xl items-start gap-3 rounded-2xl bg-white p-4 text-start text-sm text-slate-600"><LockKeyhole className="mt-0.5 size-5 shrink-0 text-blue-600" /><p><strong className="text-slate-900">Methodology safeguard:</strong> readiness cannot be presented as actual visibility, even when the readiness score is high.</p></div></div></CardContent></Card>;
+  }
+
+  const contextRows = scan.discoveredContext ? [
+    ["Brand / entity", scan.discoveredContext.brand.value, scan.discoveredContext.brand.confidence],
+    ["Category", scan.discoveredContext.category.value, scan.discoveredContext.category.confidence],
+    ["Offerings", scan.discoveredContext.offerings.value.join(", ") || "Not confidently detected", scan.discoveredContext.offerings.confidence],
+    ["Languages / markets", `${scan.discoveredContext.languages.value.join(", ")} · ${scan.discoveredContext.markets.value.join(", ")}`, Math.round((scan.discoveredContext.languages.confidence + scan.discoveredContext.markets.confidence) / 2)],
+    ["Competitors before runs", scan.discoveredContext.competitors.value.join(", ") || "None explicitly detected", scan.discoveredContext.competitors.confidence],
+    ["Overall context confidence", `${scan.contextConfidence ?? 0}%`, scan.contextConfidence ?? 0],
+  ] as const : [];
+
+  return <div className="space-y-5">
+    <div className="grid gap-5 lg:grid-cols-[.72fr_1.28fr]">
+      <Card className="rounded-[24px] border-blue-200 bg-[#07111f] text-white shadow-none"><CardContent className="p-7"><p className="text-xs font-bold uppercase tracking-[.14em] text-cyan-300">Actual AI Visibility</p><div className="mt-5 flex items-end gap-2"><strong className="text-7xl tracking-[-.07em]">{scan.actualVisibilityScore ?? "—"}</strong>{scan.actualVisibilityScore !== null && <span className="pb-2 text-xl text-white/40">/100</span>}</div><p className="mt-3 text-sm font-bold text-cyan-200">{scan.actualVisibilityStatus} · {scan.actualVisibilityConfidence ?? 0}% confidence</p><p className="mt-4 text-sm leading-6 text-slate-400">Observed only across the stored engine runs below. This is not a claim about the ChatGPT consumer product.</p><div className="mt-6 border-t border-white/10 pt-4 text-xs text-slate-400">{scan.engineRunCount} engine runs · separate from the {scan.readinessScore}/100 readiness score</div></CardContent></Card>
+      <Card className="rounded-[24px] border-slate-200 shadow-none"><CardHeader><CardTitle>Automatically discovered context</CardTitle></CardHeader><CardContent className="grid gap-4 sm:grid-cols-2">{contextRows.length ? contextRows.map(([name, value, confidence]) => <div key={name} className="rounded-2xl bg-slate-50 p-4"><p className="text-xs font-bold uppercase tracking-wider text-slate-400">{name}</p><p className="mt-2 text-sm font-bold">{value}</p><p className="mt-2 text-xs text-slate-500">{confidence}% confidence</p></div>) : <p className="text-sm text-slate-500">Context discovery was not stored for this scan.</p>}</CardContent></Card>
+    </div>
+    <div className="space-y-4">{scan.engineRuns.map((run, index) => <Card key={run.id} className="rounded-[22px] border-slate-200 py-0 shadow-none"><CardContent className="p-6">
+      <div className="flex flex-wrap items-start justify-between gap-4"><div><p className="text-xs font-bold uppercase tracking-[.12em] text-blue-600">Run {index + 1} · {run.intent}</p><h3 className="mt-2 text-lg font-extrabold">{run.prompt}</h3><div className="mt-3 flex flex-wrap gap-2"><StatusPill tone="info">{run.provider}</StatusPill><StatusPill tone="info">{run.model}</StatusPill><StatusPill tone="warn">{surfaceLabel(run.surfaceType)}</StatusPill><StatusPill tone={run.error ? "bad" : "good"}>{run.error ? "Failed" : "Completed"}</StatusPill></div></div><div className="rounded-xl border border-slate-200 px-4 py-3 text-end text-xs text-slate-500"><strong className="block text-base text-slate-900">{run.analysis.recommendationStatus}</strong>{run.analysis.mentionCount} mentions · position {run.analysis.recommendationPosition ?? "—"}</div></div>
+      {run.error ? <div className="mt-5 rounded-xl bg-red-50 p-4 text-sm text-red-800"><strong>{run.error.code}:</strong> {run.error.message}</div> : <p className="mt-5 whitespace-pre-wrap rounded-xl bg-slate-50 p-4 text-sm leading-7 text-slate-700">{run.responseText}</p>}
+      <div className="mt-4 grid gap-3 text-xs text-slate-500 sm:grid-cols-4"><span>Market: <strong className="text-slate-800">{run.country}</strong></span><span>Language: <strong className="text-slate-800">{run.language}</strong></span><span>Tokens: <strong className="text-slate-800">{run.usage.totalTokens ?? "unavailable"}</strong></span><span>Estimated cost: <strong className="text-slate-800">{costLabel(run.estimatedCostMicros)}</strong></span><span>Duration: <strong className="text-slate-800">{run.durationMs} ms</strong></span><span>Retries: <strong className="text-slate-800">{run.retryCount}</strong></span><span className="sm:col-span-2">Run ID: <strong className="break-all text-slate-800">{run.providerRunId ?? run.id}</strong></span></div>
+      {run.citations.length > 0 && <div className="mt-5 border-t border-slate-100 pt-4"><p className="text-xs font-bold uppercase tracking-wider text-slate-400">Actual citations returned by the API</p><div className="mt-3 flex flex-wrap gap-2">{run.citations.map((citation) => <a key={citation.url} href={citation.url} target="_blank" rel="noreferrer" className="inline-flex max-w-full items-center gap-1.5 rounded-xl border border-blue-200 px-3 py-2 text-xs font-bold text-blue-700 hover:bg-blue-50"><span className="truncate">{citation.title || citation.url}</span><ExternalLink className="size-3 shrink-0" /></a>)}</div></div>}
+    </CardContent></Card>)}</div>
+  </div>;
+}
+
 export default async function ReportPage({ searchParams }: { searchParams: Promise<{ scan?: string }> }) {
   const { scan: scanId } = await searchParams;
   const user = await requireAuthenticatedUser();
@@ -47,7 +85,7 @@ export default async function ReportPage({ searchParams }: { searchParams: Promi
   const passed = scan.findings.filter((finding) => finding.status === "pass").length;
   const label = score >= 80 ? "Strong foundation" : score >= 60 ? "Focused improvements needed" : "Needs attention";
 
-  return <AppShell title="Live website readiness report" description="This report measures observable website readiness. It does not claim to measure recommendation or citation inside live AI answers." workspaceLabel={user.displayName} siteLabel={`${scan.host} · ${scan.language} / ${scan.country}`} userInitial={user.displayName} action={<div className="flex gap-2"><Button disabled variant="outline" className="h-11 rounded-xl" title="PDF export is not active in private beta"><Download className="size-4" />PDF coming later</Button><Button asChild className="h-11 rounded-xl bg-[#07111f] font-bold"><Link href="/fix-center">Review fix catalog <ArrowRight className="size-4" /></Link></Button></div>}>
+  return <AppShell title="Live readiness and visibility report" description="AEO/GEO Readiness and Actual AI Visibility are calculated and presented as two separate measurements." workspaceLabel={user.displayName} siteLabel={`${scan.host} · ${scan.language} / ${scan.country}`} userInitial={user.displayName} action={<div className="flex gap-2"><Button disabled variant="outline" className="h-11 rounded-xl" title="PDF export is not active in private beta"><Download className="size-4" />PDF coming later</Button><Button asChild className="h-11 rounded-xl bg-[#07111f] font-bold"><Link href="/fix-center">Review fix catalog <ArrowRight className="size-4" /></Link></Button></div>}>
     <div className="mb-5 flex flex-wrap items-center gap-2 rounded-2xl border border-emerald-200 bg-emerald-50/60 px-4 py-3 text-xs text-emerald-900"><StatusPill tone="good">Live website evidence</StatusPill><span>{scan.language} · {scan.country}</span><span>•</span><span>{scan.requestCount} fetched resources</span><span>•</span><span>{formatDate(scan.completedAt)} UTC</span><span>•</span><span>{scan.methodologyVersion}</span></div>
     <Tabs defaultValue="summary" className="gap-5">
       <TabsList className="h-auto flex-wrap rounded-xl bg-slate-200/60 p-1"><TabsTrigger value="summary" className="px-4 py-2.5">Score summary</TabsTrigger><TabsTrigger value="evidence" className="px-4 py-2.5">Finding evidence</TabsTrigger><TabsTrigger value="visibility" className="px-4 py-2.5">Actual AI visibility</TabsTrigger></TabsList>
@@ -67,7 +105,7 @@ export default async function ReportPage({ searchParams }: { searchParams: Promi
         </div>
       </TabsContent>
       <TabsContent value="evidence"><div className="space-y-3">{scan.findings.map((finding)=><Card key={finding.id} className="rounded-[20px] border-slate-200 py-0 shadow-none"><CardContent className="grid gap-4 p-5 md:grid-cols-[44px_1fr_auto] md:items-start"><span className={`grid size-10 place-items-center rounded-xl ${finding.status === "pass" ? "bg-emerald-50 text-emerald-700" : finding.status === "partial" ? "bg-amber-50 text-amber-700" : "bg-red-50 text-red-700"}`}>{finding.status === "pass" ? <Check className="size-5" /> : finding.status === "partial" ? <CircleAlert className="size-5" /> : <X className="size-5" />}</span><div><div className="flex flex-wrap items-center gap-2"><h3 className="font-extrabold">{finding.title}</h3><StatusPill tone={tone(finding.status)}>{finding.status}</StatusPill><StatusPill tone="info">{finding.category}</StatusPill></div><p className="mt-2 text-sm leading-6 text-slate-600">{finding.explanation}</p><div className="mt-3 rounded-xl bg-slate-50 p-3 text-sm font-semibold text-slate-700">{finding.evidence}</div><a href={finding.sourceUrl} target="_blank" rel="noreferrer" className="mt-3 inline-flex items-center gap-1.5 text-xs font-bold text-blue-700">Open source <ExternalLink className="size-3" /></a></div><div className="rounded-xl border border-slate-200 px-3 py-2 text-center"><strong>{finding.awardedPoints}/{finding.weight}</strong><p className="text-[11px] text-slate-400">points</p></div></CardContent></Card>)}</div></TabsContent>
-      <TabsContent value="visibility"><Card className="rounded-[26px] border-amber-200 bg-amber-50/60 py-0 shadow-none"><CardContent className="grid min-h-80 place-items-center p-8 text-center"><div><span className="mx-auto grid size-14 place-items-center rounded-2xl bg-white text-amber-700"><Radar className="size-6" /></span><p className="mt-5 text-xs font-bold uppercase tracking-[.14em] text-amber-700">Not measured</p><h2 className="mt-2 text-2xl font-extrabold">No AI answer-surface result is claimed.</h2><p className="mx-auto mt-3 max-w-2xl text-sm leading-7 text-slate-600">This run inspected the live website only. Recommendation rate, mention rate, citations, position, and cross-engine coverage will remain empty until named AI surfaces are connected and their prompt evidence is stored.</p><div className="mx-auto mt-6 flex max-w-xl items-start gap-3 rounded-2xl bg-white p-4 text-start text-sm text-slate-600"><LockKeyhole className="mt-0.5 size-5 shrink-0 text-blue-600" /><p><strong className="text-slate-900">Methodology safeguard:</strong> readiness cannot be presented as actual visibility, even when the readiness score is high.</p></div></div></CardContent></Card></TabsContent>
+      <TabsContent value="visibility"><ActualVisibilityPanel scan={scan} /></TabsContent>
     </Tabs>
   </AppShell>;
 }

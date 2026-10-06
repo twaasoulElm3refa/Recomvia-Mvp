@@ -13,7 +13,8 @@
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next",
     "db:generate": "drizzle-kit generate",
     "typecheck": "tsc --noEmit",
-    "test:public": "node scripts/test-public-fixes.mjs"
+    "test:public": "node scripts/test-public-fixes.mjs",
+    "test:visibility": "node scripts/test-ai-visibility.mjs"
   },
   "dependencies": {
     "@base-ui/react": "^1.7.0",
