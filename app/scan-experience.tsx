@@ -1,5 +1,7 @@
 "use client";
 
+import { readStoredSiteLocale, storeSiteLocale, SITE_LOCALE_EVENT } from "@/lib/site-locale";
+
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { NavigationLink as Link } from "@/app/components/navigation-link";
 import {
@@ -221,6 +223,18 @@ export function ScanExperience() {
   const domain = useMemo(() => url ? url.replace(/^https?:\/\//, "").replace(/\/$/, "") : "yourcompany.com", [url]);
 
   useEffect(() => {
+    const syncLocale = () => setLocale(readStoredSiteLocale("en"));
+    const timer = window.setTimeout(syncLocale, 0);
+    window.addEventListener(SITE_LOCALE_EVENT, syncLocale);
+    window.addEventListener("storage", syncLocale);
+    return () => {
+      window.clearTimeout(timer);
+      window.removeEventListener(SITE_LOCALE_EVENT, syncLocale);
+      window.removeEventListener("storage", syncLocale);
+    };
+  }, []);
+
+  useEffect(() => {
     document.documentElement.lang = locale;
     document.documentElement.dir = rtl ? "rtl" : "ltr";
     return () => {
@@ -315,7 +329,7 @@ export function ScanExperience() {
             {navigation.map((item) => <Link key={item.href} href={item.href} className="transition hover:text-blue-700">{item.label}</Link>)}
           </nav>
           <div className="flex items-center gap-2">
-            <Button variant="ghost" size="sm" className="rounded-xl" onClick={() => setLocale(rtl ? "en" : "ar")}><Globe2 className="size-4" />{rtl ? "EN" : "العربية"}</Button>
+            <Button variant="ghost" size="sm" className="rounded-xl" onClick={() => { const nextLocale = rtl ? "en" : "ar"; setLocale(nextLocale); storeSiteLocale(nextLocale); }}><Globe2 className="size-4" />{rtl ? "EN" : "العربية"}</Button>
             <a href="/auth/google" className="hidden text-sm font-bold text-slate-700 xl:block">{t.signin}</a>
             <MobileSiteMenu items={navigation} menuLabel={t.menu} ctaLabel={t.signin} ctaHref="/auth/google" direction={rtl ? "rtl" : "ltr"} />
           </div>

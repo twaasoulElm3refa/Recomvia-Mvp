@@ -1,3 +1,4 @@
+import { SITE_URL } from "./site-config";
 export type ArticleSection = {
   heading: string;
   paragraphs: string[];
@@ -22,7 +23,7 @@ export type Article = {
   sources: { label: string; url: string }[];
 };
 
-export const SITE_URL = "https://recomvia-ai-visibility.omarghazi85.chatgpt.site";
+export { SITE_URL } from "./site-config";
 
 export const articles: Article[] = [
   {

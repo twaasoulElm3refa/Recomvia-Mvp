@@ -1,5 +1,7 @@
 "use client";
 
+import { readStoredSiteLocale, SITE_LOCALE_EVENT } from "@/lib/site-locale";
+
 import { FormEvent, useCallback, useEffect, useState } from "react";
 import { NavigationLink as Link } from "@/app/components/navigation-link";
 import {
@@ -77,11 +79,17 @@ export function KnowledgeAssistant() {
 
   useEffect(() => {
     const root = document.documentElement;
-    const syncLanguage = () => setPageArabic(root.lang.toLowerCase().startsWith("ar"));
+    const syncLanguage = () => setPageArabic(readStoredSiteLocale(root.lang.toLowerCase().startsWith("ar") ? "ar" : "en") === "ar");
     syncLanguage();
     const observer = new MutationObserver(syncLanguage);
     observer.observe(root, { attributes: true, attributeFilter: ["lang"] });
-    return () => observer.disconnect();
+    window.addEventListener(SITE_LOCALE_EVENT, syncLanguage);
+    window.addEventListener("storage", syncLanguage);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener(SITE_LOCALE_EVENT, syncLanguage);
+      window.removeEventListener("storage", syncLanguage);
+    };
   }, []);
 
   useEffect(() => {
