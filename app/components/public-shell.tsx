@@ -48,7 +48,9 @@ const copy = {
 
 const navigationHrefs = ["/#product", "/pricing", "/blog", "/methodology", "/faq", "/contact"] as const;
 
-export function PublicShell({ children }: { children: ReactNode }) {
+export type LocalizedMetadata = Record<SiteLocale, { title: string; description: string }>;
+
+export function PublicShell({ children, pageMetadata }: { children: ReactNode | ((locale: SiteLocale) => ReactNode); pageMetadata?: LocalizedMetadata }) {
   const [locale, setLocale] = useState<SiteLocale>("en");
 
   useEffect(() => {
@@ -62,6 +64,24 @@ export function PublicShell({ children }: { children: ReactNode }) {
       window.removeEventListener("storage", syncLocale);
     };
   }, []);
+
+  useEffect(() => {
+    document.documentElement.lang = locale;
+    document.documentElement.dir = locale === "ar" ? "rtl" : "ltr";
+    if (!pageMetadata) return;
+    const localized = pageMetadata[locale];
+    document.title = localized.title;
+    const description = document.querySelector<HTMLMetaElement>('meta[name="description"]');
+    description?.setAttribute("content", localized.description);
+    const openGraphTitle = document.querySelector<HTMLMetaElement>('meta[property="og:title"]');
+    openGraphTitle?.setAttribute("content", localized.title);
+    const openGraphDescription = document.querySelector<HTMLMetaElement>('meta[property="og:description"]');
+    openGraphDescription?.setAttribute("content", localized.description);
+    const twitterTitle = document.querySelector<HTMLMetaElement>('meta[name="twitter:title"]');
+    twitterTitle?.setAttribute("content", localized.title);
+    const twitterDescription = document.querySelector<HTMLMetaElement>('meta[name="twitter:description"]');
+    twitterDescription?.setAttribute("content", localized.description);
+  }, [locale, pageMetadata]);
 
   const t = copy[locale];
   const rtl = locale === "ar";
@@ -88,7 +108,7 @@ export function PublicShell({ children }: { children: ReactNode }) {
           </div>
         </div>
       </header>
-      {children}
+      <div lang={locale} dir={rtl ? "rtl" : "ltr"}>{typeof children === "function" ? children(locale) : children}</div>
       <footer lang={locale} dir={rtl ? "rtl" : "ltr"} className="border-t border-slate-200 bg-white">
         <div className="mx-auto grid max-w-[1240px] gap-10 px-5 py-12 sm:px-8 md:grid-cols-[1.4fr_repeat(3,.65fr)]">
           <div><BrandMark /><p className="mt-4 max-w-md text-sm leading-6 text-slate-500">{t.intro}</p></div>

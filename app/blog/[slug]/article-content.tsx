@@ -1,0 +1,55 @@
+"use client";
+
+import { NavigationLink as Link } from "@/app/components/navigation-link";
+import { ArrowLeft, ArrowRight, BookOpen, CalendarDays, Check, Clock3, ExternalLink, RefreshCw } from "lucide-react";
+import { PublicShell, type LocalizedMetadata } from "@/app/components/public-shell";
+import { StatusPill } from "@/app/components/app-shell";
+import { Card, CardContent } from "@/components/ui/card";
+import { articles, SITE_URL, type Article } from "@/lib/articles";
+import { getLocalizedArticle, getLocalizedArticles } from "@/lib/articles-ar";
+import type { SiteLocale } from "@/lib/site-locale";
+
+const copy = {
+  en: { all: "All research", research: "Recomvia Research", published: "Published Sep 13, 2026", reviewed: "Reviewed Sep 13, 2026", page: "On this page", questionsLink: "Questions answered", sourcesLink: "Sources", direct: "Direct answer", takeaways: "Key takeaways", questions: "Questions answered", faq: "Frequently asked questions", references: "Primary references", sources: "Sources and further reading", sourceNote: "Recomvia interprets these sources independently. External guidance can change; this article displays its review date so readers can judge freshness.", continue: "Continue reading", related: "Related guides", viewAll: "View all", read: "Read guide", home: "Home", breadcrumbResearch: "Research" },
+  ar: { all: "كل الأبحاث", research: "أبحاث Recomvia", published: "نُشر في 13 سبتمبر 2026", reviewed: "رُوجع في 13 سبتمبر 2026", page: "في هذه الصفحة", questionsLink: "أسئلة مجاب عنها", sourcesLink: "المصادر", direct: "الإجابة المباشرة", takeaways: "الخلاصات الأساسية", questions: "أسئلة مجاب عنها", faq: "الأسئلة الشائعة", references: "المراجع الأساسية", sources: "المصادر وقراءات إضافية", sourceNote: "تفسر Recomvia هذه المصادر بصورة مستقلة. وقد تتغير الإرشادات الخارجية؛ يعرض هذا المقال تاريخ مراجعته حتى يستطيع القراء تقدير حداثته.", continue: "تابع القراءة", related: "أدلة ذات صلة", viewAll: "عرض الكل", read: "اقرأ الدليل", home: "الرئيسية", breadcrumbResearch: "الأبحاث" },
+} as const;
+
+const categoryLabels: Record<SiteLocale, Record<Article["category"], string>> = {
+  en: { Strategy: "Strategy", Measurement: "Measurement", Technical: "Technical", Content: "Content", Authority: "Authority", International: "International" },
+  ar: { Strategy: "الاستراتيجية", Measurement: "القياس", Technical: "تقني", Content: "المحتوى", Authority: "السلطة", International: "دولي" },
+};
+
+function categoryTone(category: Article["category"]) { return category === "Technical" ? "info" : category === "Authority" ? "warn" : "good"; }
+
+export function ArticleContent({ slug }: { slug: string }) {
+  const englishArticle = getLocalizedArticle(slug, "en")!;
+  const arabicArticle = getLocalizedArticle(slug, "ar")!;
+  const pageMetadata: LocalizedMetadata = {
+    en: { title: englishArticle.seoTitle, description: englishArticle.description },
+    ar: { title: arabicArticle.seoTitle, description: arabicArticle.description },
+  };
+  return <PublicShell pageMetadata={pageMetadata}>{locale => {
+    const t = copy[locale];
+    const localizedArticles = getLocalizedArticles(locale);
+    const article = getLocalizedArticle(slug, locale)!;
+    const index = articles.findIndex(item => item.slug === slug);
+    const related = [localizedArticles[(index + 1) % articles.length], localizedArticles[(index + 4) % articles.length], localizedArticles[(index + 7) % articles.length]];
+    const url = `${SITE_URL}/blog/${article.slug}`;
+    const jsonLd = [
+      { "@context": "https://schema.org", "@type": "BlogPosting", headline: article.title, description: article.description, datePublished: article.published, dateModified: article.modified, mainEntityOfPage: { "@type": "WebPage", "@id": url }, url, author: { "@type": "Organization", name: t.research, url: SITE_URL }, publisher: { "@type": "Organization", name: "Recomvia", url: SITE_URL, logo: { "@type": "ImageObject", url: `${SITE_URL}/favicon.svg` } }, keywords: article.keywords.join(", "), articleSection: categoryLabels[locale][article.category], inLanguage: locale },
+      { "@context": "https://schema.org", "@type": "BreadcrumbList", itemListElement: [{ "@type": "ListItem", position: 1, name: t.home, item: SITE_URL }, { "@type": "ListItem", position: 2, name: t.breadcrumbResearch, item: `${SITE_URL}/blog` }, { "@type": "ListItem", position: 3, name: article.title, item: url }] },
+      { "@context": "https://schema.org", "@type": "FAQPage", mainEntity: article.faqs.map(faq => ({ "@type": "Question", name: faq.question, acceptedAnswer: { "@type": "Answer", text: faq.answer } })) },
+    ];
+    return <main><script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd).replace(/</g, "\\u003c") }} />
+      <article><header className="relative overflow-hidden border-b border-slate-200 bg-white"><div className="signal-grid absolute inset-0 opacity-70" /><div className="relative mx-auto max-w-[920px] px-5 py-14 sm:px-8 sm:py-20"><Link href="/blog" className="inline-flex items-center gap-2 text-sm font-bold text-slate-500 hover:text-blue-700"><ArrowLeft className="size-4 rtl:rotate-180" />{t.all}</Link><div className="mt-8 flex flex-wrap items-center gap-3"><StatusPill tone={categoryTone(article.category)}>{categoryLabels[locale][article.category]}</StatusPill><span className="flex items-center gap-1.5 text-sm text-slate-500"><Clock3 className="size-4" />{article.readingTime}</span></div><h1 className="mt-5 max-w-4xl text-4xl font-extrabold leading-[1.06] tracking-[-.045em] sm:text-6xl">{article.title}</h1><p className="mt-6 max-w-3xl text-lg leading-8 text-slate-600">{article.description}</p><div className="mt-8 flex flex-wrap items-center gap-5 border-t border-slate-200 pt-6 text-sm text-slate-500"><span className="flex items-center gap-2"><BookOpen className="size-4 text-blue-600" /><strong className="text-[#07111f]">{t.research}</strong></span><span className="flex items-center gap-2"><CalendarDays className="size-4" />{t.published}</span><span className="flex items-center gap-2"><RefreshCw className="size-4" />{t.reviewed}</span></div></div></header>
+        <div className="mx-auto grid max-w-[1160px] gap-10 px-5 py-14 sm:px-8 lg:grid-cols-[230px_minmax(0,760px)] lg:justify-center lg:py-20"><aside className="hidden lg:block"><div className="sticky top-28 rounded-2xl border border-slate-200 bg-white p-5"><p className="text-xs font-bold uppercase tracking-[.14em] text-slate-400">{t.page}</p><nav className="mt-4 space-y-3">{article.sections.map((section, i) => <a key={section.heading} href={`#section-${i + 1}`} className="block text-sm font-semibold leading-5 text-slate-600 hover:text-blue-700">{section.heading}</a>)}<a href="#questions" className="block text-sm font-semibold text-slate-600 hover:text-blue-700">{t.questionsLink}</a><a href="#sources" className="block text-sm font-semibold text-slate-600 hover:text-blue-700">{t.sourcesLink}</a></nav></div></aside>
+          <div className="min-w-0"><section className="rounded-[24px] border border-blue-200 bg-blue-50/60 p-6 sm:p-8"><p className="text-xs font-bold uppercase tracking-[.15em] text-blue-700">{t.direct}</p><p className="mt-4 text-lg font-semibold leading-8 text-slate-800">{article.directAnswer}</p></section><section className="mt-7 rounded-[24px] bg-[#07111f] p-6 text-white sm:p-8"><h2 className="text-xl font-extrabold">{t.takeaways}</h2><ul className="mt-5 space-y-3">{article.keyPoints.map(point => <li key={point} className="flex items-start gap-3 text-base leading-7 text-slate-300"><span className="mt-1.5 grid size-5 shrink-0 place-items-center rounded-full bg-cyan-400/15 text-cyan-300"><Check className="size-3" /></span>{point}</li>)}</ul></section>
+            <div className="mt-12 space-y-12">{article.sections.map((section, i) => <section id={`section-${i + 1}`} key={section.heading} className="scroll-mt-28"><h2 className="text-2xl font-extrabold leading-tight tracking-[-.025em] sm:text-3xl">{section.heading}</h2><div className="mt-5 space-y-5">{section.paragraphs.map(paragraph => <p key={paragraph.slice(0, 60)} className="text-[1.05rem] leading-8 text-slate-700">{paragraph}</p>)}</div>{section.bullets && <ul className="mt-6 grid gap-3 rounded-2xl border border-slate-200 bg-white p-5 sm:grid-cols-2">{section.bullets.map(item => <li key={item} className="flex items-start gap-2.5 text-sm font-semibold leading-6 text-slate-700"><Check className="mt-1 size-4 shrink-0 text-emerald-600" />{item}</li>)}</ul>}</section>)}</div>
+            <section id="questions" className="mt-14 scroll-mt-28 border-t border-slate-200 pt-12"><p className="text-sm font-bold uppercase tracking-[.14em] text-blue-600">{t.questions}</p><h2 className="mt-2 text-3xl font-extrabold">{t.faq}</h2><div className="mt-7 divide-y divide-slate-200 rounded-[22px] border border-slate-200 bg-white px-6">{article.faqs.map(faq => <div key={faq.question} className="py-6"><h3 className="font-extrabold leading-6">{faq.question}</h3><p className="mt-3 leading-7 text-slate-600">{faq.answer}</p></div>)}</div></section>
+            <section id="sources" className="mt-14 scroll-mt-28 border-t border-slate-200 pt-12"><p className="text-sm font-bold uppercase tracking-[.14em] text-blue-600">{t.references}</p><h2 className="mt-2 text-3xl font-extrabold">{t.sources}</h2><ol className="mt-6 space-y-3">{article.sources.map((source, i) => <li key={source.url}><a href={source.url} target="_blank" rel="noreferrer" className="flex items-start gap-3 rounded-2xl border border-slate-200 bg-white p-4 text-sm font-semibold text-slate-700 transition hover:border-blue-300 hover:text-blue-700"><span className="grid size-7 shrink-0 place-items-center rounded-lg bg-slate-100 text-xs font-bold">{i + 1}</span><span className="flex-1 leading-6">{source.label}</span><ExternalLink className="mt-1 size-4 shrink-0" /></a></li>)}</ol><p className="mt-4 text-sm leading-6 text-slate-500">{t.sourceNote}</p></section>
+          </div></div>
+      </article>
+      <section className="border-t border-slate-200 bg-white"><div className="mx-auto max-w-[1100px] px-5 py-16 sm:px-8"><div className="mb-7 flex items-end justify-between"><div><p className="text-sm font-bold uppercase tracking-[.14em] text-blue-600">{t.continue}</p><h2 className="mt-2 text-3xl font-extrabold">{t.related}</h2></div><Link href="/blog" className="hidden items-center gap-2 text-sm font-bold text-blue-700 sm:flex">{t.viewAll}<ArrowRight className="size-4 rtl:rotate-180" /></Link></div><div className="grid gap-4 md:grid-cols-3">{related.map(item => <Card key={item.slug} className="rounded-[20px] border-slate-200 py-0 shadow-none"><CardContent className="flex h-full flex-col p-5"><StatusPill tone="info">{categoryLabels[locale][item.category]}</StatusPill><h3 className="mt-5 flex-1 font-extrabold leading-6">{item.title}</h3><Link href={`/blog/${item.slug}`} className="mt-5 flex items-center gap-2 text-sm font-bold text-blue-700">{t.read}<ArrowRight className="size-4 rtl:rotate-180" /></Link></CardContent></Card>)}</div></div></section>
+    </main>;
+  }}</PublicShell>;
+}
