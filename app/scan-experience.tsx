@@ -1,5 +1,7 @@
 "use client";
 
+import { readStoredSiteLocale, storeSiteLocale, SITE_LOCALE_EVENT } from "@/lib/site-locale";
+
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { NavigationLink as Link } from "@/app/components/navigation-link";
 import {
@@ -30,6 +32,8 @@ type LiveScan = {
   issueCount: number;
   criticalCount: number;
   actualVisibilityStatus: string;
+  actualVisibilityScore: number | null;
+  engineRunCount: number;
   categoryScores: Record<string, number>;
   findings: Array<{ code: string; title: string; status: string; severity: string }>;
 };
@@ -49,16 +53,16 @@ const text = {
     title2: "sees you.",
     description: "Measure whether AI engines can find, understand, cite, and recommend your brand — then fix what holds you back.",
     placeholder: "yourcompany.com",
-    scan: "Run live readiness scan",
-    scanning: "Crawling the live website",
-    scanningSignals: "Discovering brand · market · language · technical signals",
+    scan: "Run live visibility scan",
+    scanning: "Measuring readiness and visibility",
+    scanningSignals: "Discovering context, then running evidence-backed engine prompts",
     proof: "Paste one URL · Context is discovered automatically · No card",
     autoContext: "Brand, market, language, and context are discovered automatically",
     result: "Live AI Readiness Score",
     issues: "issues detected",
     unlock: "Open evidence report",
-    preview: "Live website evidence · Actual visibility inside AI answers is not measured in this scan",
-    previewBadge: "Live readiness",
+    preview: "AEO/GEO Readiness and Actual AI Visibility remain separate measurements",
+    previewBadge: "Live measurement",
     answer: "Not measured in this scan",
     needsAttention: "Needs attention",
     awaiting: "Awaiting a live scan",
@@ -119,16 +123,16 @@ const text = {
     title2: "الذكاء الاصطناعي",
     description: "قِس قدرة محركات الذكاء الاصطناعي على اكتشاف علامتك وفهمها والاستشهاد بها والتوصية بها، ثم أصلح ما يحد من ظهورك.",
     placeholder: "example.com",
-    scan: "ابدأ فحص الجاهزية الحي",
-    scanning: "نفحص الموقع الحي",
-    scanningSignals: "اكتشاف العلامة · السوق · اللغة · الإشارات التقنية",
+    scan: "ابدأ فحص الظهور الحي",
+    scanning: "نقيس الجاهزية والظهور",
+    scanningSignals: "نكتشف السياق ثم نشغّل أسئلة المحرك المدعومة بالأدلة",
     proof: "ضع رابطًا واحدًا · نكتشف السياق تلقائيًا · دون بطاقة دفع",
     autoContext: "نكتشف العلامة والسوق واللغة والسياق تلقائيًا",
     result: "درجة الجاهزية الحية للذكاء الاصطناعي",
     issues: "مشكلة مكتشفة",
     unlock: "افتح تقرير الأدلة",
-    preview: "أدلة حية من الموقع · لا يقيس هذا الفحص الظهور الفعلي داخل إجابات محركات الذكاء الاصطناعي",
-    previewBadge: "جاهزية حية",
+    preview: "تبقى جاهزية AEO/GEO والظهور الفعلي داخل الذكاء الاصطناعي قياسين منفصلين",
+    previewBadge: "قياس حي",
     answer: "لم يُقَس في هذا الفحص",
     needsAttention: "يحتاج إلى تحسين",
     awaiting: "بانتظار فحص حي",
@@ -221,6 +225,18 @@ export function ScanExperience() {
   const domain = useMemo(() => url ? url.replace(/^https?:\/\//, "").replace(/\/$/, "") : "yourcompany.com", [url]);
 
   useEffect(() => {
+    const syncLocale = () => setLocale(readStoredSiteLocale("en"));
+    const timer = window.setTimeout(syncLocale, 0);
+    window.addEventListener(SITE_LOCALE_EVENT, syncLocale);
+    window.addEventListener("storage", syncLocale);
+    return () => {
+      window.clearTimeout(timer);
+      window.removeEventListener(SITE_LOCALE_EVENT, syncLocale);
+      window.removeEventListener("storage", syncLocale);
+    };
+  }, []);
+
+  useEffect(() => {
     document.documentElement.lang = locale;
     document.documentElement.dir = rtl ? "rtl" : "ltr";
     return () => {
@@ -245,7 +261,7 @@ export function ScanExperience() {
       if (!response.ok || !data.scan) throw new Error(data.error || text[locale].scanError);
       setScanResult(data.scan);
       setStatus("done");
-      return { scanId: data.scan.id, domain: clean, readinessScore: data.scan.readinessScore, issues: data.scan.issueCount, cached: Boolean(data.cached), actualVisibilityMeasured: false };
+      return { scanId: data.scan.id, domain: clean, readinessScore: data.scan.readinessScore, issues: data.scan.issueCount, cached: Boolean(data.cached), actualVisibilityMeasured: ["measured", "partial"].includes(data.scan.actualVisibilityStatus), actualVisibilityScore: data.scan.actualVisibilityScore };
     } catch (cause) {
       setStatus("idle");
       throw cause;
@@ -262,9 +278,9 @@ export function ScanExperience() {
     if (!context?.registerTool) return;
     const lifecycle = new AbortController();
     const registration = context.registerTool({
-      name: "run_live_readiness_scan",
-      title: "Run live website readiness scan",
-      description: "Crawl a public website and measure live technical, content, and entity readiness signals. This does not claim to measure visibility inside consumer AI answers.",
+      name: "run_live_visibility_scan",
+      title: "Run live readiness and AI visibility scan",
+      description: "From one public URL, measure website readiness and separately run labeled OpenRouter API visibility prompts. This does not claim to test any consumer AI experience.",
       inputSchema: {
         type: "object",
         properties: { domain: { type: "string", description: "Website domain, for example example.com" } },
@@ -315,7 +331,7 @@ export function ScanExperience() {
             {navigation.map((item) => <Link key={item.href} href={item.href} className="transition hover:text-blue-700">{item.label}</Link>)}
           </nav>
           <div className="flex items-center gap-2">
-            <Button variant="ghost" size="sm" className="rounded-xl" onClick={() => setLocale(rtl ? "en" : "ar")}><Globe2 className="size-4" />{rtl ? "EN" : "العربية"}</Button>
+            <Button variant="ghost" size="sm" className="rounded-xl" onClick={() => { const nextLocale = rtl ? "en" : "ar"; setLocale(nextLocale); storeSiteLocale(nextLocale); }}><Globe2 className="size-4" />{rtl ? "EN" : "العربية"}</Button>
             <a href="/auth/google" className="hidden text-sm font-bold text-slate-700 xl:block">{t.signin}</a>
             <MobileSiteMenu items={navigation} menuLabel={t.menu} ctaLabel={t.signin} ctaHref="/auth/google" direction={rtl ? "rtl" : "ltr"} />
           </div>
@@ -352,7 +368,7 @@ export function ScanExperience() {
                   <div className="p-6 sm:p-7">
                     <div className="flex flex-col items-center gap-6 sm:flex-row sm:items-start"><div className="score-ring"><div><strong>{score ?? "—"}</strong>{score != null && <span>/100</span>}</div></div><div className="pt-2 text-center sm:text-start"><p className="text-sm font-semibold text-slate-500">{t.result}</p><h2 className="mt-1 text-2xl font-extrabold">{scoreLabel}</h2>{scanResult ? <div className="mt-4 flex gap-2"><span className="rounded-full bg-red-50 px-3 py-1.5 text-xs font-bold text-red-700">{scanResult.criticalCount} {t.critical}</span><span className="rounded-full bg-amber-50 px-3 py-1.5 text-xs font-bold text-amber-700">{scanResult.issueCount} {t.issues}</span></div> : <p className="mt-3 max-w-xs text-sm leading-6 text-slate-500">{rtl ? "أدخل النطاق أعلاه لنفحص الصفحة وسياسة الزحف والبيانات المنظمة والمحتوى مباشرة." : "Enter a domain above to inspect the live page, crawl policy, structured data, and content."}</p>}</div></div>
                     <div className="mt-7 space-y-4">{t.axes.map((axis, index) => <div key={axis}><div className="mb-1.5 flex justify-between text-sm"><span className="font-semibold text-slate-600">{axis}</span><strong>{axesValues[index] ?? "—"}</strong></div><Progress value={axesValues[index] ?? 0} className="h-2" /></div>)}</div>
-                    <div className="mt-7 rounded-2xl bg-slate-50 p-4"><p className="text-xs font-bold uppercase tracking-[.1em] text-slate-400">{t.engineSnapshot}</p><p className="mt-3 text-sm font-semibold">{t.recommendationQuestion}</p><p className="mt-1 flex items-center gap-2 text-sm font-bold text-red-600"><span className="size-2 rounded-full bg-red-500" />{t.answer}</p></div>
+                    <div className="mt-7 rounded-2xl bg-slate-50 p-4"><p className="text-xs font-bold uppercase tracking-[.1em] text-slate-400">{t.engineSnapshot}</p><p className="mt-3 text-sm font-semibold">{t.recommendationQuestion}</p><p className={`mt-1 flex items-center gap-2 text-sm font-bold ${scanResult?.actualVisibilityScore != null ? "text-blue-700" : "text-red-600"}`}><span className={`size-2 rounded-full ${scanResult?.actualVisibilityScore != null ? "bg-blue-500" : "bg-red-500"}`} />{scanResult?.actualVisibilityScore != null ? `${scanResult.actualVisibilityScore}/100 · ${scanResult.engineRunCount} OpenRouter runs` : t.answer}</p></div>
                     {scanResult ? <Button asChild className="mt-5 h-12 w-full rounded-xl bg-[#07111f] font-bold"><Link href={`/report?scan=${encodeURIComponent(scanResult.id)}`}>{t.unlock}<ChevronRight className={`size-4 ${rtl ? "rotate-180" : ""}`} /></Link></Button> : <Button disabled className="mt-5 h-12 w-full rounded-xl bg-[#07111f] font-bold">{t.unlock}</Button>}
                     <p className="mt-3 text-center text-xs text-slate-400">{t.preview}</p>
                   </div>

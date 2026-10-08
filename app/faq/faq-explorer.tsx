@@ -1,10 +1,11 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Search, SlidersHorizontal } from "lucide-react";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { readStoredSiteLocale, SITE_LOCALE_EVENT, storeSiteLocale, type SiteLocale } from "@/lib/site-locale";
 
 export type PublicFaq = {
   id: string;
@@ -26,10 +27,27 @@ const categoryLabels: Record<string, string> = {
 };
 
 export function FaqExplorer({ entries }: { entries: PublicFaq[] }) {
-  const [language, setLanguage] = useState<"en" | "ar">("ar");
+  const [language, setLanguage] = useState<SiteLocale>("en");
   const [category, setCategory] = useState("All");
   const [query, setQuery] = useState("");
   const categories = ["All", ...Array.from(new Set(entries.map((entry) => entry.category)))];
+
+  useEffect(() => {
+    const syncLocale = () => setLanguage(readStoredSiteLocale("en"));
+    const timer = window.setTimeout(syncLocale, 0);
+    window.addEventListener(SITE_LOCALE_EVENT, syncLocale);
+    window.addEventListener("storage", syncLocale);
+    return () => {
+      window.clearTimeout(timer);
+      window.removeEventListener(SITE_LOCALE_EVENT, syncLocale);
+      window.removeEventListener("storage", syncLocale);
+    };
+  }, []);
+
+  function chooseLanguage(locale: SiteLocale) {
+    setLanguage(locale);
+    storeSiteLocale(locale);
+  }
 
   const filtered = useMemo(() => {
     const needle = query.trim().toLocaleLowerCase();
@@ -41,7 +59,7 @@ export function FaqExplorer({ entries }: { entries: PublicFaq[] }) {
   }, [category, entries, query]);
 
   return (
-    <div>
+    <div lang={language}>
       <div className="rounded-[24px] border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
         <div className="flex flex-col gap-3 sm:flex-row">
           <div className="relative flex-1">
@@ -49,8 +67,8 @@ export function FaqExplorer({ entries }: { entries: PublicFaq[] }) {
             <Input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={language === "ar" ? "ابحث في الأسئلة والإجابات…" : "Search questions and answers…"} className="h-12 rounded-xl border-slate-200 pl-10" dir={language === "ar" ? "rtl" : "ltr"} />
           </div>
           <div className="flex rounded-xl bg-slate-100 p-1">
-            <Button type="button" variant="ghost" onClick={() => setLanguage("ar")} className={`h-10 flex-1 rounded-lg px-5 font-bold sm:flex-none ${language === "ar" ? "bg-white text-blue-700 shadow-sm" : "text-slate-500"}`}>العربية</Button>
-            <Button type="button" variant="ghost" onClick={() => setLanguage("en")} className={`h-10 flex-1 rounded-lg px-5 font-bold sm:flex-none ${language === "en" ? "bg-white text-blue-700 shadow-sm" : "text-slate-500"}`}>English</Button>
+            <Button type="button" variant="ghost" onClick={() => chooseLanguage("ar")} className={`h-10 flex-1 rounded-lg px-5 font-bold sm:flex-none ${language === "ar" ? "bg-white text-blue-700 shadow-sm" : "text-slate-500"}`}>العربية</Button>
+            <Button type="button" variant="ghost" onClick={() => chooseLanguage("en")} className={`h-10 flex-1 rounded-lg px-5 font-bold sm:flex-none ${language === "en" ? "bg-white text-blue-700 shadow-sm" : "text-slate-500"}`}>English</Button>
           </div>
         </div>
         <div className="mt-4 flex items-center gap-2 overflow-x-auto pb-1">

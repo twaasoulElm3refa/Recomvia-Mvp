@@ -1,4 +1,4 @@
-import { articles } from "@/lib/articles";
+import { articles } from "./articles";
 
 export type FaqEntry = {
   id: string;
@@ -76,7 +76,7 @@ export const faqEntries: FaqEntry[] = [
     id:"guarantee",category:"Trust",question:"Does Recomvia guarantee an AI recommendation or citation?",questionAr:"هل تضمن Recomvia ظهور العلامة أو التوصية بها؟",
     answer:"No. Recomvia does not guarantee a ranking, citation, or recommendation controlled by a third-party AI system. It measures observable outcomes, improves controllable signals, documents limitations, and monitors whether results change after implementation.",
     answerAr:"لا تضمن «Recomvia» ترتيبًا أو استشهادًا أو توصية تتحكم فيها أنظمة خارجية، وإنما تقيس النتائج القابلة للملاحظة، وتحسن الإشارات التي يمكن التحكم فيها، وتوضح حدود المنهجية، ثم تراقب ما إذا تغيرت النتائج بعد التنفيذ.",
-    keywords:["guarantee","promise","ranking","citation","recommendation","ضمان","تضمن","ترتيب","استشهاد","توصية"]
+    keywords:["guarantee","promise","ranking","citation","recommendation","AI recommendation","ضمان","تضمن","تضمنون","ترتيب","استشهاد","توصية","توصية الذكاء الاصطناعي"]
   },
   {
     id:"languages",category:"Platform",question:"Which languages and countries are supported?",questionAr:"ما اللغات والدول التي تدعمها المنصة؟",
@@ -134,39 +134,101 @@ export const faqEntries: FaqEntry[] = [
   },
 ];
 
-const stopWords=new Set(["the","a","an","is","are","do","does","how","what","my","your","to","of","and","in","for","can","i","هل","ما","ماذا","كيف","في","من","على","عن","الى","إلى","هو","هي","هذا","هذه"]);
+const stopWords=new Set(["the","a","an","is","are","do","does","how","what","my","your","to","of","and","in","for","can","i","you","me","it","its","with","on","will","recomvia","ai","brand","هل","ما","ماذا","كيف","في","من","على","عن","الى","إلى","هو","هي","هذا","هذه","بها","داخل","الذكاء","الاصطناعي","اجابات","العلامه","علامتي","التجاريه","ريكومفيا"].map(normalize));
 
-function normalize(value:string){return value.toLowerCase().normalize("NFKD").replace(/[\u064B-\u065F\u0670]/g,"").replace(/[أإآ]/g,"ا").replace(/ة/g,"ه").replace(/ى/g,"ي").replace(/[^\p{L}\p{N}\s.-]/gu," ").replace(/\s+/g," ").trim()}
+function normalize(value:string){return value.toLowerCase().normalize("NFKD").replace(/[\u064B-\u065F\u0670]/g,"").replace(/[أإآ]/g,"ا").replace(/ة/g,"ه").replace(/ى/g,"ي").replace(/[ؤئ]/g,"ء").replace(/[^\p{L}\p{N}\s.-]/gu," ").replace(/\s+/g," ").trim()}
 function tokens(value:string){return normalize(value).split(" ").filter(token=>token.length>1&&!stopWords.has(token))}
+
+function relatedToken(left:string,right:string){
+  if(left===right)return true;
+  if(left.length<4||right.length<4)return false;
+  return left.startsWith(right)||right.startsWith(left);
+}
 
 export type KnowledgeResult={answered:boolean;answer?:string;title?:string;sourceUrl?:string;sourceLabel?:string;confidence:number;language:"ar"|"en";suggestedQuestion?:string};
 
 export function searchKnowledge(question:string):KnowledgeResult {
   const language: "ar" | "en" = /[\u0600-\u06ff]/.test(question) ? "ar" : "en";
-  const query=normalize(question); const queryTokens=tokens(question); if(!queryTokens.length)return {answered:false,confidence:0,language};
+  const query=normalize(question); const queryTokens=[...new Set(tokens(question))];
+  // The brand name alone can find the introduction, but must not dominate an unrelated question.
+  if(!queryTokens.length){
+    const intro=faqEntries.find(entry=>entry.id==="what-is-recomvia");
+    if(intro&&/recomvia|ريكومفيا/i.test(question))return {answered:true,title:language==="ar"?intro.questionAr:intro.question,answer:language==="ar"?intro.answerAr:intro.answer,sourceUrl:"/faq#what-is-recomvia",sourceLabel:language==="ar"?"عرض المصدر":"View source",confidence:90,language};
+    return {answered:false,confidence:0,language};
+  }
   const candidates=[
-    ...faqEntries.map(entry=>({title:language==="ar"?entry.questionAr:entry.question,answer:language==="ar"?entry.answerAr:entry.answer,url:`/faq#${entry.id}`,keywords:[entry.question,entry.questionAr,entry.answer,entry.answerAr,...entry.keywords].join(" ")})),
+    ...faqEntries.map(entry=>({title:language==="ar"?entry.questionAr:entry.question,answer:language==="ar"?entry.answerAr:entry.answer,url:`/faq#${entry.id}`,phrases:[entry.question,entry.questionAr,...entry.keywords],keywords:[entry.question,entry.questionAr,...entry.keywords].join(" "),body:[entry.answer,entry.answerAr].join(" ")})),
     ...articles.map(article=>({
       title:article.title,
       answer:article.directAnswer,
       url:`/blog/${article.slug}`,
-      keywords:[article.title,article.description,article.directAnswer,...article.keywords,...article.keyPoints,...article.sections.flatMap(section=>[section.heading,...section.paragraphs,...(section.bullets??[])]),...article.faqs.flatMap(faq=>[faq.question,faq.answer])].join(" ")
+      phrases:[article.title,...article.keywords],
+      keywords:[article.title,...article.keywords,...article.sections.map(section=>section.heading),...article.faqs.map(faq=>faq.question)].join(" "),
+      body:[article.description,article.directAnswer,...article.keyPoints,...article.sections.flatMap(section=>[...section.paragraphs,...(section.bullets??[])]),...article.faqs.map(faq=>faq.answer)].join(" ")
     })),
     ...articles.flatMap(article=>article.sections.map(section=>({
       title:`${article.title}: ${section.heading}`,
       answer:section.paragraphs.join("\n\n"),
       url:`/blog/${article.slug}`,
-      keywords:[article.title,...article.keywords,section.heading,...section.paragraphs,...(section.bullets??[])].join(" ")
+      phrases:[section.heading,article.title,...article.keywords],
+      keywords:[article.title,...article.keywords,section.heading].join(" "),
+      body:[...section.paragraphs,...(section.bullets??[])].join(" ")
     }))),
     ...articles.flatMap(article=>article.faqs.map(faq=>({
       title:faq.question,
       answer:faq.answer,
-      url:`/blog/${article.slug}#frequently-asked-questions`,
-      keywords:[article.title,...article.keywords,faq.question,faq.answer].join(" ")
+      url:`/blog/${article.slug}#questions`,
+      phrases:[faq.question,article.title,...article.keywords],
+      keywords:[article.title,...article.keywords,faq.question].join(" "),
+      body:faq.answer
     }))),
   ];
-  const ranked=candidates.map(candidate=>{const hay=normalize(candidate.keywords);const hayTokens=new Set(tokens(candidate.keywords));let score=0;for(const token of queryTokens){if(hayTokens.has(token))score+=3;else if([...hayTokens].some(word=>word.startsWith(token)||token.startsWith(word)))score+=1;}if(hay.includes(query))score+=8;return {candidate,score}}).sort((a,b)=>b.score-a.score);
-  const best=ranked[0]; const required=queryTokens.length<=2?4:Math.max(5,Math.ceil(queryTokens.length*.9));
-  if(!best||best.score<required)return {answered:false,confidence:best?Math.min(44,Math.round(best.score/Math.max(required,1)*40)):0,language,suggestedQuestion:language==="ar"?"سأحوّل هذا السؤال إلى فريق خدمة العملاء.":"I can send this question to our customer service team."};
-  return {answered:true,title:best.candidate.title,answer:best.candidate.answer,sourceUrl:best.candidate.url,sourceLabel:language==="ar"?"عرض المصدر":"View source",confidence:Math.min(96,64+best.score*3),language};
+  const searchable=candidates.map(candidate=>({
+    ...candidate,
+    normalizedTitle:normalize(candidate.title),
+    normalizedPhrases:candidate.phrases.map(normalize).filter(Boolean),
+    titleTokens:new Set(tokens(candidate.title)),
+    keywordTokens:new Set(tokens(candidate.keywords)),
+    bodyTokens:new Set(tokens(candidate.body)),
+  }));
+  const documentFrequency=new Map<string,number>();
+  for(const token of new Set(queryTokens)){
+    const count=searchable.filter(candidate=>candidate.titleTokens.has(token)||candidate.keywordTokens.has(token)||candidate.bodyTokens.has(token)).length;
+    documentFrequency.set(token,count);
+  }
+  const ranked=searchable.map(candidate=>{
+    let score=0; let matched=0; let topicMatched=0;
+    if(candidate.normalizedTitle===query)score+=80;
+    else if(query.length>=6&&(candidate.normalizedTitle.includes(query)||query.includes(candidate.normalizedTitle)))score+=24;
+    for(const phrase of candidate.normalizedPhrases){
+      if(phrase===query)score+=55;
+      else if(phrase.length>=4&&query.includes(phrase))score+=18;
+      else if(query.length>=6&&phrase.includes(query))score+=10;
+    }
+    for(const token of queryTokens){
+      const frequency=documentFrequency.get(token)??0;
+      const idf=Math.log((searchable.length+1)/(frequency+1))+1;
+      const titleExact=candidate.titleTokens.has(token);
+      const keywordExact=candidate.keywordTokens.has(token);
+      const bodyExact=candidate.bodyTokens.has(token);
+      const titleRelated=!titleExact&&[...candidate.titleTokens].some(word=>relatedToken(word,token));
+      const keywordRelated=!keywordExact&&[...candidate.keywordTokens].some(word=>relatedToken(word,token));
+      if(titleExact)score+=7*idf;
+      else if(titleRelated)score+=3.5*idf;
+      if(keywordExact)score+=6*idf;
+      else if(keywordRelated)score+=2.5*idf;
+      if(bodyExact)score+=1.25*idf;
+      if(titleExact||keywordExact||bodyExact||titleRelated||keywordRelated)matched+=1;
+      if(titleExact||keywordExact||titleRelated||keywordRelated)topicMatched+=1;
+    }
+    const coverage=matched/Math.max(queryTokens.length,1);
+    score*=0.6+coverage*0.55;
+    return {candidate,score,coverage,topicCoverage:topicMatched/Math.max(queryTokens.length,1)};
+  }).sort((a,b)=>b.score-a.score);
+  const best=ranked[0]; const required=queryTokens.length<=2?8:queryTokens.length<=4?10:12;
+  const exactMatch=best?.candidate.normalizedTitle===query;
+  // A lexical relevance threshold, not a calibrated probability of truth.
+  const supported=best&&(exactMatch||(best.score>=required&&best.coverage>=0.6&&best.topicCoverage>=0.5));
+  if(!supported)return {answered:false,confidence:0,language,suggestedQuestion:language==="ar"?"يمكنك إرسال هذا السؤال إلى فريق خدمة العملاء.":"You can send this question to our customer service team."};
+  return {answered:true,title:best.candidate.title,answer:best.candidate.answer,sourceUrl:best.candidate.url,sourceLabel:language==="ar"?"عرض المصدر":"View source",confidence:exactMatch?95:Math.min(90,Math.round(50+best.coverage*25+best.topicCoverage*15)),language};
 }

@@ -1,3 +1,5 @@
+import { discoverWebsiteContext, type DiscoveredSiteContext } from "./ai-visibility";
+
 export const READINESS_METHODOLOGY_VERSION = "readiness-v0.1";
 
 export type ReadinessFinding = {
@@ -26,6 +28,7 @@ export type LiveReadinessResult = {
   requestCount: number;
   methodologyVersion: string;
   actualVisibilityStatus: "not_measured";
+  discoveredContext: DiscoveredSiteContext;
   categoryScores: Record<ReadinessFinding["category"], number>;
   findings: ReadinessFinding[];
 };
@@ -224,12 +227,15 @@ export async function runLiveReadinessScan(input: string): Promise<LiveReadiness
   const requestCount = 1 + (robots ? 1 : 0) + (sitemap ? 1 : 0);
   const bytesFetched = page.bytes + (robots?.bytes || 0) + (sitemap?.bytes || 0);
   const confidence = Math.min(92, 72 + (robots ? 5 : 0) + (sitemap ? 5 : 0) + (jsonLdBlocks.length ? 4 : 0) + (page.status === 200 ? 4 : 0));
+  const discoveredContext = discoverWebsiteContext({
+    sourceUrl: source.toString(), finalUrl: page.url, title, description, htmlLang, html, visibleText: text,
+  });
 
   return {
     sourceUrl: source.toString(), finalUrl: page.url, httpStatus: page.status, readinessScore, confidence,
     issueCount: issueRows.length,
     criticalCount: issueRows.filter((finding) => finding.severity === "critical").length,
     bytesFetched, requestCount, methodologyVersion: READINESS_METHODOLOGY_VERSION,
-    actualVisibilityStatus: "not_measured", categoryScores, findings,
+    actualVisibilityStatus: "not_measured", discoveredContext, categoryScores, findings,
   };
 }

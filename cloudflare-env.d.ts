@@ -6,5 +6,7 @@ declare namespace Cloudflare {
     AUTH_SECRET?: string;
     GOOGLE_CLIENT_ID?: string;
     GOOGLE_CLIENT_SECRET?: string;
+    OPENROUTER_API_KEY?: string;
+    OPENROUTER_MODEL?: string;
   }
 }

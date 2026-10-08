@@ -1,0 +1,65 @@
+"use client";
+
+import { NavigationLink as Link } from "@/app/components/navigation-link";
+import { ArrowRight, BarChart3, Bot, Check, CircleAlert, Clock3, FileSearch, Globe2, Repeat2, Scale, ShieldCheck } from "lucide-react";
+import { PublicShell, type LocalizedMetadata } from "@/app/components/public-shell";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
+
+const pageMetadata: LocalizedMetadata = {
+  en: { title: "Recomvia Measurement Methodology", description: "How Recomvia separates live website readiness from actual AI answer visibility, records evidence, versions scores, and states measurement limits." },
+  ar: { title: "منهجية القياس في Recomvia", description: "كيف تفصل Recomvia بين جاهزية الموقع الفعلية وظهوره الحقيقي في إجابات الذكاء الاصطناعي، وتوثّق الأدلة وإصدارات الدرجات وحدود القياس." },
+};
+
+const copy = {
+  en: {
+    eyebrow: "Public methodology", title: <>A score you can question.<br />Evidence you can inspect.</>, intro: "Recomvia does not turn unstable AI answers into false certainty. We document what was tested, how it was tested, and what the result cannot prove.", run: "Run free score", sample: "View sample evidence",
+    betaLabel: "Private beta scope:", beta: <>methodology version <code>readiness-v0.1</code> scores live website crawlability, content structure, and entity signals. Actual AI Visibility is measured separately through labeled OpenRouter API runs with web search; it does not represent a consumer AI experience.</>,
+    happened: "What happened", actual: "Actual AI visibility", actualDesc: "Did defined AI surfaces mention, cite, or recommend the brand for relevant questions in a specific market and language?", actualFormula: "Brand × Topic × Prompt × Language × Country × Engine × Run",
+    why: "Why it may happen", readiness: "AEO/GEO readiness", readinessDesc: "Can systems crawl, interpret, extract, trust, and connect the website’s content and entity signals?", readinessNote: "A technically strong site can still have weak actual visibility — and vice versa.",
+    dimensionsLabel: "Score dimensions", dimensionsTitle: "Five views, never one unexplained number.",
+    dimensions: [
+      ["Actual AI visibility", "Observed mentions, recommendations, citations, position, coverage, and consistency across defined prompt runs."],
+      ["Authority & entity", "How clearly the brand, organization, authors, evidence, and trusted external references connect."],
+      ["Content readiness", "Answer extractability, intent alignment, factual density, completeness, freshness, and citation support."],
+      ["Technical AEO", "Crawlability, indexability, structured data, architecture, rendering, canonicals, and crawler policy."],
+      ["Language & market fit", "A distinct measurement for every language, country, commercial intent, and local competitive context."],
+    ],
+    flowLabel: "Measurement flow", flowTitle: "From context to defensible evidence.", flowIntro: "The same framework applies across languages, while prompt generation and market interpretation stay local.",
+    stages: [["1", "Discover context", "Identify the brand, category, services, markets, languages, and candidate competitors."], ["2", "Generate prompts", "Create high-intent informational, commercial, comparison, recommendation, and transactional questions."], ["3", "Run and label", "Store engine surface, model/search mode, language, country, timestamp, and run number."], ["4", "Extract evidence", "Measure observable mentions, citations, positions, sources, sentiment, and factual accuracy."], ["5", "Audit readiness", "Inspect technical access, content structure, entity clarity, authority, and market fit."], ["6", "Score with confidence", "Score Actual AI Visibility and AEO/GEO Readiness separately while retaining confidence labels."]],
+    safeguardsLabel: "Non-negotiable safeguards", safeguardsTitle: "What Recomvia will not claim.", safeguards: [[Scale, "No guaranteed ranking", "Third-party systems remain outside our control."], [Repeat2, "No single-run certainty", "Repeated runs and confidence labels expose volatility."], [Globe2, "No language shortcuts", "Arabic and English are separate market measurements."], [ShieldCheck, "No hidden methodology", "Metrics must be measurable, explainable, repeatable, and actionable."]] as const,
+    checks: [[Clock3, "Timestamp every run"], [BarChart3, "Show confidence"], [CircleAlert, "State limitations"]] as const,
+  },
+  ar: {
+    eyebrow: "المنهجية العامة", title: <>درجة يمكنك مساءلتها.<br />وأدلة يمكنك فحصها.</>, intro: "لا تحوّل Recomvia إجابات الذكاء الاصطناعي المتقلبة إلى يقين زائف. نوثّق ما اختُبر، وكيف اختُبر، وما لا تستطيع النتيجة إثباته.", run: "ابدأ الفحص المجاني", sample: "اعرض نموذج الأدلة",
+    betaLabel: "نطاق الإصدار التجريبي الخاص:", beta: <>يقيس إصدار المنهجية <code dir="ltr">readiness-v0.1</code> قابلية زحف الموقع الفعلي وبنية المحتوى وإشارات الكيان. ويُقاس AI Visibility الفعلي بصورة منفصلة عبر عمليات OpenRouter API موسومة تستخدم البحث على الويب؛ ولا يمثّل ذلك تجربة أي منتج ذكاء اصطناعي للمستهلك.</>,
+    happened: "ما الذي حدث", actual: "AI Visibility الفعلي", actualDesc: "هل ذكرت أسطح الذكاء الاصطناعي المحددة العلامة التجارية أو استشهدت بها أو أوصت بها لأسئلة ذات صلة في سوق ولغة محددين؟", actualFormula: "العلامة × الموضوع × السؤال × اللغة × البلد × المحرك × التشغيل",
+    why: "لماذا قد يحدث", readiness: "جاهزية AEO/GEO", readinessDesc: "هل تستطيع الأنظمة الزحف إلى محتوى الموقع وإشارات كيانه وتفسيرها واستخراجها والثقة بها وربطها؟", readinessNote: "قد يظل الموقع القوي تقنيًا ضعيفًا في الظهور الفعلي، والعكس صحيح.",
+    dimensionsLabel: "أبعاد الدرجة", dimensionsTitle: "خمس زوايا، لا رقم واحد بلا تفسير.",
+    dimensions: [
+      ["AI Visibility الفعلي", "الإشارات والتوصيات والاستشهادات والموقع والتغطية والاتساق المرصودة عبر عمليات تشغيل محددة للأسئلة."],
+      ["السلطة والكيان", "مدى وضوح ترابط العلامة والمؤسسة والمؤلفين والأدلة والمراجع الخارجية الموثوقة."],
+      ["جاهزية المحتوى", "قابلية استخراج الإجابة، والتوافق مع النية، والكثافة الواقعية، والاكتمال، والحداثة، ودعم الاستشهادات."],
+      ["AEO التقني", "قابلية الزحف والفهرسة، والبيانات المنظمة، والبنية، والتصيير، والروابط الأساسية، وسياسة برامج الزحف."],
+      ["ملاءمة اللغة والسوق", "قياس مستقل لكل لغة وبلد ونية تجارية وسياق تنافسي محلي."],
+    ],
+    flowLabel: "مسار القياس", flowTitle: "من السياق إلى دليل يمكن الدفاع عنه.", flowIntro: "ينطبق الإطار نفسه عبر اللغات، بينما يظل توليد الأسئلة وتفسير السوق محليين.",
+    stages: [["1", "اكتشاف السياق", "تحديد العلامة والفئة والخدمات والأسواق واللغات والمنافسين المحتملين."], ["2", "توليد الأسئلة", "إنشاء أسئلة معلوماتية وتجارية ومقارنة وتوصية ومعاملات عالية النية."], ["3", "التشغيل والتوسيم", "حفظ سطح المحرك ووضع النموذج أو البحث واللغة والبلد والطابع الزمني ورقم التشغيل."], ["4", "استخراج الأدلة", "قياس الإشارات والاستشهادات والمواقع والمصادر والانطباع والدقة الواقعية القابلة للرصد."], ["5", "تدقيق الجاهزية", "فحص الوصول التقني وبنية المحتوى ووضوح الكيان والسلطة وملاءمة السوق."], ["6", "إسناد الدرجة مع الثقة", "حساب AI Visibility الفعلي وجاهزية AEO/GEO بصورة منفصلة مع الاحتفاظ بتسميات الثقة."]],
+    safeguardsLabel: "ضمانات لا تقبل التنازل", safeguardsTitle: "ما لن تدّعيه Recomvia.", safeguards: [[Scale, "لا ضمان للترتيب", "تظل أنظمة الأطراف الخارجية خارج سيطرتنا."], [Repeat2, "لا يقين من تشغيل واحد", "تكشف عمليات التشغيل المتكررة وتسميات الثقة مقدار التقلب."], [Globe2, "لا اختصارات لغوية", "العربية والإنجليزية قياسان منفصلان للسوق."], [ShieldCheck, "لا منهجية مخفية", "يجب أن تكون المقاييس قابلة للقياس والتفسير والتكرار والتنفيذ."]] as const,
+    checks: [[Clock3, "سجّل وقت كل تشغيل"], [BarChart3, "أظهر مستوى الثقة"], [CircleAlert, "اذكر القيود"]] as const,
+  },
+} as const;
+
+export function MethodologyContent() {
+  return <PublicShell pageMetadata={pageMetadata}>{locale => {
+    const t = copy[locale];
+    return <main>
+      <section className="relative overflow-hidden border-b border-slate-200 bg-[#07111f] text-white"><div className="signal-grid absolute inset-0 opacity-20" /><div className="relative mx-auto max-w-[1000px] px-5 py-20 sm:px-8 sm:py-28"><p className="text-sm font-bold uppercase tracking-[.16em] text-cyan-300">{t.eyebrow}</p><h1 className="mt-4 max-w-4xl text-4xl font-extrabold tracking-[-.05em] sm:text-6xl">{t.title}</h1><p className="mt-6 max-w-3xl text-lg leading-8 text-slate-300">{t.intro}</p><div className="mt-8 flex flex-wrap gap-3"><Button asChild className="h-11 rounded-xl bg-white font-bold text-[#07111f]"><Link href="/">{t.run}<ArrowRight className="size-4 rtl:rotate-180" /></Link></Button><Button asChild variant="outline" className="h-11 rounded-xl border-white/20 bg-transparent text-white hover:bg-white/10 hover:text-white"><Link href="/report">{t.sample}</Link></Button></div></div></section>
+      <section className="border-b border-amber-200 bg-amber-50"><div className="mx-auto flex max-w-[1000px] items-start gap-3 px-5 py-5 text-sm leading-6 text-amber-950 sm:px-8"><CircleAlert className="mt-0.5 size-5 shrink-0 text-amber-700" /><p><strong>{t.betaLabel}</strong> {t.beta}</p></div></section>
+      <section className="mx-auto max-w-[1240px] px-5 py-20 sm:px-8"><div className="grid gap-8 lg:grid-cols-2"><Card className="rounded-[26px] border-blue-200 bg-blue-50/40 py-0 shadow-none"><CardContent className="p-7 sm:p-9"><span className="grid size-11 place-items-center rounded-2xl bg-blue-600 text-white"><Bot className="size-5" /></span><p className="mt-7 text-xs font-bold uppercase tracking-[.14em] text-blue-600">{t.happened}</p><h2 className="mt-2 text-3xl font-extrabold">{t.actual}</h2><p className="mt-4 leading-7 text-slate-600">{t.actualDesc}</p><div className="mt-6 rounded-2xl bg-white p-4 text-sm font-bold text-blue-800">{t.actualFormula}</div></CardContent></Card><Card className="rounded-[26px] border-violet-200 bg-violet-50/40 py-0 shadow-none"><CardContent className="p-7 sm:p-9"><span className="grid size-11 place-items-center rounded-2xl bg-violet-600 text-white"><FileSearch className="size-5" /></span><p className="mt-7 text-xs font-bold uppercase tracking-[.14em] text-violet-600">{t.why}</p><h2 className="mt-2 text-3xl font-extrabold">{t.readiness}</h2><p className="mt-4 leading-7 text-slate-600">{t.readinessDesc}</p><div className="mt-6 rounded-2xl bg-white p-4 text-sm font-bold text-violet-800">{t.readinessNote}</div></CardContent></Card></div></section>
+      <section className="border-y border-slate-200 bg-white"><div className="mx-auto max-w-[1240px] px-5 py-20 sm:px-8"><div className="mb-10 max-w-3xl"><p className="text-sm font-bold uppercase tracking-[.14em] text-blue-600">{t.dimensionsLabel}</p><h2 className="mt-3 text-3xl font-extrabold tracking-tight sm:text-4xl">{t.dimensionsTitle}</h2></div><div className="grid gap-4 md:grid-cols-2">{t.dimensions.map(([title, desc], i) => <Card key={title} className={`rounded-[20px] border-slate-200 py-0 shadow-none ${i === 0 ? "md:col-span-2" : ""}`}><CardContent className="flex gap-5 p-6"><span className="grid size-10 shrink-0 place-items-center rounded-xl bg-slate-100 text-sm font-extrabold text-blue-600">0{i + 1}</span><div><h3 className="font-extrabold">{title}</h3><p className="mt-2 text-sm leading-6 text-slate-600">{desc}</p></div></CardContent></Card>)}</div></div></section>
+      <section className="mx-auto max-w-[1240px] px-5 py-20 sm:px-8"><div className="grid gap-12 lg:grid-cols-[.68fr_1.32fr]"><div><p className="text-sm font-bold uppercase tracking-[.14em] text-blue-600">{t.flowLabel}</p><h2 className="mt-3 text-3xl font-extrabold tracking-tight">{t.flowTitle}</h2><p className="mt-4 leading-7 text-slate-600">{t.flowIntro}</p></div><div className="space-y-3">{t.stages.map(([n, title, desc]) => <div key={n} className="flex gap-4 rounded-2xl border border-slate-200 bg-white p-5"><span className="grid size-9 shrink-0 place-items-center rounded-xl bg-[#07111f] text-sm font-bold text-white">{n}</span><div><h3 className="font-extrabold">{title}</h3><p className="mt-1 text-sm leading-6 text-slate-600">{desc}</p></div></div>)}</div></div></section>
+      <section className="bg-slate-100"><div className="mx-auto max-w-[1240px] px-5 py-20 sm:px-8"><div className="mb-10"><p className="text-sm font-bold uppercase tracking-[.14em] text-blue-600">{t.safeguardsLabel}</p><h2 className="mt-3 text-3xl font-extrabold tracking-tight">{t.safeguardsTitle}</h2></div><div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">{t.safeguards.map(([Icon, title, desc]) => <Card key={title} className="rounded-[22px] border-slate-200 py-0 shadow-none"><CardContent className="p-6"><Icon className="size-5 text-blue-600" /><h3 className="mt-6 font-extrabold">{title}</h3><p className="mt-2 text-sm leading-6 text-slate-600">{desc}</p></CardContent></Card>)}</div><div className="mt-8 grid gap-4 sm:grid-cols-3">{t.checks.map(([Icon, label]) => <div key={label} className="flex items-center gap-3 rounded-2xl bg-white p-4 text-sm font-bold"><Icon className="size-4 text-cyan-600" />{label}<Check className="ms-auto size-4 text-emerald-600" /></div>)}</div></div></section>
+    </main>;
+  }}</PublicShell>;
+}
