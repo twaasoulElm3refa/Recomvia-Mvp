@@ -2,8 +2,10 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { aggregateActualVisibility, analyzeVisibilityResponse, discoverWebsiteContext, generateIntentPrompts, runActualVisibility, type DiscoveredSiteContext, type VisibilityEngineRun } from "../lib/ai-visibility";
 import type { EngineAdapter, EngineResponse } from "../lib/ai-engines/engine-adapter";
-import { OpenAIEngineAdapter } from "../lib/ai-engines/openai-engine-adapter";
-import { estimateOpenAiCostMicros, OPENAI_DEFAULT_MODEL } from "../lib/ai-engines/pricing";
+import { OpenRouterEngineAdapter } from "../lib/ai-engines/openrouter-engine-adapter";
+import { actualProviderCostMicros } from "../lib/ai-engines/pricing";
+
+const OPENROUTER_TEST_MODEL = "openai/test-model";
 
 const context: DiscoveredSiteContext = {
   brand: { value: "Northstar", confidence: 94, evidence: ["Organization structured data"] },
@@ -117,35 +119,98 @@ test("isolates an unexpected adapter exception so the remaining prompts are stil
   assert.equal(measurement.engineRuns[1].providerRunId, "response_ok");
 });
 
-test("OpenAI adapter retries bounded provider errors and records real returned sources, citations, usage, cost, and run ID", async () => {
+test("OpenRouter adapter retries bounded provider errors and records returned sources, citations, usage, actual cost, and run ID", async () => {
   let requests = 0;
   const fetchImpl: typeof fetch = async (_input, init) => {
     requests += 1;
     assert.match(String(new Headers(init?.headers).get("authorization")), /^Bearer /);
+    const request = JSON.parse(String(init?.body));
+    assert.equal(request.model, OPENROUTER_TEST_MODEL);
+    assert.deepEqual(request.usage, { include: true });
+    assert.equal(request.tools[0].type, "openrouter:web_search");
     if (requests === 1) return new Response(JSON.stringify({ error: { code: "server_error", message: "Try again" } }), { status: 500, headers: { "content-type": "application/json" } });
     return new Response(JSON.stringify({
-      id: "resp_real_shape", model: OPENAI_DEFAULT_MODEL,
-      output: [
-        { type: "web_search_call", action: { sources: [{ type: "url", url: "https://source.example/a", title: "Source A" }] } },
-        { type: "message", content: [{ type: "output_text", text: "Northstar is listed.", annotations: [{ type: "url_citation", url: "https://source.example/a", title: "Source A", start_index: 0, end_index: 9 }] }] },
-      ],
-      usage: { input_tokens: 100, output_tokens: 20, total_tokens: 120, input_tokens_details: { cached_tokens: 20 } },
+      id: "generation_real_shape", model: OPENROUTER_TEST_MODEL,
+      choices: [{ message: {
+        content: "Northstar is listed.",
+        annotations: [{ type: "url_citation", url_citation: { url: "https://source.example/a", title: "Source A", start_index: 0, end_index: 9 } }],
+      } }],
+      usage: { prompt_tokens: 100, completion_tokens: 20, total_tokens: 120, prompt_tokens_details: { cached_tokens: 20 }, server_tool_use: { web_search_requests: 1 }, cost: 0.010152 },
     }), { status: 200, headers: { "content-type": "application/json" } });
   };
-  const adapter = new OpenAIEngineAdapter({ apiKey: "test-only-key", fetchImpl, maxRetries: 1 });
+  const adapter = new OpenRouterEngineAdapter({ apiKey: "test-only-key", model: OPENROUTER_TEST_MODEL, fetchImpl, maxRetries: 1 });
   const response = await adapter.run({ prompt: "Which options?", language: "en", country: "UK", useSearch: true });
-  assert.equal(response.provider, "OpenAI API");
+  assert.equal(response.provider, "OpenRouter");
+  assert.equal(response.model, OPENROUTER_TEST_MODEL);
   assert.equal(response.surfaceType, "api_with_search");
   assert.equal(response.retryCount, 1);
-  assert.equal(response.providerRunId, "resp_real_shape");
+  assert.equal(response.providerRunId, "generation_real_shape");
   assert.deepEqual(response.usage, { inputTokens: 100, cachedInputTokens: 20, outputTokens: 20, totalTokens: 120 });
   assert.equal(response.sources[0].url, "https://source.example/a");
   assert.equal(response.citations[0].url, "https://source.example/a");
   assert.equal(response.estimatedCostMicros, 10_152);
 });
 
-test("cost calculation is centralized and returns null instead of inventing unknown pricing", () => {
-  const usage = { inputTokens: 100, cachedInputTokens: 20, outputTokens: 20, totalTokens: 120 };
-  assert.equal(estimateOpenAiCostMicros(OPENAI_DEFAULT_MODEL, usage, 1), 10_152);
-  assert.equal(estimateOpenAiCostMicros("unknown-model", usage, 1), null);
+test("OpenRouter adapter keeps absent citations and provider cost empty without fabrication", async () => {
+  const fetchImpl: typeof fetch = async (_input, init) => {
+    const request = JSON.parse(String(init?.body));
+    assert.equal(request.tools[0].type, "openrouter:web_search");
+    return new Response(JSON.stringify({
+      id: "generation_without_search", model: OPENROUTER_TEST_MODEL,
+      choices: [{ message: { content: [{ type: "text", text: "A plain answer." }] } }],
+      usage: { prompt_tokens: 7, completion_tokens: 3, total_tokens: 10, server_tool_use: { web_search_requests: 1 } },
+    }), { status: 200, headers: { "content-type": "application/json" } });
+  };
+  const adapter = new OpenRouterEngineAdapter({ apiKey: "test-only-key", model: OPENROUTER_TEST_MODEL, fetchImpl });
+  const response = await adapter.run({ prompt: "Answer plainly", language: "en", country: "Global", useSearch: true });
+  assert.equal(response.surfaceType, "api_with_search");
+  assert.deepEqual(response.sources, []);
+  assert.deepEqual(response.citations, []);
+  assert.equal(response.estimatedCostMicros, null);
+});
+
+test("OpenRouter adapter labels a run without an executed search accurately", async () => {
+  const fetchImpl: typeof fetch = async (_input, init) => {
+    const request = JSON.parse(String(init?.body));
+    assert.equal(request.tools, undefined);
+    assert.equal(request.max_tool_calls, undefined);
+    return new Response(JSON.stringify({
+      id: "generation_no_tool", model: OPENROUTER_TEST_MODEL,
+      choices: [{ message: { content: "A plain answer." } }],
+      usage: { prompt_tokens: 7, completion_tokens: 3, total_tokens: 10 },
+    }), { status: 200, headers: { "content-type": "application/json" } });
+  };
+  const response = await new OpenRouterEngineAdapter({ apiKey: "test-only-key", model: OPENROUTER_TEST_MODEL, fetchImpl })
+    .run({ prompt: "Answer plainly", language: "en", country: "Global", useSearch: false });
+  assert.equal(response.surfaceType, "api_without_search");
+});
+
+test("OpenRouter adapter records bounded timeout and provider failures", async () => {
+  const timeoutFetch: typeof fetch = async (_input, init) => new Promise<Response>((_resolve, reject) => {
+    init?.signal?.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")), { once: true });
+  });
+  const timedOut = await new OpenRouterEngineAdapter({ apiKey: "test-only-key", model: OPENROUTER_TEST_MODEL, fetchImpl: timeoutFetch, timeoutMs: 1, maxRetries: 0 })
+    .run({ prompt: "Timeout", language: "en", country: "Global", useSearch: true });
+  assert.equal(timedOut.error?.code, "timeout");
+  assert.equal(timedOut.retryCount, 0);
+  assert.equal(timedOut.responseText, null);
+
+  const providerFetch: typeof fetch = async () => new Response(JSON.stringify({ error: { code: "invalid_model", message: "Model unavailable" } }), { status: 400, headers: { "content-type": "application/json" } });
+  const failed = await new OpenRouterEngineAdapter({ apiKey: "test-only-key", model: OPENROUTER_TEST_MODEL, fetchImpl: providerFetch, maxRetries: 2 })
+    .run({ prompt: "Failure", language: "en", country: "Global", useSearch: true });
+  assert.equal(failed.error?.code, "invalid_model");
+  assert.equal(failed.error?.retryable, false);
+  assert.equal(failed.retryCount, 0);
+});
+
+test("OpenRouter adapter requires both server-side configuration values", () => {
+  assert.throws(() => new OpenRouterEngineAdapter({ apiKey: "", model: OPENROUTER_TEST_MODEL }), /OPENROUTER_API_KEY/);
+  assert.throws(() => new OpenRouterEngineAdapter({ apiKey: "test-only-key", model: "" }), /OPENROUTER_MODEL/);
+});
+
+test("cost calculation uses only actual provider cost and returns null when unavailable", () => {
+  assert.equal(actualProviderCostMicros(0.010152), 10_152);
+  assert.equal(actualProviderCostMicros(0), 0);
+  assert.equal(actualProviderCostMicros(undefined), null);
+  assert.equal(actualProviderCostMicros(-1), null);
 });

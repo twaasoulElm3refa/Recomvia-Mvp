@@ -2,8 +2,7 @@ import { env } from "cloudflare:workers";
 import { getAuthenticatedUser } from "@/app/auth";
 import { completeScan, countRecentScans, createRunningScan, ensureWorkspace, failScan, findCachedScan, getOrCreateSite } from "@/db/product";
 import { generateIntentPrompts, runActualVisibility, type ActualVisibilityMeasurement } from "@/lib/ai-visibility";
-import { OpenAIEngineAdapter } from "@/lib/ai-engines/openai-engine-adapter";
-import { OPENAI_DEFAULT_MODEL } from "@/lib/ai-engines/pricing";
+import { OpenRouterEngineAdapter } from "@/lib/ai-engines/openrouter-engine-adapter";
 import { normalizeWebsiteInput, READINESS_METHODOLOGY_VERSION, runLiveReadinessScan } from "@/lib/live-readiness";
 
 export const runtime = "edge";
@@ -25,9 +24,11 @@ export async function POST(request: Request) {
   const language = "Auto-detected";
   const country = "Auto-detected";
   const workspace = await ensureWorkspace(user);
-  const visibilityModel = env.OPENAI_VISIBILITY_MODEL?.trim() || OPENAI_DEFAULT_MODEL;
-  const engineAvailability = env.OPENAI_API_KEY?.trim() ? "configured" : "not_configured";
-  const cacheKey = `${normalized.toString().toLowerCase()}|auto-context|${READINESS_METHODOLOGY_VERSION}|visibility-v1|${visibilityModel}|api_with_search|${engineAvailability}`;
+  const openRouterApiKey = env.OPENROUTER_API_KEY?.trim();
+  const visibilityModel = env.OPENROUTER_MODEL?.trim() || "unconfigured";
+  const openRouterConfigured = Boolean(openRouterApiKey && visibilityModel !== "unconfigured");
+  const engineAvailability = openRouterConfigured ? "configured" : "not_configured";
+  const cacheKey = `${normalized.toString().toLowerCase()}|auto-context|${READINESS_METHODOLOGY_VERSION}|visibility-v2|openrouter|${visibilityModel}|api_with_search|${engineAvailability}`;
   const cached = await findCachedScan(workspace, cacheKey);
   if (cached) return Response.json({ scan: cached, cached: true }, { headers: { "Cache-Control": "no-store" } });
   if (await countRecentScans(workspace) >= 5) {
@@ -44,9 +45,9 @@ export async function POST(request: Request) {
   try {
     const result = await runLiveReadinessScan(normalized.toString());
     let visibility: ActualVisibilityMeasurement;
-    if (env.OPENAI_API_KEY?.trim()) {
+    if (openRouterConfigured) {
       visibility = await runActualVisibility({
-        adapter: new OpenAIEngineAdapter({ apiKey: env.OPENAI_API_KEY, model: visibilityModel }),
+        adapter: new OpenRouterEngineAdapter({ apiKey: openRouterApiKey!, model: visibilityModel }),
         context: result.discoveredContext,
       });
     } else {

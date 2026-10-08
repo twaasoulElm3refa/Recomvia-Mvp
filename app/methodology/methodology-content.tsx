@@ -14,7 +14,7 @@ const pageMetadata: LocalizedMetadata = {
 const copy = {
   en: {
     eyebrow: "Public methodology", title: <>A score you can question.<br />Evidence you can inspect.</>, intro: "Recomvia does not turn unstable AI answers into false certainty. We document what was tested, how it was tested, and what the result cannot prove.", run: "Run free score", sample: "View sample evidence",
-    betaLabel: "Private beta scope:", beta: <>methodology version <code>readiness-v0.1</code> scores live website crawlability, content structure, and entity signals. Actual AI Visibility is measured separately through labeled OpenAI API runs with web search; it does not represent the ChatGPT consumer experience.</>,
+    betaLabel: "Private beta scope:", beta: <>methodology version <code>readiness-v0.1</code> scores live website crawlability, content structure, and entity signals. Actual AI Visibility is measured separately through labeled OpenRouter API runs with web search; it does not represent a consumer AI experience.</>,
     happened: "What happened", actual: "Actual AI visibility", actualDesc: "Did defined AI surfaces mention, cite, or recommend the brand for relevant questions in a specific market and language?", actualFormula: "Brand × Topic × Prompt × Language × Country × Engine × Run",
     why: "Why it may happen", readiness: "AEO/GEO readiness", readinessDesc: "Can systems crawl, interpret, extract, trust, and connect the website’s content and entity signals?", readinessNote: "A technically strong site can still have weak actual visibility — and vice versa.",
     dimensionsLabel: "Score dimensions", dimensionsTitle: "Five views, never one unexplained number.",
@@ -32,7 +32,7 @@ const copy = {
   },
   ar: {
     eyebrow: "المنهجية العامة", title: <>درجة يمكنك مساءلتها.<br />وأدلة يمكنك فحصها.</>, intro: "لا تحوّل Recomvia إجابات الذكاء الاصطناعي المتقلبة إلى يقين زائف. نوثّق ما اختُبر، وكيف اختُبر، وما لا تستطيع النتيجة إثباته.", run: "ابدأ الفحص المجاني", sample: "اعرض نموذج الأدلة",
-    betaLabel: "نطاق الإصدار التجريبي الخاص:", beta: <>يقيس إصدار المنهجية <code dir="ltr">readiness-v0.1</code> قابلية زحف الموقع الفعلي وبنية المحتوى وإشارات الكيان. ويُقاس AI Visibility الفعلي بصورة منفصلة عبر عمليات OpenAI API موسومة تستخدم البحث على الويب؛ ولا يمثّل ذلك تجربة ChatGPT الاستهلاكية.</>,
+    betaLabel: "نطاق الإصدار التجريبي الخاص:", beta: <>يقيس إصدار المنهجية <code dir="ltr">readiness-v0.1</code> قابلية زحف الموقع الفعلي وبنية المحتوى وإشارات الكيان. ويُقاس AI Visibility الفعلي بصورة منفصلة عبر عمليات OpenRouter API موسومة تستخدم البحث على الويب؛ ولا يمثّل ذلك تجربة أي منتج ذكاء اصطناعي للمستهلك.</>,
     happened: "ما الذي حدث", actual: "AI Visibility الفعلي", actualDesc: "هل ذكرت أسطح الذكاء الاصطناعي المحددة العلامة التجارية أو استشهدت بها أو أوصت بها لأسئلة ذات صلة في سوق ولغة محددين؟", actualFormula: "العلامة × الموضوع × السؤال × اللغة × البلد × المحرك × التشغيل",
     why: "لماذا قد يحدث", readiness: "جاهزية AEO/GEO", readinessDesc: "هل تستطيع الأنظمة الزحف إلى محتوى الموقع وإشارات كيانه وتفسيرها واستخراجها والثقة بها وربطها؟", readinessNote: "قد يظل الموقع القوي تقنيًا ضعيفًا في الظهور الفعلي، والعكس صحيح.",
     dimensionsLabel: "أبعاد الدرجة", dimensionsTitle: "خمس زوايا، لا رقم واحد بلا تفسير.",
