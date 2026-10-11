@@ -95,8 +95,23 @@ export async function POST(request: Request) {
     candidate?: IdentityCandidate,
   ) {
     await attachAnalysisTarget(workspace, scanId!, target, input, cacheKey);
-    const context =
+    const baseContext =
       result?.discoveredContext || contextForTarget(target, candidate);
+    const context =
+      target.kind === "website" && baseContext.brand.value !== target.name
+        ? {
+            ...baseContext,
+            brand: {
+              value: target.name,
+              confidence: target.identityConfirmed
+                ? 100
+                : baseContext.brand.confidence,
+              evidence: target.identityConfirmed
+                ? ["User-confirmed candidate anchored to submitted URL"]
+                : baseContext.brand.evidence,
+            },
+          }
+        : baseContext;
     const prompts = generateTargetPrompts(target);
     const visibility: ActualVisibilityMeasurement = adapter
       ? await runActualVisibility({
@@ -182,13 +197,25 @@ export async function POST(request: Request) {
         model!,
         true,
       );
-      return await finish(
-        pending.targetInput,
-        target,
-        cacheKey,
-        undefined,
-        candidate,
-      );
+      if (pending.targetInput.websiteUrl) {
+        const result = await runLiveReadinessScan(
+          pending.targetInput.websiteUrl,
+        );
+        return await finish(
+          pending.targetInput,
+          {
+            ...target,
+            kind: "website",
+            websiteUrl: pending.targetInput.websiteUrl,
+            category:
+              candidate.category || result.discoveredContext.category.value,
+          },
+          cacheKey,
+          result,
+          candidate,
+        );
+      }
+      return await finish(pending.targetInput, target, cacheKey, undefined, candidate);
     }
 
     let input: TargetInput;
@@ -244,6 +271,32 @@ export async function POST(request: Request) {
     if (input.websiteUrl) {
       const result = await runLiveReadinessScan(input.websiteUrl);
       const context = result.discoveredContext;
+      if (result.identityCandidates.length > 1) {
+        const discovery = {
+          status: "ambiguous" as const,
+          candidates: result.identityCandidates.slice(0, 4).map((item, index) => ({
+            id: `candidate_${index + 1}`,
+            kind: "brand" as const,
+            name: item.name,
+            description: item.evidence.join("; "),
+            category: context.offerings.value[0] || context.category.value,
+            aliases: [],
+            country: context.markets.value[0] || "Global",
+            websiteUrl: input.websiteUrl,
+            sources: [result.finalUrl],
+          })),
+          response: null,
+        };
+        await storeDiscovery(workspace, scanId, discovery);
+        return json(
+          {
+            status: "needs_confirmation",
+            scanId,
+            candidates: discovery.candidates,
+          },
+          202,
+        );
+      }
       const target: AnalysisTarget = {
         kind: "website",
         input: input.input,

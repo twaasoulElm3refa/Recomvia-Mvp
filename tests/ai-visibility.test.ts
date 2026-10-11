@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { aggregateActualVisibility, analyzeVisibilityResponse, discoverWebsiteContext, generateIntentPrompts, runActualVisibility, type DiscoveredSiteContext, type VisibilityEngineRun } from "../lib/ai-visibility";
+import { aggregateActualVisibility, analyzeVisibilityResponse, discoverWebsiteContext, discoverWebsiteIdentityCandidates, generateIntentPrompts, runActualVisibility, type DiscoveredSiteContext, type VisibilityEngineRun } from "../lib/ai-visibility";
+import { decodeHtmlEntities, sanitizeProviderAnswer } from "../lib/answer-text";
 import type { EngineAdapter, EngineResponse } from "../lib/ai-engines/engine-adapter";
 import { OpenRouterEngineAdapter } from "../lib/ai-engines/openrouter-engine-adapter";
 import { actualProviderCostMicros } from "../lib/ai-engines/pricing";
@@ -35,6 +36,44 @@ test("discovers entity, offerings, language, market, and explicit competitors fr
   assert.ok(discovered.markets.value.includes("United Kingdom"));
   assert.ok(discovered.competitors.value.includes("RivalCo"));
   assert.ok(discovered.brand.confidence > 90);
+});
+
+test("URL identity stays anchored to the submitted domain and similar external names are not proof", () => {
+  const html = `<html><head><title>AI Arabic &#8211; Artificial intelligence news</title></head><body>
+    <script type="application/ld+json">{"@type":"Organization","name":"Belarabi","url":"https://belarabi.me"}</script>
+    <script type="application/ld+json">{"@type":"Organization","name":"AI Arabic Telegram","url":"https://t.me/aiarabic"}</script>
+  </body></html>`;
+  const identities = discoverWebsiteIdentityCandidates({
+    html,
+    title: "AI Arabic &#8211; Artificial intelligence news",
+    finalUrl: "https://aiarabic.com/",
+  });
+  assert.deepEqual(identities.map((item) => item.name), ["AI Arabic"]);
+  const discovered = discoverWebsiteContext({
+    sourceUrl: "https://aiarabic.com/",
+    finalUrl: "https://aiarabic.com/",
+    title: "AI Arabic &#8211; Artificial intelligence news",
+    description: "Arabic artificial intelligence news",
+    htmlLang: "en",
+    html,
+    visibleText: "Arabic artificial intelligence news",
+  });
+  assert.equal(discovered.brand.value, "AI Arabic");
+  assert.equal(discovered.category.value, "Artificial intelligence news");
+});
+
+test("conflicting identities anchored on the submitted website remain ambiguous", () => {
+  const html = `<html><head><meta property="og:site_name" content="Second Identity"></head><body>
+    <script type="application/ld+json">{"@type":"Organization","name":"First Identity","url":"https://same.example/about"}</script>
+  </body></html>`;
+  assert.deepEqual(
+    discoverWebsiteIdentityCandidates({
+      html,
+      title: "Ignored title",
+      finalUrl: "https://same.example/",
+    }).map((item) => item.name),
+    ["First Identity", "Second Identity"],
+  );
 });
 
 test("generates contextual intent prompts without forcing the tested brand into the answer", () => {
@@ -167,6 +206,39 @@ test("OpenRouter adapter keeps absent citations and provider cost empty without 
   assert.deepEqual(response.sources, []);
   assert.deepEqual(response.citations, []);
   assert.equal(response.estimatedCostMicros, null);
+});
+
+test("Qwen reasoning is removed before storage while citations and the final answer remain", async () => {
+  assert.equal(decodeHtmlEntities("News &#8211; Arabic"), "News – Arabic");
+  assert.equal(
+    sanitizeProviderAnswer("The user wants current options.\nLet me search.\nFinal answer: Useful answer."),
+    "Useful answer.",
+  );
+  const fetchImpl: typeof fetch = async () =>
+    new Response(
+      JSON.stringify({
+        id: "qwen-clean",
+        model: "qwen/test",
+        choices: [{
+          message: {
+            content: "The user wants...\n</think>\n## Final answer\n**Useful** answer &#8211; verified.",
+            annotations: [{ type: "url_citation", url_citation: { url: "https://source.example/qwen", title: "Evidence" } }],
+          },
+        }],
+        usage: { prompt_tokens: 2, completion_tokens: 3, total_tokens: 5, server_tool_use: { web_search_requests: 1 } },
+      }),
+      { headers: { "content-type": "application/json" } },
+    );
+  const adapter = new OpenRouterEngineAdapter({ apiKey: "test-only-key", model: "qwen/test", fetchImpl });
+  const result = await runActualVisibility({
+    adapter,
+    context,
+    prompts: [generateIntentPrompts(context)[0]],
+  });
+  assert.equal(result.engineRuns[0].responseText, "## Final answer\n**Useful** answer – verified.");
+  assert.ok(!result.engineRuns[0].responseText?.includes("think"));
+  assert.ok(!result.engineRuns[0].responseText?.includes("The user wants"));
+  assert.equal(result.engineRuns[0].citations[0].url, "https://source.example/qwen");
 });
 
 test("OpenRouter adapter labels a run without an executed search accurately", async () => {

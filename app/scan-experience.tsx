@@ -36,6 +36,7 @@ import type {
   TargetInput,
 } from "@/lib/analysis-target";
 import { faqEntries } from "@/lib/knowledge-base";
+import { normalizeDisplayText } from "@/lib/answer-text";
 
 type Locale = "en" | "ar";
 type ModelContext = {
@@ -817,12 +818,15 @@ export function ScanExperience() {
                       key={candidate.id}
                       className="rounded-xl border border-slate-200 p-4"
                     >
-                      <p className="font-bold">{candidate.name}</p>
+                      <p dir="auto" className="font-bold">
+                        {normalizeDisplayText(candidate.name)}
+                      </p>
                       <p className="mt-1 text-sm leading-6 text-slate-600">
-                        {candidate.description}
+                        {normalizeDisplayText(candidate.description)}
                       </p>
                       <p className="mt-1 text-xs text-slate-500">
-                        {candidate.category} · {candidate.country}
+                        {normalizeDisplayText(candidate.category)} ·{" "}
+                        {normalizeDisplayText(candidate.country)}
                       </p>
                       <div className="mt-2 flex flex-wrap gap-3">
                         {candidate.sources.map((source, index) => (

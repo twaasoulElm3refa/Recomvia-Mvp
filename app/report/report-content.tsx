@@ -2,9 +2,11 @@
 import { useState, type ReactNode } from "react";
 import { NavigationLink as Link } from "@/app/components/navigation-link";
 import { AppShell, StatusPill } from "@/app/components/app-shell";
+import { SafeMarkdown } from "@/app/components/safe-markdown";
 import { Button } from "@/components/ui/button";
 import { useSiteLocale } from "@/hooks/use-site-locale";
 import { safeSourceUrl } from "@/lib/analysis-target";
+import { normalizeDisplayText } from "@/lib/answer-text";
 import type { StoredScan } from "@/db/product";
 
 function Panel({
@@ -31,7 +33,7 @@ function Source({ url, label }: { url: string; label?: string }) {
       rel="noopener noreferrer"
       className="inline-block max-w-full break-all rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-xs font-semibold text-blue-700 hover:underline"
     >
-      {label || safe}
+      {normalizeDisplayText(label || safe)}
     </a>
   ) : null;
 }
@@ -438,7 +440,7 @@ export function ReportContent({
                           : t("Unbranded question", "سؤال دون ذكر الاسم")}
                     </p>
                     <h2 dir="auto" className="mt-3 text-lg font-extrabold">
-                      {run.prompt}
+                      {normalizeDisplayText(run.prompt)}
                     </h2>
                     <div className="mt-4 flex flex-wrap gap-2">
                       <StatusPill tone="info">
@@ -464,7 +466,7 @@ export function ReportContent({
                           : t("Response stored", "إجابة محفوظة")}
                       </StatusPill>
                     </div>
-                    <p
+                    <div
                       dir="auto"
                       className="mt-5 whitespace-pre-wrap rounded-2xl bg-slate-50 p-4 text-sm leading-7 text-slate-700"
                     >
@@ -473,8 +475,8 @@ export function ReportContent({
                             "The provider did not complete this request. This run is excluded from the score.",
                             "لم يكمل المزود الطلب. استُبعد هذا التشغيل من الدرجة.",
                           )
-                        : run.responseText}
-                    </p>
+                        : <SafeMarkdown text={run.responseText} />}
+                    </div>
                     {!["identity", "topic"].includes(run.intent) && (
                       <p className="mt-3 text-xs text-slate-500">
                         {t("Name match", "تطابق الاسم")}:{" "}

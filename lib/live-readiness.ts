@@ -1,4 +1,10 @@
-import { discoverWebsiteContext, type DiscoveredSiteContext } from "./ai-visibility";
+import {
+  discoverWebsiteContext,
+  discoverWebsiteIdentityCandidates,
+  type DiscoveredSiteContext,
+  type WebsiteIdentityCandidate,
+} from "./ai-visibility";
+import { decodeHtmlEntities } from "./answer-text";
 
 export const READINESS_METHODOLOGY_VERSION = "readiness-v0.1";
 
@@ -29,6 +35,7 @@ export type LiveReadinessResult = {
   methodologyVersion: string;
   actualVisibilityStatus: "not_measured";
   discoveredContext: DiscoveredSiteContext;
+  identityCandidates: WebsiteIdentityCandidate[];
   categoryScores: Record<ReadinessFinding["category"], number>;
   findings: ReadinessFinding[];
 };
@@ -119,7 +126,8 @@ function attributes(tag: string) {
 function metaContent(html: string, target: string) {
   for (const tag of html.match(/<meta\b[^>]*>/gi) ?? []) {
     const attrs = attributes(tag);
-    if ((attrs.name || attrs.property || "").toLowerCase() === target.toLowerCase()) return (attrs.content || "").trim();
+    if ((attrs.name || attrs.property || "").toLowerCase() === target.toLowerCase())
+      return decodeHtmlEntities((attrs.content || "").trim());
   }
   return "";
 }
@@ -133,16 +141,14 @@ function linkHref(html: string, rel: string) {
 }
 
 function plainText(html: string) {
-  return html
+  return decodeHtmlEntities(
+    html
     .replace(/<script\b[\s\S]*?<\/script>/gi, " ")
     .replace(/<style\b[\s\S]*?<\/style>/gi, " ")
     .replace(/<[^>]+>/g, " ")
-    .replace(/&nbsp;|&#160;/gi, " ")
-    .replace(/&amp;/gi, "&")
-    .replace(/&lt;/gi, "<")
-    .replace(/&gt;/gi, ">")
     .replace(/\s+/g, " ")
-    .trim();
+    .trim(),
+  );
 }
 
 function clip(value: string, length = 220) {
@@ -229,12 +235,17 @@ export async function runLiveReadinessScan(input: string): Promise<LiveReadiness
   const discoveredContext = discoverWebsiteContext({
     sourceUrl: source.toString(), finalUrl: page.url, title, description, htmlLang, html, visibleText: text,
   });
+  const identityCandidates = discoverWebsiteIdentityCandidates({
+    finalUrl: page.url,
+    title,
+    html,
+  });
 
   return {
     sourceUrl: source.toString(), finalUrl: page.url, httpStatus: page.status, readinessScore, confidence,
     issueCount: issueRows.length,
     criticalCount: issueRows.filter((finding) => finding.severity === "critical").length,
     bytesFetched, requestCount, methodologyVersion: READINESS_METHODOLOGY_VERSION,
-    actualVisibilityStatus: "not_measured", discoveredContext, categoryScores, findings,
+    actualVisibilityStatus: "not_measured", discoveredContext, identityCandidates, categoryScores, findings,
   };
 }
