@@ -64,7 +64,7 @@ test("keeps Actual AI Visibility scoring independent from readiness", () => {
   const readinessScore = 91;
   const run = {
     error: null,
-    responseText: "No tested brand appears.",
+    responseText: "No tested brand appears.", surfaceType: "api_with_search", intent: "recommendation",
     analysis: { brandVisible: false, recommendationStatus: "absent", recommendationPosition: null },
   } as VisibilityEngineRun;
   const visibility = aggregateActualVisibility([run], 1);
