@@ -14,6 +14,7 @@ import {
   type ScanCompletion,
 } from "@/db/product";
 import {
+  businessContextForVisibility,
   runActualVisibility,
   type ActualVisibilityMeasurement,
 } from "@/lib/ai-visibility";
@@ -207,8 +208,7 @@ export async function POST(request: Request) {
             ...target,
             kind: "website",
             websiteUrl: pending.targetInput.websiteUrl,
-            category:
-              candidate.category || result.discoveredContext.category.value,
+            category: businessContextForVisibility(result.discoveredContext),
           },
           cacheKey,
           result,
@@ -279,7 +279,7 @@ export async function POST(request: Request) {
             kind: "brand" as const,
             name: item.name,
             description: item.evidence.join("; "),
-            category: context.offerings.value[0] || context.category.value,
+            category: businessContextForVisibility(context),
             aliases: [],
             country: context.markets.value[0] || "Global",
             websiteUrl: input.websiteUrl,
@@ -303,7 +303,7 @@ export async function POST(request: Request) {
         name: context.brand.value,
         websiteUrl: input.websiteUrl,
         aliases: [],
-        category: context.offerings.value[0] || context.category.value,
+        category: businessContextForVisibility(context),
         language: context.languages.value[0] || input.language,
         country: context.markets.value[0] || "Global",
         identityConfirmed: false,

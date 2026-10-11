@@ -358,6 +358,66 @@ test("authenticated API: entity discovery, topic mode, isolation, confirmation, 
       },
     );
     await t.test(
+      "URL visibility prompts use visible business context instead of SearchAction",
+      async () => {
+        const db = createFixture();
+        let providerCalls = 0;
+        globalThis.fetch = async (remote) => {
+          const address = String(remote);
+          if (address.includes("openrouter.ai")) {
+            providerCalls++;
+            return engineReply("A search-evidenced answer.");
+          }
+          return new Response(
+            address.endsWith("robots.txt")
+              ? "User-agent: *\nAllow: /"
+              : address.includes("sitemap")
+                ? '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"></urlset>'
+                : `<html lang="en"><head>
+                    <title>Northstar | Retail analytics</title>
+                    <meta name="description" content="Northstar provides retail analytics and inventory planning services.">
+                    <script type="application/ld+json">{"@context":"https://schema.org","@type":"WebSite","name":"Northstar","url":"https://northstar.example/","potentialAction":{"@type":"SearchAction","target":"https://northstar.example/?s={search_term_string}"}}</script>
+                  </head><body><h1>Retail analytics for modern stores</h1><p>We provide retail analytics and demand forecasting for modern retailers.</p><a href="/services/inventory-planning">Inventory planning</a></body></html>`,
+            {
+              headers: {
+                "Content-Type": address.includes("sitemap")
+                  ? "application/xml"
+                  : address.endsWith("robots.txt")
+                    ? "text/plain"
+                    : "text/html",
+              },
+            },
+          );
+        };
+        const res = await POST(
+          request({ url: "https://northstar.example" }),
+        );
+        const data = await readBody(res);
+        assert.equal(res.status, 201);
+        assert.equal(providerCalls, 3);
+        assert.equal(data.scan.engineRuns.length, 3);
+        assert.ok(data.scan.target?.category);
+        assert.ok(
+          data.scan.engineRuns
+            .filter((run) => run.intent !== "identity")
+            .every((run) => !run.prompt.includes("SearchAction")),
+        );
+        assert.equal(
+          db.prepare("SELECT COUNT(*) n FROM engine_runs WHERE prompt LIKE '%SearchAction%'").get()?.n,
+          0,
+        );
+        assert.equal(
+          db.prepare("SELECT category FROM scan_contexts").get()?.category,
+          "retail analytics and demand forecasting for modern retailers",
+        );
+        db.close();
+        globalThis.fetch = async (_url, init) => {
+          calls++;
+          return handler(JSON.parse(String(init?.body)));
+        };
+      },
+    );
+    await t.test(
       "conflicting website identity evidence requires confirmation and remains anchored to the URL",
       async () => {
         const db = createFixture();

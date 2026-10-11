@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { aggregateActualVisibility, analyzeVisibilityResponse, discoverWebsiteContext, discoverWebsiteIdentityCandidates, generateIntentPrompts, runActualVisibility, type DiscoveredSiteContext, type VisibilityEngineRun } from "../lib/ai-visibility";
+import { aggregateActualVisibility, analyzeVisibilityResponse, businessContextForVisibility, discoverWebsiteContext, discoverWebsiteIdentityCandidates, generateIntentPrompts, isTechnicalWebsiteVocabulary, runActualVisibility, type DiscoveredSiteContext, type VisibilityEngineRun } from "../lib/ai-visibility";
+import { generateTargetPrompts, type AnalysisTarget } from "../lib/analysis-target";
 import { decodeHtmlEntities, sanitizeProviderAnswer } from "../lib/answer-text";
 import type { EngineAdapter, EngineResponse } from "../lib/ai-engines/engine-adapter";
 import { OpenRouterEngineAdapter } from "../lib/ai-engines/openrouter-engine-adapter";
@@ -73,6 +74,159 @@ test("conflicting identities anchored on the submitted website remain ambiguous"
       finalUrl: "https://same.example/",
     }).map((item) => item.name),
     ["First Identity", "Second Identity"],
+  );
+});
+
+test("visible business content outranks SearchAction and other structured-data vocabulary", () => {
+  const html = `<html lang="en"><head>
+    <title>Northstar | Retail analytics for modern stores</title>
+    <meta name="description" content="Northstar provides retail analytics and inventory planning services.">
+    <script type="application/ld+json">{
+      "@context":"https://schema.org",
+      "@type":"WebSite",
+      "name":"Northstar",
+      "url":"https://northstar.example/",
+      "potentialAction":{"@type":"SearchAction","target":"https://northstar.example/?s={search_term_string}","query-input":"required name=search_term_string"},
+      "publisher":{"@type":"Organization","name":"Organization","description":"Northstar provides retail analytics and inventory planning services."},
+      "mainEntity":{"@type":"WebPage","category":"potentialAction"},
+      "hasOfferCatalog":{"@type":"ItemList","itemListElement":[
+        {"@type":"Product","name":"Organization"},
+        {"@type":"Service","name":"Demand forecasting"}
+      ]}
+    }</script>
+  </head><body>
+    <h1>Retail analytics for modern stores</h1>
+    <p>We provide retail analytics and demand forecasting for modern retailers.</p>
+    <nav><a href="/services/inventory-planning">Inventory planning</a></nav>
+    <section class="product-cards"><article><h2>Demand forecasting</h2></article></section>
+  </body></html>`;
+  const visibleText = "Northstar Retail analytics for modern stores We provide retail analytics and demand forecasting for modern retailers. Inventory planning Demand forecasting";
+  const discovered = discoverWebsiteContext({
+    sourceUrl: "https://northstar.example/",
+    finalUrl: "https://northstar.example/",
+    title: "Northstar | Retail analytics for modern stores",
+    description: "Northstar provides retail analytics and inventory planning services.",
+    htmlLang: "en",
+    html,
+    visibleText,
+  });
+  assert.equal(
+    discovered.category.value,
+    "retail analytics and demand forecasting for modern retailers",
+  );
+  assert.equal(discovered.category.evidence[0], "Visible homepage business copy");
+  assert.ok(discovered.category.confidence >= 80);
+  assert.ok(discovered.offerings.value.includes("Inventory planning"));
+  assert.ok(discovered.offerings.value.includes("Demand forecasting"));
+  for (const forbidden of [
+    "SearchAction",
+    "SearchAction services",
+    "WebSite",
+    "WebPage",
+    "Organization",
+    "potentialAction",
+    "publisher",
+    "mainEntity",
+  ]) {
+    assert.notEqual(discovered.category.value, forbidden);
+    assert.ok(!discovered.offerings.value.includes(forbidden));
+  }
+  const selected = businessContextForVisibility(discovered);
+  assert.ok(selected);
+  const target: AnalysisTarget = {
+    kind: "website",
+    input: "https://northstar.example/",
+    name: "Northstar",
+    websiteUrl: "https://northstar.example/",
+    aliases: [],
+    category: selected,
+    language: "en",
+    country: "Global",
+    identityConfirmed: false,
+  };
+  const prompts = generateTargetPrompts(target);
+  assert.equal(prompts.length, 3);
+  assert.ok(prompts.slice(1).every((prompt) => prompt.question.includes(selected)));
+  assert.ok(prompts.every((prompt) => !prompt.question.includes("SearchAction")));
+});
+
+test("technical or low-confidence context cannot create unbranded prompts", () => {
+  for (const value of [
+    "SearchAction",
+    "WebSite",
+    "Organization",
+    "potentialAction",
+    "mainEntityOfPage",
+    "SoftwareApplication",
+    "MedicalOrganization",
+    "og:title",
+    "meta tag",
+    "JSON-LD",
+    "<h1>",
+  ])
+    assert.equal(isTechnicalWebsiteVocabulary(value), true, value);
+
+  const html = `<html><head><title>Example</title><script type="application/ld+json">{"@type":"WebSite","potentialAction":{"@type":"SearchAction"}}</script></head><body><h1>Welcome</h1></body></html>`;
+  const discovered = discoverWebsiteContext({
+    sourceUrl: "https://example.test/",
+    finalUrl: "https://example.test/",
+    title: "Example",
+    description: "",
+    htmlLang: "en",
+    html,
+    visibleText: "Example Welcome",
+  });
+  assert.equal(discovered.category.value, "");
+  assert.equal(discovered.category.confidence, 0);
+  assert.deepEqual(discovered.offerings.value, []);
+  assert.equal(businessContextForVisibility(discovered), "");
+  assert.equal(
+    generateTargetPrompts({
+      kind: "website",
+      input: "https://example.test/",
+      name: "Example",
+      websiteUrl: "https://example.test/",
+      aliases: [],
+      category: "SearchAction",
+      language: "en",
+      country: "Global",
+      identityConfirmed: false,
+    }).length,
+    1,
+  );
+});
+
+test("Arabic production regression shape derives AI-news context from visible copy, not SearchAction", () => {
+  const visibleBusinessCopy = "أخبار وتحليلات الذكاء الاصطناعي باللغة العربية";
+  const html = `<html dir="rtl" lang="ar"><head>
+    <title>AI بالعربي | إيه آي بالعربي &#8211; أخبار الذكاء الاصطناعي باللغة العربية</title>
+    <script type="application/ld+json">{"@context":"https://schema.org","@type":"WebSite","name":"AI بالعربي","url":"https://aiarabic.com/","potentialAction":{"@type":"SearchAction","target":"https://aiarabic.com/?s={search_term_string}"}}</script>
+  </head><body><h1>أخبار الذكاء الاصطناعي باللغة العربية</h1><p>نقدم ${visibleBusinessCopy}.</p></body></html>`;
+  const discovered = discoverWebsiteContext({
+    sourceUrl: "https://aiarabic.com/",
+    finalUrl: "https://aiarabic.com/",
+    title: "AI بالعربي | إيه آي بالعربي – أخبار الذكاء الاصطناعي باللغة العربية",
+    description: "",
+    htmlLang: "ar",
+    html,
+    visibleText: `AI بالعربي أخبار الذكاء الاصطناعي باللغة العربية نقدم ${visibleBusinessCopy}`,
+  });
+  assert.equal(discovered.category.value, visibleBusinessCopy);
+  assert.ok(!businessContextForVisibility(discovered).includes("SearchAction"));
+  assert.ok(
+    generateTargetPrompts({
+      kind: "website",
+      input: "https://aiarabic.com/",
+      name: discovered.brand.value,
+      websiteUrl: "https://aiarabic.com/",
+      aliases: ["إيه آي بالعربي"],
+      category: businessContextForVisibility(discovered),
+      language: "ar",
+      country: "Global",
+      identityConfirmed: false,
+    })
+      .slice(1)
+      .every((prompt) => !prompt.question.includes("SearchAction")),
   );
 });
 

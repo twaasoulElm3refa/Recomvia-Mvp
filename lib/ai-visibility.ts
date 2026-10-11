@@ -189,6 +189,188 @@ function metaContent(html: string, key: string) {
   return "";
 }
 
+const SCHEMA_VOCABULARY = new Set(
+  [
+    "action",
+    "article",
+    "author",
+    "brand",
+    "blogposting",
+    "breadcrumblist",
+    "contactpoint",
+    "faqpage",
+    "itemlist",
+    "listitem",
+    "localbusiness",
+    "mainentity",
+    "mainentityofpage",
+    "newsarticle",
+    "organization",
+    "offer",
+    "person",
+    "postaladdress",
+    "potentialaction",
+    "product",
+    "publisher",
+    "sameas",
+    "searchaction",
+    "searchresultspage",
+    "service",
+    "softwareapplication",
+    "thing",
+    "website",
+    "webpage",
+  ].map((value) => value.toLowerCase()),
+);
+
+const HTML_VOCABULARY = new Set([
+  "a",
+  "article",
+  "aside",
+  "body",
+  "button",
+  "div",
+  "footer",
+  "form",
+  "h1",
+  "h2",
+  "h3",
+  "head",
+  "header",
+  "html",
+  "img",
+  "input",
+  "link",
+  "main",
+  "meta",
+  "nav",
+  "script",
+  "section",
+  "span",
+  "style",
+  "title",
+]);
+
+const GENERIC_PAGE_COPY =
+  /^(?:home|welcome|welcome to|about|about us|company|our company|services?|products?|solutions?|features?|learn more|read more|get started|contact|contact us|who we are|what we do|الرئيسية|مرحب[اأ]|من نحن|عن الشركة|خدماتنا|منتجاتنا|حلولنا|اعرف المزيد|اقرأ المزيد|تواصل معنا)$/iu;
+
+/** Reject schema, markup and implementation vocabulary without relying only on a list. */
+export function isTechnicalWebsiteVocabulary(value: string) {
+  const clean = decodeHtmlEntities(value).trim();
+  if (!clean) return true;
+  const compact = clean.toLocaleLowerCase().replace(/[\s_.:/-]+/g, "");
+  if (SCHEMA_VOCABULARY.has(compact) || HTML_VOCABULARY.has(compact))
+    return true;
+  const vocabularyTokens = clean
+    .split(/[^\p{L}\p{N}]+/u)
+    .map((token) => token.toLocaleLowerCase())
+    .filter(Boolean);
+  if (
+    vocabularyTokens.some(
+      (token) =>
+        SCHEMA_VOCABULARY.has(token) &&
+        !["brand", "product", "service"].includes(token),
+    )
+  )
+    return true;
+  if (/^https?:\/\/schema\.org\//i.test(clean)) return true;
+  if (/^(?:og|twitter):[a-z:_-]+$/i.test(clean)) return true;
+  if (/^<\/?[a-z][^>]*>$/i.test(clean)) return true;
+  // Schema types and properties commonly use a single PascalCase/camelCase token.
+  if (
+    !/\s/u.test(clean) &&
+    (/^[a-z]+(?:[A-Z][a-z\d]*)+$/u.test(clean) ||
+      /^[A-Z][a-z\d]+(?:[A-Z][A-Za-z\d]*)+$/u.test(clean) ||
+      /^[A-Z][A-Za-z\d]*(?:Action|Page|Article|Posting|List|Item|Address|Point|Property)$/u.test(
+        clean,
+      ))
+  )
+    return true;
+  const implementationTerm =
+    /\b(?:schema(?:\.org)?|json[ -]?ld|structured data|html(?: tag)?|meta(?:data| tag)?|canonical(?: url)?|open graph|hreflang|robots\.txt|xml sitemap|dom|css selector|http status)\b/iu;
+  const genuineService =
+    /\b(?:services?|consulting|consultancy|agency|audits?|optimization|implementation|development|platform|software|solutions?)\b|(?:خدمات|استشارات|وكالة|تدقيق|تحسين|تطوير|منصة|برمجيات|حلول)/iu;
+  return implementationTerm.test(clean) && !genuineService.test(clean);
+}
+
+export function isBusinessContextCandidate(value: string) {
+  const clean = decodeHtmlEntities(value).replace(/\s+/g, " ").trim();
+  if (
+    clean.length < 3 ||
+    clean.length > 140 ||
+    GENERIC_PAGE_COPY.test(clean) ||
+    isTechnicalWebsiteVocabulary(clean) ||
+    !/[\p{L}]/u.test(clean)
+  )
+    return false;
+  return clean.split(/\s+/).length <= 18;
+}
+
+function visibleTextFromFragment(value: string) {
+  return decodeHtmlEntities(
+    value
+      .replace(/<script\b[\s\S]*?<\/script>/gi, " ")
+      .replace(/<style\b[\s\S]*?<\/style>/gi, " ")
+      .replace(/<[^>]+>/g, " ")
+      .replace(/\s+/g, " ")
+      .trim(),
+  );
+}
+
+function tagTexts(html: string, tagPattern: string) {
+  const values: string[] = [];
+  const expression = new RegExp(
+    `<(?:${tagPattern})\\b[^>]*>([\\s\\S]*?)<\\/(?:${tagPattern})>`,
+    "gi",
+  );
+  for (const match of html.matchAll(expression)) {
+    const text = visibleTextFromFragment(match[1]);
+    if (text) values.push(text);
+  }
+  return unique(values);
+}
+
+function removeBrandPrefix(value: string, brand: string) {
+  const escaped = brand.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return value
+    .replace(new RegExp(`^${escaped}\\s*(?:[-–—|:]\\s*)?`, "iu"), "")
+    .replace(
+      /^(?:we (?:provide|offer|build|help|specialize in)|our (?:company|business) (?:provides|offers)|a |an |the |نقدم|نوفر|نساعد|شركة متخصصة في|منصة متخصصة في)\s+/iu,
+      "",
+    )
+    .replace(/[.!?،]+$/u, "")
+    .trim();
+}
+
+function visibleBusinessCandidates(html: string, brand: string) {
+  const paragraphCandidates = tagTexts(html, "p")
+    .filter((value) =>
+      /\b(?:provide|offer|speciali[sz]e|platform for|software for|services? for|helps?|solutions? for)\b|(?:نقدم|نوفر|متخصص|منصة|برمجيات|خدمات|حلول|نساعد)/iu.test(
+        value,
+      ),
+    )
+    .map((value) => ({
+      value: removeBrandPrefix(value, brand),
+      confidence: 92,
+      evidence: "Visible homepage business copy",
+    }));
+  const headings = [
+    ...tagTexts(html, "h1").map((value) => ({
+      value: removeBrandPrefix(value, brand),
+      confidence: 88,
+      evidence: "Homepage H1",
+    })),
+    ...tagTexts(html, "h2|h3").map((value) => ({
+      value: removeBrandPrefix(value, brand),
+      confidence: 80,
+      evidence: "Relevant homepage H2/H3",
+    })),
+  ];
+  return [...paragraphCandidates, ...headings].filter((candidate) =>
+    isBusinessContextCandidate(candidate.value),
+  );
+}
+
 function identityKey(value: string) {
   return decodeHtmlEntities(value)
     .normalize("NFKC")
@@ -301,21 +483,39 @@ function anchorOfferings(html: string) {
   for (const match of html.matchAll(
     /<a\b[^>]*href\s*=\s*["'][^"']*\/(?:products?|services?|solutions?|platform|features?)(?:[\/?#"'][^"']*)?["'][^>]*>([\s\S]*?)<\/a>/gi,
   )) {
-    const text = match[1]
-      .replace(/<[^>]+>/g, " ")
-      .replace(/&amp;/gi, "&")
-      .replace(/\s+/g, " ")
-      .trim();
+    const text = visibleTextFromFragment(match[1]);
     if (
-      text.length >= 3 &&
       text.length <= 80 &&
-      !/^(products?|services?|solutions?|platform|features?|learn more)$/i.test(
-        text,
-      )
+      isBusinessContextCandidate(text)
     )
       values.push(text);
   }
   return unique(values).slice(0, 8);
+}
+
+function serviceCardOfferings(html: string) {
+  const values: string[] = [];
+  for (const match of html.matchAll(
+    /<(?:article|div|section)\b[^>]*(?:class|id)\s*=\s*["'][^"']*(?:service|product|solution|offering)[^"']*["'][^>]*>([\s\S]*?)<\/(?:article|div|section)>/gi,
+  )) {
+    const headings = tagTexts(match[1], "h2|h3|h4");
+    for (const heading of headings)
+      if (heading.length <= 80 && isBusinessContextCandidate(heading))
+        values.push(heading);
+  }
+  return unique(values).slice(0, 8);
+}
+
+function visiblySupports(value: string, visibleText: string) {
+  const normalize = (text: string) =>
+    decodeHtmlEntities(text)
+      .normalize("NFKC")
+      .toLocaleLowerCase()
+      .replace(/[^\p{L}\p{N}]+/gu, " ")
+      .trim();
+  const candidate = normalize(value);
+  const visible = normalize(visibleText);
+  return Boolean(candidate && visible.includes(candidate));
 }
 
 function explicitCompetitors(text: string, brand: string) {
@@ -362,36 +562,38 @@ export function discoverWebsiteContext(
   );
   const organizationName = organizationIdentity?.name || "";
   let schemaDescription = "";
-  let schemaCategory = "";
+  const schemaCategories: string[] = [];
   const schemaOfferings: string[] = [];
   const schemaMarkets: string[] = [];
   walkJson(structured, (object) => {
     const types = schemaTypes(object["@type"]);
-    if (!schemaDescription && typeof object.description === "string")
-      schemaDescription = object.description.trim();
-    if (!schemaCategory) {
-      const category =
-        typeof object.category === "string"
-          ? object.category
-          : types.find(
-              (type) =>
-                ![
-                  "Organization",
-                  "WebSite",
-                  "WebPage",
-                  "BreadcrumbList",
-                  "FAQPage",
-                ].includes(type),
-            );
-      if (category) schemaCategory = category;
-    }
+    const organizationNode = types.some((type) =>
+      ["Organization", "Corporation", "LocalBusiness", "Brand"].includes(
+        type,
+      ),
+    );
+    if (
+      organizationNode &&
+      !schemaDescription &&
+      typeof object.description === "string" &&
+      visiblySupports(object.description, input.visibleText)
+    )
+      schemaDescription = decodeHtmlEntities(object.description).trim();
+    if (
+      typeof object.category === "string" &&
+      isBusinessContextCandidate(object.category) &&
+      visiblySupports(object.category, input.visibleText)
+    )
+      schemaCategories.push(decodeHtmlEntities(object.category).trim());
     if (
       ["Product", "Service", "SoftwareApplication", "Offer"].some((type) =>
         types.includes(type),
       ) &&
-      typeof object.name === "string"
+      typeof object.name === "string" &&
+      isBusinessContextCandidate(object.name) &&
+      visiblySupports(object.name, input.visibleText)
     )
-      schemaOfferings.push(object.name);
+      schemaOfferings.push(decodeHtmlEntities(object.name).trim());
     for (const field of [object.areaServed, object.addressCountry]) {
       if (typeof field === "string") schemaMarkets.push(field);
       else if (
@@ -415,12 +617,19 @@ export function discoverWebsiteContext(
     siteName ||
     titleCandidate ||
     hostnameBrand(input.finalUrl);
-  const description =
-    input.description || schemaDescription || clip(input.visibleText, 260);
-  const offerings = unique([
-    ...schemaOfferings,
-    ...anchorOfferings(input.html),
+  const visibleCandidates = visibleBusinessCandidates(input.html, brand);
+  const navigationOfferings = anchorOfferings(input.html);
+  const cardOfferings = serviceCardOfferings(input.html);
+  const visibleOfferings = unique([
+    ...navigationOfferings,
+    ...cardOfferings,
   ]);
+  const offerings = unique([...visibleOfferings, ...schemaOfferings]);
+  const description =
+    input.description ||
+    visibleCandidates[0]?.value ||
+    schemaDescription ||
+    clip(input.visibleText, 260);
   const alternateLanguages = [
     ...input.html.matchAll(/hreflang\s*=\s*["']([^"']+)["']/gi),
   ].map((match) => match[1].split("-")[0]);
@@ -444,13 +653,45 @@ export function discoverWebsiteContext(
     .map((part) => part.trim())
     .filter(Boolean);
   const titleSubject = titleParts.length > 1 ? titleParts.at(-1)! : "";
-  const category = decodeHtmlEntities(
-    schemaCategory ||
-      offerings[0] ||
-      titleSubject ||
-      description.split(/[.!?،]/)[0]?.slice(0, 100) ||
-      "business services",
+  const metaDescriptionSubject = removeBrandPrefix(
+    input.description.split(/[.!?،]/)[0]?.slice(0, 140) || "",
+    brand,
   );
+  const categoryCandidates = [
+    ...visibleCandidates,
+    {
+      value: titleSubject,
+      confidence: 76,
+      evidence: "Meta title business phrase",
+    },
+    {
+      value: metaDescriptionSubject,
+      confidence: 72,
+      evidence: "Meta description business phrase",
+    },
+    ...navigationOfferings.map((value) => ({
+      value,
+      confidence: 70,
+      evidence: "Product/service navigation label",
+    })),
+    ...cardOfferings.map((value) => ({
+      value,
+      confidence: 68,
+      evidence: "Visible service/product card",
+    })),
+    {
+      value: schemaDescription,
+      confidence: 62,
+      evidence: "Visible Organization description corroborated by structured data",
+    },
+    ...schemaCategories.map((value) => ({
+      value,
+      confidence: 60,
+      evidence: "Visible category corroborated by structured data",
+    })),
+  ].filter((candidate) => isBusinessContextCandidate(candidate.value));
+  const selectedCategory = categoryCandidates[0] || null;
+  const category = selectedCategory?.value || "";
   const competitors = explicitCompetitors(input.visibleText, brand);
 
   return {
@@ -486,23 +727,23 @@ export function discoverWebsiteContext(
     },
     category: {
       value: category,
-      confidence: schemaCategory ? 82 : offerings.length ? 68 : 42,
-      evidence: [
-        schemaCategory
-          ? "Structured data type/category"
-          : offerings.length
-            ? "Detected offering"
-            : "Description inference",
-      ],
+      confidence: selectedCategory?.confidence || 0,
+      evidence: selectedCategory
+        ? [selectedCategory.evidence]
+        : ["No reliable business context found"],
     },
     offerings: {
       value: offerings,
-      confidence: schemaOfferings.length ? 86 : offerings.length ? 65 : 25,
-      evidence: schemaOfferings.length
-        ? ["Product or Service structured data"]
-        : offerings.length
-          ? ["Product/service links"]
-          : ["No explicit offerings found"],
+      confidence: visibleOfferings.length
+        ? 76
+        : schemaOfferings.length
+          ? 60
+          : 0,
+      evidence: visibleOfferings.length
+        ? ["Visible product/service navigation or cards"]
+        : schemaOfferings.length
+          ? ["Visible offering corroborated by structured data"]
+          : ["No reliable offerings found"],
     },
     languages: {
       value: languages,
@@ -542,6 +783,18 @@ export function discoverWebsiteContext(
   };
 }
 
+export function businessContextForVisibility(
+  context: DiscoveredSiteContext,
+): string {
+  const candidates = [
+    ...(context.offerings.confidence >= 60 ? context.offerings.value : []),
+    ...(context.category.confidence >= 60 ? [context.category.value] : []),
+  ];
+  return (
+    candidates.find((value) => isBusinessContextCandidate(value))?.trim() || ""
+  );
+}
+
 function isArabic(language: string) {
   return language.toLowerCase().startsWith("ar");
 }
@@ -551,11 +804,9 @@ export function generateIntentPrompts(
 ): IntentPrompt[] {
   const language = context.languages.value[0] || "en";
   const country = context.markets.value[0] || "Global";
-  const offering =
-    context.offerings.value[0] ||
-    context.category.value ||
-    context.description.value.split(/[.!?،]/)[0];
-  const subject = clip(offering, 110);
+  const businessContext = businessContextForVisibility(context);
+  if (!businessContext) return [];
+  const subject = clip(businessContext, 110);
   const questions = isArabic(language)
     ? [
         ["discovery", `ما الشركات التي تقدم ${subject} في سوق ${country}؟`],
