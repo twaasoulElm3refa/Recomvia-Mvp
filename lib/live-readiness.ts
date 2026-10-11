@@ -50,8 +50,7 @@ function assertPublicUrl(url: URL) {
   if (url.port && url.port !== "80" && url.port !== "443") throw new Error("Only standard web ports can be analyzed.");
   const host = url.hostname.toLowerCase().replace(/\.$/, "");
   if (!host.includes(".") || host === "localhost" || host.endsWith(".localhost") || host.endsWith(".local") ||
-      host.endsWith(".internal") || host.endsWith(".lan") || host === "::1" || host.startsWith("fc") ||
-      host.startsWith("fd") || host.startsWith("fe80:") || blockedIpv4(host)) {
+      host.endsWith(".internal") || host.endsWith(".lan") || host.includes(":") || blockedIpv4(host)) {
     throw new Error("This address is not a public website.");
   }
 }

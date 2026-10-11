@@ -13,6 +13,20 @@ export type FaqEntry = {
 
 export const faqEntries: FaqEntry[] = [
   {
+    id: "personal-brand-analysis", category: "Measurement",
+    question: "Can I analyze my name or personal brand without a website?", questionAr: "هل يمكن تحليل اسمي أو علامتي الشخصية دون موقع؟",
+    answer: "Yes. Enter a person's or brand's name. Recomvia searches for a sourced identity and asks you to choose when names are ambiguous. Named identity answers are kept separate from unbranded visibility tests. A website audit is not applicable when no website is crawled. Identity descriptions still need factual review.",
+    answerAr: "نعم. أدخل اسم الشخص أو العلامة. تبحث Recomvia عن هوية مدعومة بمصادر وتطلب منك الاختيار عند تشابه الأسماء. تفصل إجابات التعريف بالاسم عن اختبارات الظهور دون تلقين الاسم. الفحص التقني غير منطبق عندما لا نفحص موقعًا، وتبقى معلومات التعريف بحاجة إلى مراجعة صحتها.",
+    keywords: ["personal brand", "my name", "without website", "person", "اسمي", "اسم شخص", "علامة شخصية", "دون موقع", "بدون موقع", "تشابه الأسماء"]
+  },
+  {
+    id: "topic-exploration", category: "Measurement",
+    question: "Can I analyze a topic or search term?", questionAr: "هل يمكن تحليل موضوع أو مصطلح؟",
+    answer: "Yes. A topic analysis shows cited sources and names appearing in the stored API answer sample. A general topic has no personal or brand score. The results are not a global ranking. Name and topic analysis requires an activated AI integration; missing results are never replaced with invented scores.",
+    answerAr: "نعم. يعرض تحليل الموضوع المصادر والأسماء الواردة في عينة إجابات API المحفوظة. لا يحصل الموضوع العام على درجة شخص أو علامة، والنتائج ليست ترتيبًا عالميًا. يتطلب تحليل الأسماء والموضوعات تفعيل ربط الذكاء الاصطناعي، ولا تُستبدل النتائج الناقصة بدرجات مختلقة.",
+    keywords: ["topic", "keyword", "search term", "موضوع", "مصطلح", "كلمة مفتاحية", "تحليل موضوع"]
+  },
+  {
     id:"what-is-recomvia",category:"Platform",question:"What is Recomvia?",questionAr:"ما هي Recomvia؟",
     answer:"Recomvia is an AI Visibility Optimization Platform. It measures how AI-powered search and answer systems find, understand, cite, and recommend a brand, explains the causes, then connects findings to automated, assisted, or expert improvements.",
     answerAr:"«Recomvia» منصة لتحسين الظهور داخل محركات البحث والإجابة المعتمدة على الذكاء الاصطناعي، تقيس كيف تكتشف الأنظمة العلامة وتفهمها وتستشهد بها وتوصي بها، ثم تفسر الأسباب وتربطها بتحسين آلي أو بموافقة العميل أو بتدخل خبير.",
@@ -62,8 +76,8 @@ export const faqEntries: FaqEntry[] = [
   },
   {
     id:"score-method",category:"Measurement",question:"How is the AI Recommendation Score calculated?",questionAr:"كيف تُحسب درجة التوصية بالعلامة؟",
-    answer:"The score combines documented observed outcomes and separately reported readiness dimensions. Inputs can include mentions, recommendations, citations, position, high-intent coverage, cross-engine consistency, entity authority, content readiness, technical AEO, and language-market fit. The methodology, weights, sample size, and confidence must remain visible and versioned.",
-    answerAr:"تجمع الدرجة بين نتائج الظهور الفعلية الموثقة ومحاور الجاهزية التي تعرض بصورة مستقلة، وقد تشمل الظهور والتوصية والاستشهاد والموقع وتغطية الأسئلة عالية النية والاتساق بين المحركات، إلى جانب السلطة والكيان والمحتوى والجاهزية التقنية وملاءمة اللغة والسوق، مع إظهار المنهجية والأوزان وحجم العينة والثقة.",
+    answer:"In entity-visibility-v1, the visibility percentage is the share of completed search-evidenced unbranded answers that mention the selected name. Named identity questions are excluded. Topics have no brand score. Website readiness is reported separately. This is a small observed sample, not a calibrated recommendation probability or a consumer-app ranking. Legacy reports retain their original methodology and score.",
+    answerAr:"في منهجية entity-visibility-v1، نسبة الظهور هي حصة الإجابات المكتملة المدعومة بالبحث التي تذكر الاسم المختار دون ذكره مسبقًا في السؤال. تُستبعد أسئلة التعريف بالاسم، ولا تُمنح الموضوعات درجة علامة. تُعرض جاهزية الموقع مستقلة. هذه عينة رصد صغيرة وليست احتمالًا موثوقًا للتوصية أو ترتيبًا في تطبيقات الجمهور. تحتفظ التقارير السابقة بمنهجيتها ودرجاتها الأصلية.",
     keywords:["score","calculate","methodology","weight","درجة","تحسب","منهجية","اوزان"],relatedArticle:"ai-visibility-score-methodology"
   },
   {

@@ -1,4 +1,7 @@
-export type EngineSurfaceType = "api_with_search" | "api_without_search" | "consumer_experience";
+export type EngineSurfaceType =
+  | "api_with_search"
+  | "api_without_search"
+  | "consumer_experience";
 
 export type EngineCitation = {
   url: string;
@@ -25,6 +28,7 @@ export type EngineRunRequest = {
   language: string;
   country: string;
   useSearch: boolean;
+  maxOutputTokens?: number;
 };
 
 export type EngineProviderError = {
