@@ -1,5 +1,9 @@
 import { normalizeWebsiteInput } from "./live-readiness";
-import type { DiscoveredSiteContext, IntentPrompt } from "./ai-visibility";
+import {
+  isBusinessContextCandidate,
+  type DiscoveredSiteContext,
+  type IntentPrompt,
+} from "./ai-visibility";
 import type { EngineResponse } from "./ai-engines/engine-adapter";
 import { decodeHtmlEntities } from "./answer-text";
 
@@ -316,10 +320,12 @@ export function generateTargetPrompts(target: AnalysisTarget): IntentPrompt[] {
     .replace(/[|/\\:;,_–—-]+/g, " ")
     .replace(/\s+/g, " ")
     .trim();
+  if (subject && !isBusinessContextCandidate(subject)) return prompts;
   const stillLeaks = names.some((name) => {
     const token = normalized(name);
     return token.length >= 2 && normalized(subject).includes(token);
   });
+  if ((!subject || stillLeaks) && target.kind === "website") return prompts;
   if (!subject || stillLeaks)
     subject = ar ? "هذا المجال" : target.kind === "person" ? "this field" : "this category";
   const audience =
