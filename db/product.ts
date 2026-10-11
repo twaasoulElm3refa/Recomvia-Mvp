@@ -673,7 +673,7 @@ export async function claimIdentityChoice(
 
 export type ScanCompletion = Omit<
   LiveReadinessResult,
-  "readinessScore" | "finalUrl" | "httpStatus"
+  "readinessScore" | "finalUrl" | "httpStatus" | "identityCandidates"
 > & {
   readinessScore: number | null;
   finalUrl: string | null;

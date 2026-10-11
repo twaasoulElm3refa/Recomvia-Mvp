@@ -8,6 +8,7 @@ import type {
   EngineSurfaceType,
   EngineUsage,
 } from "./ai-engines/engine-adapter";
+import { decodeHtmlEntities, sanitizeProviderAnswer } from "./answer-text";
 
 export type ConfidenceValue<T> = {
   value: T;
@@ -113,6 +114,11 @@ type WebsiteContextInput = {
   visibleText: string;
 };
 
+export type WebsiteIdentityCandidate = {
+  name: string;
+  evidence: string[];
+};
+
 function unique(values: string[]) {
   const seen = new Set<string>();
   return values
@@ -176,9 +182,118 @@ function metaContent(html: string, key: string) {
       .match(/(?:name|property)\s*=\s*["']([^"']+)["']/i)?.[1]
       ?.toLowerCase();
     if (name !== key.toLowerCase()) continue;
-    return tag.match(/content\s*=\s*["']([^"']*)["']/i)?.[1]?.trim() || "";
+    return decodeHtmlEntities(
+      tag.match(/content\s*=\s*["']([^"']*)["']/i)?.[1]?.trim() || "",
+    );
   }
   return "";
+}
+
+function identityKey(value: string) {
+  return decodeHtmlEntities(value)
+    .normalize("NFKC")
+    .toLocaleLowerCase()
+    .replace(/[\p{P}\p{Z}\p{M}]/gu, "");
+}
+
+function sameWebsite(value: unknown, finalUrl: string) {
+  if (typeof value !== "string") return false;
+  try {
+    const candidate = new URL(value, finalUrl).hostname
+      .toLowerCase()
+      .replace(/^www\./, "");
+    const submitted = new URL(finalUrl).hostname
+      .toLowerCase()
+      .replace(/^www\./, "");
+    return candidate === submitted;
+  } catch {
+    return false;
+  }
+}
+
+/** Resolve a website only from evidence attached to the submitted domain. */
+export function discoverWebsiteIdentityCandidates(
+  input: Pick<WebsiteContextInput, "html" | "title" | "finalUrl">,
+): WebsiteIdentityCandidate[] {
+  const anchoredOrganizations: WebsiteIdentityCandidate[] = [];
+  const unanchoredOrganizations: WebsiteIdentityCandidate[] = [];
+  walkJson(jsonLdObjects(input.html), (object) => {
+    const types = schemaTypes(object["@type"]);
+    if (
+      !types.some((type) =>
+        ["Organization", "Corporation", "LocalBusiness", "Brand"].includes(
+          type,
+        ),
+      ) ||
+      typeof object.name !== "string" ||
+      !object.name.trim()
+    )
+      return;
+    const references = [
+      object.url,
+      object["@id"],
+      ...(Array.isArray(object.sameAs) ? object.sameAs : [object.sameAs]),
+    ];
+    const hasReference = references.some(
+      (value) => typeof value === "string" && value.trim(),
+    );
+    const anchored = references.some((value) =>
+      sameWebsite(value, input.finalUrl),
+    );
+    if (hasReference && !anchored) return;
+    (anchored ? anchoredOrganizations : unanchoredOrganizations).push({
+      name: decodeHtmlEntities(object.name).trim(),
+      evidence: [
+        anchored
+          ? `Organization structured data anchored to ${new URL(input.finalUrl).hostname}`
+          : "Unanchored Organization structured data",
+      ],
+    });
+  });
+
+  const siteName =
+    metaContent(input.html, "og:site_name") ||
+    metaContent(input.html, "application-name");
+  const titleName = decodeHtmlEntities(input.title)
+    .split(/\s+[|\u2013\u2014-]\s+/)[0]
+    ?.trim();
+  const directPageNames = new Set(
+    [siteName, titleName].filter(Boolean).map((name) => identityKey(name!)),
+  );
+  const corroboratedOrganizations = unanchoredOrganizations
+    .filter((candidate) => directPageNames.has(identityKey(candidate.name)))
+    .map((candidate) => ({
+      ...candidate,
+      evidence: ["Organization structured data corroborated by submitted page"],
+    }));
+  const directSignals: WebsiteIdentityCandidate[] = [
+    ...anchoredOrganizations,
+    ...corroboratedOrganizations,
+    ...(siteName ? [{ name: siteName, evidence: ["og:site_name"] }] : []),
+    ...(!siteName && titleName
+      ? [{ name: titleName, evidence: ["Page title on submitted domain"] }]
+      : []),
+  ];
+  const candidates = directSignals.length
+    ? directSignals
+    : unanchoredOrganizations.length
+      ? [unanchoredOrganizations[0]]
+      : [
+          {
+            name: hostnameBrand(input.finalUrl),
+            evidence: ["Submitted hostname"],
+          },
+        ];
+  const merged = new Map<string, WebsiteIdentityCandidate>();
+  for (const candidate of candidates) {
+    const key = identityKey(candidate.name);
+    if (!key) continue;
+    const existing = merged.get(key);
+    if (existing)
+      existing.evidence = unique([...existing.evidence, ...candidate.evidence]);
+    else merged.set(key, { ...candidate });
+  }
+  return [...merged.values()];
 }
 
 function anchorOfferings(html: string) {
@@ -239,23 +354,19 @@ export function discoverWebsiteContext(
   input: WebsiteContextInput,
 ): DiscoveredSiteContext {
   const structured = jsonLdObjects(input.html);
-  let organizationName = "";
+  const identities = discoverWebsiteIdentityCandidates(input);
+  const organizationIdentity = identities.find((candidate) =>
+    candidate.evidence.some((evidence) =>
+      evidence.startsWith("Organization structured data"),
+    ),
+  );
+  const organizationName = organizationIdentity?.name || "";
   let schemaDescription = "";
   let schemaCategory = "";
   const schemaOfferings: string[] = [];
   const schemaMarkets: string[] = [];
   walkJson(structured, (object) => {
     const types = schemaTypes(object["@type"]);
-    if (
-      !organizationName &&
-      types.some((type) =>
-        ["Organization", "Corporation", "LocalBusiness", "Brand"].includes(
-          type,
-        ),
-      ) &&
-      typeof object.name === "string"
-    )
-      organizationName = object.name.trim();
     if (!schemaDescription && typeof object.description === "string")
       schemaDescription = object.description.trim();
     if (!schemaCategory) {
@@ -295,8 +406,11 @@ export function discoverWebsiteContext(
   const siteName =
     metaContent(input.html, "og:site_name") ||
     metaContent(input.html, "application-name");
-  const titleCandidate = input.title.split(/\s+[|—–-]\s+/)[0]?.trim() || "";
+  const titleCandidate =
+    decodeHtmlEntities(input.title).split(/\s+[|\u2013\u2014-]\s+/)[0]?.trim() ||
+    "";
   const brand =
+    identities[0]?.name ||
     organizationName ||
     siteName ||
     titleCandidate ||
@@ -325,17 +439,24 @@ export function discoverWebsiteContext(
     ...schemaMarkets,
     ...(inferredCountry ? [inferredCountry] : ["Global"]),
   ]);
-  const category =
+  const titleParts = decodeHtmlEntities(input.title)
+    .split(/\s+[|\u2013\u2014-]\s+/)
+    .map((part) => part.trim())
+    .filter(Boolean);
+  const titleSubject = titleParts.length > 1 ? titleParts.at(-1)! : "";
+  const category = decodeHtmlEntities(
     schemaCategory ||
-    offerings[0] ||
-    description.split(/[.!?،]/)[0]?.slice(0, 100) ||
-    "business services";
+      offerings[0] ||
+      titleSubject ||
+      description.split(/[.!?،]/)[0]?.slice(0, 100) ||
+      "business services",
+  );
   const competitors = explicitCompetitors(input.visibleText, brand);
 
   return {
     brand: {
       value: brand,
-      confidence: organizationName
+      confidence: organizationIdentity
         ? 94
         : siteName
           ? 88
@@ -343,8 +464,8 @@ export function discoverWebsiteContext(
             ? 72
             : 55,
       evidence: [
-        organizationName
-          ? "Organization structured data"
+        organizationIdentity
+          ? organizationIdentity.evidence[0]
           : siteName
             ? "og:site_name"
             : titleCandidate
@@ -738,6 +859,14 @@ export async function runActualVisibility(input: {
         country: prompt.country,
         useSearch: true,
       });
+      response = {
+        ...response,
+        responseText: response.responseText
+          ? sanitizeProviderAnswer(response.responseText, {
+              decodeEntities: true,
+            }) || null
+          : null,
+      };
     } catch (error) {
       response = {
         provider: input.adapter.provider,

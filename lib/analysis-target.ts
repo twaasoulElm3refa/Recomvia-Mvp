@@ -1,6 +1,7 @@
 import { normalizeWebsiteInput } from "./live-readiness";
 import type { DiscoveredSiteContext, IntentPrompt } from "./ai-visibility";
 import type { EngineResponse } from "./ai-engines/engine-adapter";
+import { decodeHtmlEntities } from "./answer-text";
 
 export const TARGET_METHODOLOGY_VERSION = "entity-visibility-v1";
 export type TargetKind = "website" | "person" | "brand" | "topic";
@@ -98,7 +99,9 @@ INPUT_DATA: ${JSON.stringify({ input: input.input, requestedKind: input.kind, cl
 }
 
 function short(value: unknown, max: number) {
-  return typeof value === "string" ? value.trim().slice(0, max) : "";
+  return typeof value === "string"
+    ? decodeHtmlEntities(value).trim().slice(0, max)
+    : "";
 }
 
 export function parseTargetDiscovery(
@@ -280,25 +283,45 @@ export function generateTargetPrompts(target: AnalysisTarget): IntentPrompt[] {
         : `What do you know about the ${target.kind === "person" ? "person" : "brand"} ${target.name} in ${target.category || "an unspecified field"}? Distinguish namesakes, cite sources and state uncertainty.`,
     ),
   ];
-  const subject = target.category.trim();
   const normalized = (s: string) =>
     s
       .normalize("NFKC")
       .toLocaleLowerCase()
       .replace(/[\p{P}\p{Z}\p{M}]/gu, "");
-  // Skip unbranded measurement if its supposedly generic topic leaks the entity name.
   const names = [
     target.name,
-    ...(target.kind === "website" ? [] : [target.input]),
+    target.input,
     ...target.aliases,
   ].filter(Boolean);
-  if (
-    !subject ||
-    names.some((name) =>
-      normalized(`${subject} ${target.country}`).includes(normalized(name)),
-    )
-  )
-    return prompts;
+  if (target.websiteUrl) {
+    try {
+      const host = new URL(target.websiteUrl).hostname.replace(/^www\./, "");
+      names.push(host, host.split(".")[0].replace(/[-_]+/g, " "));
+    } catch {
+      /* Invalid URLs cannot be introduced through the validated target flow. */
+    }
+  }
+  const escaped = (value: string) =>
+    value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  let subject = decodeHtmlEntities(target.category).trim();
+  // The crawled category can contain the site or entity name. Remove those
+  // references instead of cancelling the required unbranded measurement.
+  for (const name of [...new Set(names)].sort((a, b) => b.length - a.length)) {
+    const clean = decodeHtmlEntities(name).trim();
+    if (!clean || /^[a-z][a-z\d+.-]*:\/\//i.test(clean)) continue;
+    const pattern = clean.split(/\s+/).map(escaped).join("\\s+");
+    subject = subject.replace(new RegExp(pattern, "giu"), " ");
+  }
+  subject = subject
+    .replace(/[|/\\:;,_–—-]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  const stillLeaks = names.some((name) => {
+    const token = normalized(name);
+    return token.length >= 2 && normalized(subject).includes(token);
+  });
+  if (!subject || stillLeaks)
+    subject = ar ? "هذا المجال" : target.kind === "person" ? "this field" : "this category";
   const audience =
     target.kind === "person"
       ? ar

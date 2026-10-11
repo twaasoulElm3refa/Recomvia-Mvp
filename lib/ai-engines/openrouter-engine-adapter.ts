@@ -9,6 +9,7 @@ import type {
 } from "./engine-adapter";
 import { actualProviderCostMicros } from "./pricing";
 import { safeSourceUrl } from "../analysis-target";
+import { sanitizeProviderAnswer } from "../answer-text";
 
 type FetchLike = typeof fetch;
 
@@ -75,14 +76,15 @@ function usageFrom(response: OpenRouterResponse): EngineUsage {
 
 function outputText(response: OpenRouterResponse) {
   const content = response.choices?.[0]?.message?.content;
-  if (typeof content === "string" && content.trim()) return content.trim();
+  if (typeof content === "string" && content.trim())
+    return sanitizeProviderAnswer(content);
   if (!Array.isArray(content)) return null;
   const text = content
     .filter((item) => item.type === "text" && typeof item.text === "string")
     .map((item) => item.text!.trim())
     .filter(Boolean)
     .join("\n");
-  return text || null;
+  return text ? sanitizeProviderAnswer(text) || null : null;
 }
 
 function citationsFrom(response: OpenRouterResponse): EngineCitation[] {
@@ -216,7 +218,7 @@ export class OpenRouterEngineAdapter implements EngineAdapter {
               {
                 role: "system",
                 content:
-                  "Answer the question directly and independently. When web search is available, use current web evidence and cite it. Name concrete options where appropriate, preserve uncertainty, and do not assume any brand must appear.",
+                  "Return only the final answer, with no private reasoning, planning, analysis preamble, or <think> tags. Answer the question directly and independently. When web search is available, use current web evidence and cite it. Name concrete options where appropriate, preserve uncertainty, and do not assume any brand must appear.",
               },
               { role: "user", content: request.prompt },
             ],

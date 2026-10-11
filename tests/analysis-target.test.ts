@@ -184,12 +184,21 @@ test("named identity questions are separated from unbranded questions and aliase
     assert.ok(!prompt.question.includes("Omar Example"));
     assert.ok(prompt.question.includes("صناعة المحتوى"));
   }
-  assert.equal(
-    generateTargetPrompts({ ...target, category: "صناعة المحتوى عند عمر مثال" })
-      .length,
-    1,
-  );
-  assert.equal(generateTargetPrompts({ ...target, category: "" }).length, 1);
+  for (const category of [
+    `${target.category} ${target.name} Omar Example`,
+    "",
+  ]) {
+    const protectedPrompts = generateTargetPrompts({ ...target, category });
+    assert.equal(protectedPrompts.length, 3);
+    assert.equal(
+      protectedPrompts.filter((prompt) => prompt.intent !== "identity").length,
+      2,
+    );
+    for (const prompt of protectedPrompts.slice(1)) {
+      assert.ok(!prompt.question.includes(target.name));
+      assert.ok(!prompt.question.includes("Omar Example"));
+    }
+  }
 });
 
 test("missing website does not break alias detection and negative recommendations are not promoted", () => {

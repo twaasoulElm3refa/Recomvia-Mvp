@@ -9,6 +9,7 @@ type ApiBody = {
   cached: boolean;
   scanId: string;
   status: string;
+  candidates?: Array<{ name: string }>;
 };
 const readBody = (response: Response) => response.json() as Promise<ApiBody>;
 
@@ -115,7 +116,7 @@ test("authenticated API: entity discovery, topic mode, isolation, confirmation, 
             prompt.includes("INPUT_DATA:")
               ? JSON.stringify({ status: "resolved", candidates: [candidate] })
               : prompt.startsWith("What do you know")
-                ? "Ada Example is a public researcher."
+                ? "<think>The user wants an identity lookup.</think>Ada Example is a public researcher."
                 : "Other Researcher is listed.",
           );
         };
@@ -130,6 +131,18 @@ test("authenticated API: entity discovery, topic mode, isolation, confirmation, 
         assert.deepEqual(body.scan.categoryScores, {});
         assert.equal(body.scan.actualVisibilityScore, 0);
         assert.equal(body.scan.engineRuns.length, 3);
+        assert.equal(
+          db.prepare("SELECT COUNT(*) n FROM engine_runs WHERE response_text LIKE '%think%'").get()?.n,
+          0,
+        );
+        assert.equal(
+          db.prepare("SELECT COUNT(*) n FROM engine_runs WHERE intent != 'identity'").get()?.n,
+          2,
+        );
+        assert.equal(
+          db.prepare("SELECT COUNT(*) n FROM engine_runs WHERE citations_json LIKE '%profiles.example%'").get()?.n,
+          3,
+        );
         assert.equal(calls, 4);
         assert.equal(db.prepare("SELECT COUNT(*) n FROM sites").get()?.n, 0);
         assert.equal(
@@ -337,6 +350,51 @@ test("authenticated API: entity discovery, topic mode, isolation, confirmation, 
         assert.equal(typeof data.scan.readinessScore, "number");
         assert.equal(data.scan.actualVisibilityStatus, "not_configured");
         assert.equal(data.scan.target!.kind, "website");
+        db.close();
+        globalThis.fetch = async (_url, init) => {
+          calls++;
+          return handler(JSON.parse(String(init?.body)));
+        };
+      },
+    );
+    await t.test(
+      "conflicting website identity evidence requires confirmation and remains anchored to the URL",
+      async () => {
+        const db = createFixture();
+        globalThis.fetch = async (remote) => {
+          const address = String(remote);
+          return new Response(
+            address.endsWith("robots.txt")
+              ? "User-agent: *\nAllow: /"
+              : address.includes("sitemap")
+                ? '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"></urlset>'
+                : `<html lang="en"><head><title>First Identity</title><meta property="og:site_name" content="Second Identity"></head><body>
+                    <script type="application/ld+json">{"@type":"Organization","name":"First Identity","url":"https://same.example/about"}</script>
+                    <h1>Research services</h1></body></html>`,
+            {
+              headers: {
+                "Content-Type": address.includes("sitemap")
+                  ? "application/xml"
+                  : address.endsWith("robots.txt")
+                    ? "text/plain"
+                    : "text/html",
+              },
+            },
+          );
+        };
+        const res = await POST(request({ url: "https://same.example" }));
+        const data = await readBody(res);
+        assert.equal(res.status, 202);
+        assert.equal(data.status, "needs_confirmation");
+        assert.deepEqual(data.candidates?.map((item) => item.name), [
+          "First Identity",
+          "Second Identity",
+        ]);
+        assert.equal(
+          db.prepare("SELECT status FROM scans").get()?.status,
+          "awaiting_identity",
+        );
+        assert.equal(db.prepare("SELECT COUNT(*) n FROM engine_runs").get()?.n, 0);
         db.close();
         globalThis.fetch = async (_url, init) => {
           calls++;
