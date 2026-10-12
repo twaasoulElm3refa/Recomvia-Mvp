@@ -7,7 +7,9 @@ import { Button } from "@/components/ui/button";
 import { useSiteLocale } from "@/hooks/use-site-locale";
 import { safeSourceUrl } from "@/lib/analysis-target";
 import { normalizeDisplayText } from "@/lib/answer-text";
-import type { StoredScan } from "@/db/product";
+import { REPORT_PAYWALL_COPY } from "@/lib/report-copy";
+import type { ReportView } from "@/db/product";
+import { LockKeyhole } from "lucide-react";
 
 function Panel({
   children,
@@ -38,20 +40,46 @@ function Source({ url, label }: { url: string; label?: string }) {
   ) : null;
 }
 
+function LockedReportCard({ ar }: { ar: boolean }) {
+  const copy = REPORT_PAYWALL_COPY[ar ? "ar" : "en"];
+  return (
+    <Panel>
+      <div className="mx-auto max-w-xl py-5 text-center">
+        <span className="mx-auto grid size-12 place-items-center rounded-2xl bg-blue-50 text-blue-700">
+          <LockKeyhole className="size-6" aria-hidden="true" />
+        </span>
+        <h2 className="mt-5 text-xl font-extrabold">
+          {copy.title}
+        </h2>
+        <p className="mt-3 text-sm leading-7 text-slate-600">
+          {copy.description}
+        </p>
+        <Button asChild className="mt-6 rounded-xl bg-blue-600">
+          <Link href="/pricing">{copy.cta}</Link>
+        </Button>
+      </div>
+    </Panel>
+  );
+}
+
 export function ReportContent({
-  scan,
+  report,
   displayName,
 }: {
-  scan: StoredScan | null;
+  report: ReportView | null;
   displayName: string;
 }) {
   const locale = useSiteLocale();
   const ar = locale === "ar";
   const t = (en: string, arabic: string) => (ar ? arabic : en);
   const [tab, setTab] = useState("summary");
+  const scan = report?.scan ?? null;
+  const canViewFullReport = report?.entitlement.canViewFullReport ?? false;
+  const fullScan =
+    canViewFullReport && scan && "engineRuns" in scan ? scan : null;
   const kind = scan?.target?.kind || "website";
   const topic = kind === "topic";
-  const runs = scan?.engineRuns || [];
+  const runs = fullScan?.engineRuns || [];
   const eligible = runs.filter(
     (run) => !["identity", "topic", "entity_resolution"].includes(run.intent),
   );
@@ -61,14 +89,6 @@ export function ReportContent({
   );
   const mentions = observed.filter((run) => run.analysis.brandVisible).length;
   const identity = runs.filter((run) => run.intent === "identity");
-  const sources = [
-    ...new Map(
-      runs
-        .filter((run) => !run.error)
-        .flatMap((run) => run.citations)
-        .map((c) => [c.url, c]),
-    ).values(),
-  ];
   const names = [
     ...new Set(
       runs
@@ -114,7 +134,7 @@ export function ReportContent({
           "استخدم اسمًا عامًا متسقًا وتعريفًا مختصرًا موثقًا. يمكن فحص موقعك بشكل مستقل بإدخال رابطه؛ تعديل الصفحات الخارجية يبقى لدى أصحابها.",
         ),
       );
-    if (hasReadiness && scan!.issueCount)
+    if (hasReadiness && fullScan?.issueCount)
       suggestions.push(
         t(
           "Start with the failed website checks under Technical evidence. Review each source and the proposed change before implementation.",
@@ -135,8 +155,12 @@ export function ReportContent({
           : t("Identity and visibility report", "تقرير الهوية والظهور")
       }
       description={t(
-        "Inspect the questions, answers and sources behind each observation.",
-        "راجع الأسئلة والإجابات والمصادر التي تستند إليها كل نتيجة.",
+        canViewFullReport
+          ? "Inspect the questions, answers and sources behind each observation."
+          : "Review your scores and summary statistics. Full evidence requires an active plan.",
+        canViewFullReport
+          ? "راجع الأسئلة والإجابات والمصادر التي تستند إليها كل نتيجة."
+          : "راجع الدرجات والإحصاءات الملخصة. تتطلب الأدلة الكاملة خطة نشطة.",
       )}
       workspaceLabel={displayName}
       userInitial={displayName}
@@ -213,7 +237,12 @@ export function ReportContent({
                   onClick={() => setTab(id)}
                   className={`rounded-xl px-4 py-3 text-sm font-bold ${tab === id ? "bg-blue-600 text-white" : "border border-slate-200 bg-white text-slate-600"}`}
                 >
-                  {label}
+                  <span className="inline-flex items-center gap-2">
+                    {id !== "summary" && !canViewFullReport && (
+                      <LockKeyhole className="size-3.5" aria-hidden="true" />
+                    )}
+                    {label}
+                  </span>
                 </button>
               ))}
           </div>
@@ -247,14 +276,19 @@ export function ReportContent({
                     <p className="mt-4 text-sm leading-7 text-slate-300">
                       {topic
                         ? t(
-                            "A general topic has no personal or brand score. Read the returned sources and names.",
-                            "الموضوع العام لا يُمنح درجة شخص أو علامة. راجع المصادر والأسماء في الإجابات.",
+                            "A general topic has no personal or brand score.",
+                            "الموضوع العام لا يُمنح درجة شخص أو علامة.",
                           )
                         : scan.methodologyVersion.startsWith("entity-")
-                          ? t(
-                              `${mentions} of ${observed.length} completed search-enabled, unbranded answers mentioned the selected name. ${eligible.length} unbranded tests were requested.`,
-                              `ورد الاسم المختار في ${mentions} من ${observed.length} إجابات مكتملة بالبحث دون ذكر الاسم مسبقًا. عدد الاختبارات المطلوبة لهذا القياس: ${eligible.length}.`,
-                            )
+                          ? canViewFullReport
+                            ? t(
+                                `${mentions} of ${observed.length} completed search-enabled, unbranded answers mentioned the selected name. ${eligible.length} unbranded tests were requested.`,
+                                `ورد الاسم المختار في ${mentions} من ${observed.length} إجابات مكتملة بالبحث دون ذكر الاسم مسبقًا. عدد الاختبارات المطلوبة لهذا القياس: ${eligible.length}.`,
+                              )
+                            : t(
+                                "Observed AI visibility from the stored analysis.",
+                                "درجة الظهور الفعلية من التحليل المحفوظ.",
+                              )
                           : t(
                               "Legacy visibility index. Its original score is preserved; this report does not recalculate it.",
                               "مؤشر ظهور من المنهجية السابقة. حُفظت درجته الأصلية ولم يُعَد حسابها.",
@@ -279,8 +313,8 @@ export function ReportContent({
                     <p className="mt-4 text-sm leading-7 text-slate-500">
                       {hasReadiness
                         ? t(
-                            `${scan.findings.length} website checks, ${scan.issueCount} findings to review. Readiness is independent of visibility.`,
-                            `${scan.findings.length} فحصًا للموقع، و${scan.issueCount} ملاحظة للمراجعة. الجاهزية مستقلة عن الظهور.`,
+                            `${scan.issueCount} findings to review. Readiness is independent of visibility.`,
+                            `${scan.issueCount} ملاحظة للمراجعة. الجاهزية مستقلة عن الظهور.`,
                           )
                         : t(
                             "No website audit was run. A missing website is not scored as zero.",
@@ -289,16 +323,26 @@ export function ReportContent({
                     </p>
                     <div className="mt-5 flex flex-wrap gap-2">
                       <StatusPill tone="info">
-                        {runs.length} {t("stored answers", "إجابات محفوظة")}
+                        {scan.engineRunCount} {t("AI runs", "تشغيلات ذكاء اصطناعي")}
                       </StatusPill>
                       <StatusPill tone="info">
-                        {sources.length}{" "}
-                        {t("returned source URLs", "روابط مصادر معادة")}
+                        {scan.criticalCount}{" "}
+                        {t("critical findings", "ملاحظات حرجة")}
                       </StatusPill>
                     </div>
                   </Panel>
                 </div>
-                {topic && names.length > 0 && (
+                {Object.keys(scan.categoryScores).length > 0 && (
+                  <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                    {Object.entries(scan.categoryScores).map(([category, score]) => (
+                      <Panel key={category}>
+                        <p className="text-sm font-bold text-slate-500">{category}</p>
+                        <p className="mt-3 text-3xl font-extrabold">{score}/100</p>
+                      </Panel>
+                    ))}
+                  </div>
+                )}
+                {canViewFullReport && topic && names.length > 0 && (
                   <Panel>
                     <h2 className="font-extrabold">
                       {t(
@@ -321,33 +365,40 @@ export function ReportContent({
                     </div>
                   </Panel>
                 )}
-                <Panel>
-                  <h2 className="text-lg font-extrabold">
-                    {t("Recommended next steps", "الخطوات المقترحة")}
-                  </h2>
-                  <ol className="mt-4 list-decimal space-y-3 ps-5 text-sm leading-7 text-slate-600">
-                    {suggestions.map((s) => (
-                      <li key={s}>{s}</li>
-                    ))}
-                  </ol>
-                  <p className="mt-4 border-t pt-4 text-xs text-slate-500">
-                    {t(
-                      "These are reviewable recommendations. No website or external profile has been changed.",
-                      "هذه توصيات قابلة للمراجعة. لم يُعدَّل موقع أو ملف خارجي.",
-                    )}
-                  </p>
-                </Panel>
+                {canViewFullReport ? (
+                  <Panel>
+                    <h2 className="text-lg font-extrabold">
+                      {t("Recommended next steps", "الخطوات المقترحة")}
+                    </h2>
+                    <ol className="mt-4 list-decimal space-y-3 ps-5 text-sm leading-7 text-slate-600">
+                      {suggestions.map((s) => (
+                        <li key={s}>{s}</li>
+                      ))}
+                    </ol>
+                    <p className="mt-4 border-t pt-4 text-xs text-slate-500">
+                      {t(
+                        "These are reviewable recommendations. No website or external profile has been changed.",
+                        "هذه توصيات قابلة للمراجعة. لم يُعدَّل موقع أو ملف خارجي.",
+                      )}
+                    </p>
+                  </Panel>
+                ) : (
+                  <LockedReportCard ar={ar} />
+                )}
               </>
             )}
-            {tab === "identity" && (
+            {tab !== "summary" && !canViewFullReport && (
+              <LockedReportCard ar={ar} />
+            )}
+            {tab === "identity" && canViewFullReport && fullScan && (
               <>
                 <Panel>
                   <h2 className="text-lg font-extrabold">
-                    {scan.target?.name || scan.displayName}
+                    {fullScan.target?.name || fullScan.displayName}
                   </h2>
                   <p className="mt-2 text-sm text-slate-600">
-                    {scan.target?.category ||
-                      scan.discoveredContext?.category.value}
+                    {fullScan.target?.category ||
+                      fullScan.discoveredContext?.category.value}
                   </p>
                   <p className="mt-3 text-sm leading-7 text-slate-500">
                     {t(
@@ -355,7 +406,7 @@ export function ReportContent({
                       "هذه الهوية المختارة ووصف API لها. تحتاج المعلومات إلى مراجعة مصادرها؛ تطابق الاسم وحده ليس إثباتًا للهوية أو صحة الوصف.",
                     )}
                   </p>
-                  {scan.target?.identityConfirmed && (
+                  {fullScan.target?.identityConfirmed && (
                     <p className="mt-3 text-sm font-bold text-blue-700">
                       {t(
                         "Identity selected by the account owner.",
@@ -366,8 +417,8 @@ export function ReportContent({
                   <div className="mt-4 flex flex-wrap gap-2">
                     {[
                       ...new Set(
-                        scan.discovery?.candidates
-                          .filter((c) => c.name === scan.target?.name)
+                        fullScan.discovery?.candidates
+                          .filter((c) => c.name === fullScan.target?.name)
                           .flatMap((c) => c.sources) || [],
                       ),
                     ].map((url) => (
@@ -411,7 +462,7 @@ export function ReportContent({
                 )}
               </>
             )}
-            {tab === "answers" && (
+            {tab === "answers" && canViewFullReport && fullScan && (
               <>
                 {!runs.length && (
                   <Panel>
@@ -526,9 +577,9 @@ export function ReportContent({
                 ))}
               </>
             )}
-            {tab === "technical" &&
+            {tab === "technical" && canViewFullReport && fullScan &&
               (hasReadiness ? (
-                scan.findings.map((f) => (
+                fullScan.findings.map((f) => (
                   <Panel key={f.id}>
                     <div className="flex flex-wrap items-center gap-3">
                       <h2 className="font-extrabold">{f.title}</h2>

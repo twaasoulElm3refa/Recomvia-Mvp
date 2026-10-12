@@ -9,7 +9,7 @@ const cases = [
   ["كم سعر باقة Essential؟", "/faq#essential-plan"],
   ["هل يمكنكم تعديل موقعي دون موافقتي؟", "/faq#approval-rollback"],
   ["هل تدعمون ووردبريس؟", "/faq#wordpress"],
-  ["What is included in the Starter Report?", "/faq#starter-report"],
+  ["What does the Essential plan include?", "/faq#essential-plan"],
   ["What is the difference between subscriptions and Fix Credits?", "/faq#subscription-vs-credits"],
 ] as const;
 for (const [question, source] of cases) {

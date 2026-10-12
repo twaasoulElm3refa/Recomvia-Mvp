@@ -12,6 +12,7 @@ import { safeSourceUrl } from "../analysis-target";
 import { sanitizeProviderAnswer } from "../answer-text";
 
 type FetchLike = typeof fetch;
+const nativeFetch = globalThis.fetch;
 
 type OpenRouterAnnotation = {
   type?: string;
@@ -176,6 +177,7 @@ export class OpenRouterEngineAdapter implements EngineAdapter {
     timeoutMs?: number;
     maxRetries?: number;
     fetchImpl?: FetchLike;
+    testMode?: "mock";
   }) {
     if (!input.apiKey.trim())
       throw new Error(
@@ -184,6 +186,13 @@ export class OpenRouterEngineAdapter implements EngineAdapter {
     if (!input.model.trim())
       throw new Error(
         "OPENROUTER_MODEL is required to initialize the OpenRouter engine adapter.",
+      );
+    if (
+      input.testMode === "mock" &&
+      (!input.fetchImpl || input.fetchImpl === nativeFetch)
+    )
+      throw new Error(
+        "AI_TEST_MODE=mock blocks the native OpenRouter transport. Inject a mock fetch implementation.",
       );
     this.apiKey = input.apiKey;
     this.model = input.model.trim();

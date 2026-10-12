@@ -9,7 +9,7 @@ import { FaqExplorer } from "./faq-explorer";
 
 export const metadata: Metadata = {
   title: { absolute: "Recomvia FAQ — AI Visibility, Reports & Fixes" },
-  description: "Clear answers about Recomvia AI visibility measurement, Starter reports, subscriptions, Fix Credits, optimization, methodology, privacy, and human support.",
+  description: "Clear answers about Recomvia AI visibility measurement, report access, subscriptions, Fix Credits, optimization, methodology, privacy, and human support.",
   alternates: { canonical: `${SITE_URL}/faq` },
   openGraph: { title: "Recomvia FAQ — AI Visibility, Reports & Fixes", description: "Documented answers about measuring and improving visibility in AI-powered search and answer systems.", type: "website", url: `${SITE_URL}/faq` },
 };

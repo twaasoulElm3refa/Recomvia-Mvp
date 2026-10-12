@@ -24,7 +24,7 @@ export const userB = {
   displayName: "Tester B",
 };
 
-export function createFixture(legacy = false) {
+export function createFixture(legacy = false, activeSubscription = true) {
   const sqlite = new DatabaseSync(":memory:");
   sqlite.exec("PRAGMA foreign_keys=ON");
   const migrations = readdirSync(join(process.cwd(), "drizzle"))
@@ -59,6 +59,17 @@ export function createFixture(legacy = false) {
     sqlite.exec("ROLLBACK");
     throw error;
   }
+  if (activeSubscription)
+    sqlite.exec(`
+      INSERT INTO users (id,email,display_name)
+        VALUES ('${userA.userId}','${userA.email}','${userA.displayName}');
+      INSERT INTO organizations (id,name,owner_user_id)
+        VALUES ('org-target-test-a','Test workspace','${userA.userId}');
+      INSERT INTO organization_members (organization_id,user_id,role)
+        VALUES ('org-target-test-a','${userA.userId}','owner');
+      INSERT INTO subscriptions (id,organization_id,plan,status,current_period_end)
+        VALUES ('subscription-target-test-a','org-target-test-a','essential','active','2099-01-01T00:00:00.000Z');
+    `);
   class Prepared {
     values: (string | number | null)[] = [];
     constructor(readonly query: string) {}
@@ -100,5 +111,6 @@ export function createFixture(legacy = false) {
   state.env.DB = db;
   state.env.OPENROUTER_API_KEY = "test-only-no-real-key";
   state.env.OPENROUTER_MODEL = "test/model";
+  state.env.AI_TEST_MODE = "mock";
   return sqlite;
 }

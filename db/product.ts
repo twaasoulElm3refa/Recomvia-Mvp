@@ -16,6 +16,11 @@ import type {
   VisibilityEngineRun,
   VisibilityEvidence,
 } from "@/lib/ai-visibility";
+import {
+  resolveReportEntitlement,
+  type ReportEntitlement,
+  type SubscriptionRecord,
+} from "@/lib/report-entitlements";
 
 type Workspace = {
   organizationId: string;
@@ -65,6 +70,37 @@ export type StoredScan = {
   categoryScores: Record<string, number>;
   discoveredContext: DiscoveredSiteContext | null;
   engineRuns: StoredEngineRun[];
+};
+
+export type ReportSummary = Pick<
+  StoredScan,
+  | "id"
+  | "displayName"
+  | "status"
+  | "scanKind"
+  | "methodologyVersion"
+  | "language"
+  | "country"
+  | "readinessScore"
+  | "actualVisibilityStatus"
+  | "actualVisibilityScore"
+  | "actualVisibilityConfidence"
+  | "engineRunCount"
+  | "contextConfidence"
+  | "confidence"
+  | "issueCount"
+  | "criticalCount"
+  | "completedAt"
+  | "createdAt"
+> & {
+  detailLevel: "summary";
+  target: Pick<AnalysisTarget, "kind" | "name"> | null;
+  categoryScores: Record<string, number>;
+};
+
+export type ReportView = {
+  scan: StoredScan | ReportSummary;
+  entitlement: ReportEntitlement;
 };
 
 function database() {
@@ -241,6 +277,31 @@ function scanSelect() {
     LEFT JOIN analysis_targets t ON t.id = s.target_id
   `;
 }
+
+function reportSummarySelect() {
+  return `
+    SELECT s.id, s.organization_id AS organizationId,
+      COALESCE(t.display_name, w.display_name, '') AS displayName,
+      t.kind AS targetKind, t.display_name AS targetName,
+      s.status, s.scan_kind AS scanKind, s.methodology_version AS methodologyVersion,
+      s.language, s.country, s.readiness_score AS readinessScore,
+      s.actual_visibility_status AS actualVisibilityStatus,
+      s.actual_visibility_score AS actualVisibilityScore,
+      s.actual_visibility_confidence AS actualVisibilityConfidence,
+      s.engine_run_count AS engineRunCount, s.context_confidence AS contextConfidence,
+      s.confidence, s.issue_count AS issueCount, s.critical_count AS criticalCount,
+      s.completed_at AS completedAt, s.created_at AS createdAt
+    FROM scans s
+    LEFT JOIN sites w ON w.id = s.site_id
+    LEFT JOIN analysis_targets t ON t.id = s.target_id
+  `;
+}
+
+type ReportSummaryRow = Omit<ReportSummary, "detailLevel" | "target" | "categoryScores"> & {
+  organizationId: string;
+  targetKind: AnalysisTarget["kind"] | null;
+  targetName: string | null;
+};
 
 function parseJson<T>(value: string | null | undefined, fallback: T): T {
   if (!value) return fallback;
@@ -452,6 +513,53 @@ function computeCategoryScores(findings: StoredFinding[]) {
     output[category] = possible ? Math.round((awarded / possible) * 100) : 0;
   }
   return output;
+}
+
+async function categoryScoresForScan(scanId: string) {
+  const result = await database()
+    .prepare(
+      `
+      SELECT category, SUM(weight) AS possible, SUM(awarded_points) AS awarded
+      FROM scan_findings WHERE scan_id = ? GROUP BY category
+    `,
+    )
+    .bind(scanId)
+    .all<{ category: string; possible: number; awarded: number }>();
+  return Object.fromEntries(
+    result.results.map((row) => [
+      row.category,
+      Number(row.possible)
+        ? Math.round((Number(row.awarded) / Number(row.possible)) * 100)
+        : 0,
+    ]),
+  );
+}
+
+async function toReportSummary(row: ReportSummaryRow): Promise<ReportSummary> {
+  const { organizationId: _organizationId, targetKind, targetName, ...safe } = row;
+  void _organizationId;
+  return {
+    ...safe,
+    detailLevel: "summary",
+    target:
+      targetKind && targetName ? { kind: targetKind, name: targetName } : null,
+    categoryScores: await categoryScoresForScan(row.id),
+  };
+}
+
+async function reportEntitlementForOrganization(organizationId: string) {
+  const result = await database()
+    .prepare(
+      `
+      SELECT plan, status, current_period_end AS currentPeriodEnd
+      FROM subscriptions
+      WHERE organization_id = ?
+      ORDER BY updated_at DESC
+    `,
+    )
+    .bind(organizationId)
+    .all<SubscriptionRecord>();
+  return resolveReportEntitlement(result.results);
 }
 
 async function hydrateScan(
@@ -1002,21 +1110,85 @@ export async function getLatestScanForUser(userId: string) {
   return hydrateScan(row);
 }
 
+async function getReportSummaryRowForUser(userId: string, scanId: string) {
+  return database()
+    .prepare(
+      `${reportSummarySelect()}
+      JOIN organization_members m ON m.organization_id = s.organization_id
+      WHERE s.id = ? AND m.user_id = ? LIMIT 1
+    `,
+    )
+    .bind(scanId, userId)
+    .first<ReportSummaryRow>();
+}
+
+export async function getReportForUser(
+  userId: string,
+  scanId: string,
+): Promise<ReportView | null> {
+  const row = await getReportSummaryRowForUser(userId, scanId);
+  if (!row) return null;
+
+  // Incomplete scans need their stored identity-choice state to resume. They do
+  // not contain a completed paid report yet.
+  if (row.status !== "completed") {
+    const scan = await getScanForUser(userId, scanId);
+    if (!scan) return null;
+    return {
+      scan,
+      entitlement: { canViewFullReport: false, planId: null },
+    };
+  }
+
+  const entitlement = await reportEntitlementForOrganization(row.organizationId);
+  if (!entitlement.canViewFullReport) {
+    return { scan: await toReportSummary(row), entitlement };
+  }
+  const scan = await getScanForUser(userId, scanId);
+  return scan ? { scan, entitlement } : null;
+}
+
+export async function getLatestReportForUser(
+  userId: string,
+): Promise<ReportView | null> {
+  const row = await database()
+    .prepare(
+      `${reportSummarySelect()}
+      JOIN organization_members m ON m.organization_id = s.organization_id
+      WHERE m.user_id = ? AND s.status = 'completed'
+      ORDER BY s.created_at DESC LIMIT 1
+    `,
+    )
+    .bind(userId)
+    .first<ReportSummaryRow>();
+  if (!row) return null;
+  return getReportForUser(userId, row.id);
+}
+
+export async function getLatestScanSummaryForUser(userId: string) {
+  const row = await database()
+    .prepare(
+      `${reportSummarySelect()}
+      JOIN organization_members m ON m.organization_id = s.organization_id
+      WHERE m.user_id = ? AND s.status = 'completed'
+      ORDER BY s.created_at DESC LIMIT 1
+    `,
+    )
+    .bind(userId)
+    .first<ReportSummaryRow>();
+  return row ? toReportSummary(row) : null;
+}
+
 export async function listScansForUser(userId: string, limit = 20) {
   const result = await database()
     .prepare(
-      `${scanSelect()}
+      `${reportSummarySelect()}
     JOIN organization_members m ON m.organization_id = s.organization_id
     WHERE m.user_id = ?
     ORDER BY s.created_at DESC LIMIT ?
   `,
     )
     .bind(userId, Math.max(1, Math.min(50, limit)))
-    .all<
-      Omit<
-        StoredScan,
-        "findings" | "categoryScores" | "discoveredContext" | "engineRuns"
-      >
-    >();
-  return result.results.map((row) => ({ ...row, ...targetFields(row) }));
+    .all<ReportSummaryRow>();
+  return Promise.all(result.results.map(toReportSummary));
 }

@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import { requireAuthenticatedUser } from "@/app/auth";
-import { getLatestScanForUser, getScanForUser } from "@/db/product";
+import { getLatestReportForUser, getReportForUser } from "@/db/product";
 import { ReportContent } from "./report-content";
 export const dynamic = "force-dynamic";
 export const runtime = "edge";
@@ -15,8 +15,8 @@ export default async function ReportPage({
 }) {
   const { scan: scanId } = await searchParams;
   const user = await requireAuthenticatedUser();
-  const scan = scanId
-    ? await getScanForUser(user.userId, scanId)
-    : await getLatestScanForUser(user.userId);
-  return <ReportContent scan={scan} displayName={user.displayName} />;
+  const report = scanId
+    ? await getReportForUser(user.userId, scanId)
+    : await getLatestReportForUser(user.userId);
+  return <ReportContent report={report} displayName={user.displayName} />;
 }
