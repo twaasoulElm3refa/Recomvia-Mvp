@@ -9,6 +9,7 @@ import {
   failScan,
   findCachedScan,
   getOrCreateSite,
+  getReportForUser,
   getScanForUser,
   storeDiscovery,
   type ScanCompletion,
@@ -44,9 +45,9 @@ export async function GET(request: Request) {
   if (!user) return json({ code: "sign_in" }, 401);
   const id = new URL(request.url).searchParams.get("scan");
   if (!id || id.length > 100) return json({ code: "invalid_input" }, 400);
-  const scan = await getScanForUser(user.userId, id);
-  if (!scan) return json({ code: "not_found" }, 404);
-  return json({ scan });
+  const report = await getReportForUser(user.userId, id);
+  if (!report) return json({ code: "not_found" }, 404);
+  return json({ scan: report.scan, entitlement: report.entitlement });
 }
 
 export async function POST(request: Request) {
@@ -77,6 +78,7 @@ export async function POST(request: Request) {
   const workspace = await ensureWorkspace(user);
   const key = env.OPENROUTER_API_KEY?.trim();
   const model = env.OPENROUTER_MODEL?.trim();
+  const mockAi = env.AI_TEST_MODE?.trim().toLowerCase() === "mock";
   const adapter =
     key && model
       ? new OpenRouterEngineAdapter({
@@ -84,6 +86,7 @@ export async function POST(request: Request) {
           model,
           maxRetries: 0,
           timeoutMs: 25_000,
+          ...(mockAi ? { fetchImpl: fetch, testMode: "mock" as const } : {}),
         })
       : null;
   let scanId: string | null = null;
@@ -149,9 +152,13 @@ export async function POST(request: Request) {
       },
       findings: [],
     };
+    await completeScan(workspace, scanId!, completion, visibility);
+    const report = await getReportForUser(workspace.userId, scanId!);
+    if (!report) throw new Error("Stored report could not be loaded.");
     return json(
       {
-        scan: await completeScan(workspace, scanId!, completion, visibility),
+        scan: report.scan,
+        entitlement: report.entitlement,
         cached: false,
       },
       201,
@@ -244,7 +251,15 @@ export async function POST(request: Request) {
       Boolean(adapter),
     );
     const cached = await findCachedScan(workspace, cacheKey);
-    if (cached) return json({ scan: cached, cached: true });
+    if (cached) {
+      const report = await getReportForUser(workspace.userId, cached.id);
+      if (!report) throw new Error("Cached report could not be loaded.");
+      return json({
+        scan: report.scan,
+        entitlement: report.entitlement,
+        cached: true,
+      });
+    }
     const site = input.websiteUrl
       ? await getOrCreateSite(workspace, {
           host: new URL(input.websiteUrl).hostname.toLowerCase(),

@@ -3,10 +3,10 @@ import { NavigationLink as Link } from "@/app/components/navigation-link";
 import { AppShell, StatusPill } from "@/app/components/app-shell";
 import { Button } from "@/components/ui/button";
 import { useSiteLocale } from "@/hooks/use-site-locale";
-import type { StoredScan } from "@/db/product";
+import type { ReportSummary } from "@/db/product";
 
 type ScanRow = Pick<
-  StoredScan,
+  ReportSummary,
   | "id"
   | "status"
   | "target"
@@ -21,7 +21,7 @@ export function DashboardContent({
   scans,
 }: {
   displayName: string;
-  latest: StoredScan | null;
+  latest: ReportSummary | null;
   scans: ScanRow[];
 }) {
   const ar = useSiteLocale() === "ar";

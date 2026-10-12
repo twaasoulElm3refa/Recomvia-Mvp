@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import { requireAuthenticatedUser } from "@/app/auth";
-import { getLatestScanForUser, listScansForUser } from "@/db/product";
+import { getLatestScanSummaryForUser, listScansForUser } from "@/db/product";
 import { DashboardContent } from "./dashboard-content";
 export const dynamic = "force-dynamic";
 export const runtime = "edge";
@@ -11,7 +11,7 @@ export const metadata: Metadata = {
 export default async function DashboardPage() {
   const user = await requireAuthenticatedUser();
   const [latest, scans] = await Promise.all([
-    getLatestScanForUser(user.userId),
+    getLatestScanSummaryForUser(user.userId),
     listScansForUser(user.userId),
   ]);
   return (

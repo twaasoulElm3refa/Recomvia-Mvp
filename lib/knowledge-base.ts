@@ -1,4 +1,7 @@
 import { articles } from "./articles";
+import { PLAN_CATALOG } from "./plans";
+
+const essentialPlan = PLAN_CATALOG[0];
 
 export type FaqEntry = {
   id: string;
@@ -22,8 +25,8 @@ export const faqEntries: FaqEntry[] = [
   {
     id: "topic-exploration", category: "Measurement",
     question: "Can I analyze a topic or search term?", questionAr: "هل يمكن تحليل موضوع أو مصطلح؟",
-    answer: "Yes. A topic analysis shows cited sources and names appearing in the stored API answer sample. A general topic has no personal or brand score. The results are not a global ranking. Name and topic analysis requires an activated AI integration; missing results are never replaced with invented scores.",
-    answerAr: "نعم. يعرض تحليل الموضوع المصادر والأسماء الواردة في عينة إجابات API المحفوظة. لا يحصل الموضوع العام على درجة شخص أو علامة، والنتائج ليست ترتيبًا عالميًا. يتطلب تحليل الأسماء والموضوعات تفعيل ربط الذكاء الاصطناعي، ولا تُستبدل النتائج الناقصة بدرجات مختلقة.",
+    answer: "Yes. A topic summary shows the analysis metadata and summary statistics; a general topic has no personal or brand score. With an active full-report entitlement, the stored report also shows cited sources and names appearing in the API answer sample. The results are not a global ranking, and missing results are never replaced with invented scores.",
+    answerAr: "نعم. يعرض ملخص تحليل الموضوع بيانات التحليل وإحصاءاته، ولا يحصل الموضوع العام على درجة شخص أو علامة. ومع صلاحية التقرير الكامل النشطة، يعرض التقرير المحفوظ أيضًا المصادر والأسماء الواردة في عينة إجابات API. النتائج ليست ترتيبًا عالميًا، ولا تُستبدل النتائج الناقصة بدرجات مختلقة.",
     keywords: ["topic", "keyword", "search term", "موضوع", "مصطلح", "كلمة مفتاحية", "تحليل موضوع"]
   },
   {
@@ -34,32 +37,26 @@ export const faqEntries: FaqEntry[] = [
   },
   {
     id:"free-score",category:"Reports",question:"What does the free AI visibility score include?",questionAr:"ماذا يشمل فحص الظهور المجاني؟",
-    answer:"The free score provides one real introductory measurement, a limited view of the main dimensions, one critical issue, one opportunity, a small engine snapshot, and the total number of detected issues. Detailed evidence and most findings remain locked for the Starter Report.",
-    answerAr:"يعرض الفحص المجاني قياسًا أوليًا حقيقيًا، ولمحة محدودة من المحاور الأساسية، ومشكلة حرجة واحدة، وفرصة واحدة، ونتيجة مختصرة لبعض المحركات، مع عدد المشكلات المكتشفة، بينما تبقى الأدلة والتفاصيل ومعظم النتائج داخل تقرير البداية.",
+    answer:"The free report shows the entity or site name, analysis date and type, language and market, overall scores, actual AI visibility, website readiness when applicable, category scores, and summary statistics. AI answers, citations, evidence, detailed findings, measurement records, and recommendations remain locked.",
+    answerAr:"يعرض التقرير المجاني اسم الكيان أو الموقع، وتاريخ التحليل ونوعه، واللغة والسوق، والدرجات الإجمالية، والظهور الفعلي، وجاهزية الموقع عند انطباقها، ودرجات المحاور والإحصاءات الملخصة. وتبقى إجابات الذكاء الاصطناعي والمصادر والأدلة والنتائج التفصيلية وسجلات القياس والتوصيات مقفلة.",
     keywords:["free","score","scan","include","مجاني","فحص","درجة","يشمل"]
   },
   {
-    id:"starter-report",category:"Billing",question:"What is included in the $4.99 Starter Report?",questionAr:"ماذا يتضمن تقرير البداية بسعر 4.99 دولار؟",
-    answer:"The one-time Starter Report unlocks the findings collected in the initial scan, core score details, limited prompt and engine results, one competitor, priority issues, key opportunities, a technical mini audit, initial recommendations, account storage, and a PDF. It does not include monitoring or the Fix Center.",
-    answerAr:"يفتح تقرير البداية، مقابل 4.99 دولار لمرة واحدة، نتائج الفحص الأول، وتفاصيل الدرجات، والنتائج المحدودة للأسئلة والمحركات، ومنافسًا واحدًا، وأهم المشكلات والفرص، وتدقيقًا تقنيًا مصغرًا، وتوصيات أولية، وحفظ التقرير ونسخة PDF، لكنه لا يشمل المراقبة أو مركز الإصلاح.",
-    keywords:["4.99","starter","report","تقرير البداية","دولار"]
-  },
-  {
-    id:"essential-plan",category:"Billing",question:"What does the Essential plan include?",questionAr:"ماذا تشمل باقة Essential؟",
-    answer:"Essential starts at $19 per month for one website and includes the full visibility report, a defined high-intent prompt set, selected AI engine surfaces, competitor comparison, recurring measurement, historical comparison, issue tracking, the Fix Center, and post-fix rechecks. Fix Credits are purchased separately.",
-    answerAr:"تبدأ باقة «Essential» من 19 دولارًا شهريًا لموقع واحد، وتشمل التقرير الكامل، ومجموعة محددة من الأسئلة عالية النية، ومحركات مختارة، ومقارنة المنافسين، والقياس الدوري، والمقارنات التاريخية، وتتبع المشكلات، وفتح مركز الإصلاح وإعادة القياس، ولا تتضمن نقاط الإصلاح التي تُشترى بصورة منفصلة.",
+    id:"essential-plan",category:"Billing",question:`What does the ${essentialPlan.name.en} plan include?`,questionAr:`ماذا تشمل باقة ${essentialPlan.name.ar}؟`,
+    answer:`${essentialPlan.name.en} is ${essentialPlan.price?.amount} ${essentialPlan.price?.cadence.en} and unlocks the full stored report: identity analysis, AI answers, sources and citations, evidence, visibility details, technical evidence, and detailed recommendations. Checkout is not connected yet.`,
+    answerAr:`سعر باقة ${essentialPlan.name.ar} هو ${essentialPlan.price?.amount} ${essentialPlan.price?.cadence.ar}، وتفتح التقرير الكامل المحفوظ: تحليل الهوية، وإجابات الذكاء الاصطناعي، والمصادر والاستشهادات، والأدلة، وتفاصيل الظهور، والأدلة التقنية، والتوصيات التفصيلية. الدفع غير مربوط حاليًا.`,
     keywords:["essential","19","subscription","plan","price","pricing","cost","اشتراك","باقة","تسعة عشر","سعر","تكلفة"]
   },
   {
     id:"subscription-vs-credits",category:"Billing",question:"What is the difference between a subscription and Fix Credits?",questionAr:"ما الفرق بين الاشتراك ونقاط الإصلاح؟",
-    answer:"The subscription pays for analysis, reports, monitoring, issue tracking, and remeasurement. Fix Credits pay for clearly priced automated or assisted improvements. An active Essential plan or higher is required before credits can be purchased or used.",
-    answerAr:"الاشتراك يدفع مقابل التحليل والتقارير والمراقبة وتتبع المشكلات وإعادة القياس، أما نقاط الإصلاح فتدفع مقابل تحسينات آلية أو شبه آلية محددة التكلفة، ويشترط وجود اشتراك «Essential» أو أعلى لشراء النقاط أو استخدامها.",
+    answer:"The current Essential entitlement unlocks the full stored report. Fix Credits are a separate product concept for improvements and are not included in this report entitlement. Credit checkout is not connected yet.",
+    answerAr:"تفتح صلاحية Essential الحالية التقرير الكامل المحفوظ. أما نقاط الإصلاح فهي مفهوم منتج منفصل للتحسينات ولا تدخل ضمن صلاحية التقرير. شراء النقاط غير مربوط حاليًا.",
     keywords:["credits","subscription","difference","fix credits","نقاط","الفرق","الاشتراك","اصلاح"]
   },
   {
     id:"credits-after-cancel",category:"Billing",question:"What happens to purchased credits if I cancel?",questionAr:"ماذا يحدث للنقاط المشتراة عند إلغاء الاشتراك؟",
-    answer:"Purchased Fix Credits are not confiscated when a subscription is cancelled. They remain in the wallet for the disclosed validity period, while the Fix Center becomes inactive until Essential or a higher plan is reactivated.",
-    answerAr:"لا تُصادر نقاط الإصلاح المشتراة عند إلغاء الاشتراك، بل تبقى في المحفظة خلال مدة الصلاحية المعلنة، بينما يتوقف مركز الإصلاح حتى إعادة تفعيل باقة «Essential» أو أعلى.",
+    answer:"Credit purchasing is not connected yet. Any future credit validity and cancellation rules must be published before payment is enabled.",
+    answerAr:"شراء النقاط غير مربوط حاليًا. يجب نشر قواعد صلاحية النقاط والإلغاء مستقبلًا قبل تفعيل الدفع.",
     keywords:["cancel","expire","credits","wallet","الغاء","النقاط","صلاحية","المحفظة"]
   },
   {
