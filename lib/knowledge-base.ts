@@ -1,7 +1,7 @@
 import { articles } from "./articles";
-import { PLAN_CATALOG } from "./plans";
+import { PLAN_CATALOG, planById } from "./plans";
 
-const essentialPlan = PLAN_CATALOG[0];
+const essentialPlan = planById("essential")!;
 
 export type FaqEntry = {
   id: string;
@@ -37,26 +37,34 @@ export const faqEntries: FaqEntry[] = [
   },
   {
     id:"free-score",category:"Reports",question:"What does the free AI visibility score include?",questionAr:"ماذا يشمل فحص الظهور المجاني؟",
-    answer:"The free report shows the entity or site name, analysis date and type, language and market, overall scores, actual AI visibility, website readiness when applicable, category scores, and summary statistics. AI answers, citations, evidence, detailed findings, measurement records, and recommendations remain locked.",
-    answerAr:"يعرض التقرير المجاني اسم الكيان أو الموقع، وتاريخ التحليل ونوعه، واللغة والسوق، والدرجات الإجمالية، والظهور الفعلي، وجاهزية الموقع عند انطباقها، ودرجات المحاور والإحصاءات الملخصة. وتبقى إجابات الذكاء الاصطناعي والمصادر والأدلة والنتائج التفصيلية وسجلات القياس والتوصيات مقفلة.",
+    answer:"One free analysis is provided after sign-in. Its summary shows the entity or site name, analysis date and type, language and market, overall scores, actual AI visibility, website readiness when applicable, category scores, and summary statistics. AI answers, citations, evidence, detailed findings, measurement records, and recommendations remain locked.",
+    answerAr:"يتاح تحليل مجاني واحد بعد تسجيل الدخول. يعرض ملخصه اسم الكيان أو الموقع، وتاريخ التحليل ونوعه، واللغة والسوق، والدرجات الإجمالية، والظهور الفعلي، وجاهزية الموقع عند انطباقها، ودرجات المحاور والإحصاءات الملخصة. وتبقى إجابات الذكاء الاصطناعي والمصادر والأدلة والنتائج التفصيلية وسجلات القياس والتوصيات مقفلة.",
     keywords:["free","score","scan","include","مجاني","فحص","درجة","يشمل"]
   },
   {
-    id:"essential-plan",category:"Billing",question:`What does the ${essentialPlan.name.en} plan include?`,questionAr:`ماذا تشمل باقة ${essentialPlan.name.ar}؟`,
-    answer:`${essentialPlan.name.en} is ${essentialPlan.price?.amount} ${essentialPlan.price?.cadence.en} and unlocks the full stored report: identity analysis, AI answers, sources and citations, evidence, visibility details, technical evidence, and detailed recommendations. Checkout is not connected yet.`,
-    answerAr:`سعر باقة ${essentialPlan.name.ar} هو ${essentialPlan.price?.amount} ${essentialPlan.price?.cadence.ar}، وتفتح التقرير الكامل المحفوظ: تحليل الهوية، وإجابات الذكاء الاصطناعي، والمصادر والاستشهادات، والأدلة، وتفاصيل الظهور، والأدلة التقنية، والتوصيات التفصيلية. الدفع غير مربوط حاليًا.`,
-    keywords:["essential","19","subscription","plan","price","pricing","cost","اشتراك","باقة","تسعة عشر","سعر","تكلفة"]
+    id: "plans-comparison", category: "Billing",
+    question: "What are Recomvia's prices and plan differences?", questionAr: "ما أسعار باقات Recomvia وما الفرق بينها؟",
+    answer: "Free gives one analysis with headline numbers. Starter unlocks one initial report for " + planById("starter")!.price.amount + " once. Essential is " + essentialPlan.price.amount + "/month for one project with detailed analysis and monitoring. Growth is " + planById("growth")!.price.amount + "/month for very advanced analysis of one project. Pro is " + planById("pro")!.price.amount + "/month for three projects, each with full Growth features. Fix Credits cost extra. Paid activation is not open yet; requests do not charge you.",
+    answerAr: "يشمل المجاني تحليلًا واحدًا تظهر أرقامه الرئيسية. تفتح Starter تقريرًا أوليًا واحدًا مقابل " + planById("starter")!.price.amount + " مرة واحدة. تبلغ Essential " + essentialPlan.price.amount + " شهريًا لمشروع واحد بتحليل تفصيلي ومتابعة. وتبلغ Growth " + planById("growth")!.price.amount + " شهريًا لمشروع واحد بتحليل متقدم جدًا. وتبلغ Pro " + planById("pro")!.price.amount + " شهريًا لثلاثة مشروعات، لكل منها كامل مزايا Growth. تُشترى نقاط الإصلاح منفصلة. لم يُفتح التفعيل المدفوع بعد، ولا تُحصّل رسوم من طلب الاهتمام.",
+    keywords: ["plans comparison", "all prices", "pricing", "compare plans", "اسعار الباقات", "مقارنة الباقات", "كل الباقات", "الفرق بين الباقات"]
   },
+  ...PLAN_CATALOG.filter((plan) => plan.id !== "free").map((plan): FaqEntry => ({
+    id: `${plan.id}-plan`, category: "Billing",
+    question: `What does the ${plan.name.en} plan include?`, questionAr: `ماذا تشمل باقة ${plan.name.en}؟`,
+    answer: `${plan.name.en} costs ${plan.price.amount} ${plan.price.cadence.en}. ${plan.description.en} ${plan.features.map((feature) => feature.en).join(". ")}. Paid activation is not open yet. Requests do not collect payment; exact usage allowances are confirmed before purchase.`,
+    answerAr: `سعر ${plan.name.en} هو ${plan.price.amount} ${plan.price.cadence.ar}. ${plan.description.ar} ${plan.features.map((feature) => feature.ar).join("، ")}. لم يُفتح التفعيل المدفوع بعد. لا تُحصّل رسوم من الطلب، وتُوضح حصص الاستخدام قبل الشراء.`,
+    keywords: [plan.id, plan.name.ar, plan.price.amount.slice(1), ...(plan.id === "starter" ? ["one report", "one time", "تقرير مبدئي", "مرة واحدة"] : [])],
+  })),
   {
     id:"subscription-vs-credits",category:"Billing",question:"What is the difference between a subscription and Fix Credits?",questionAr:"ما الفرق بين الاشتراك ونقاط الإصلاح؟",
-    answer:"The current Essential entitlement unlocks the full stored report. Fix Credits are a separate product concept for improvements and are not included in this report entitlement. Credit checkout is not connected yet.",
-    answerAr:"تفتح صلاحية Essential الحالية التقرير الكامل المحفوظ. أما نقاط الإصلاح فهي مفهوم منتج منفصل للتحسينات ولا تدخل ضمن صلاحية التقرير. شراء النقاط غير مربوط حاليًا.",
+    answer:"Monthly plans cover reports and monitoring. Fix Credits are purchased separately for automated or assisted improvements; they require an active Essential, Growth or Pro subscription and are not included in plan prices. Each fix shows its scope and credit cost before approval. Human expert services are separately priced. Credit purchasing and live execution are not open yet.",
+    answerAr:"تغطي الاشتراكات الشهرية التقارير والمتابعة. تُشترى نقاط الإصلاح منفصلة للتحسينات الآلية والمساعدة، وتتطلب اشتراك Essential أو Growth أو Pro نشطًا، ولا تدخل ضمن سعر الباقة. يظهر نطاق الإصلاح وتكلفته قبل الموافقة. الخدمات البشرية تُسعّر منفصلة. لم يُفتح شراء النقاط والتنفيذ الحي بعد.",
     keywords:["credits","subscription","difference","fix credits","نقاط","الفرق","الاشتراك","اصلاح"]
   },
   {
     id:"credits-after-cancel",category:"Billing",question:"What happens to purchased credits if I cancel?",questionAr:"ماذا يحدث للنقاط المشتراة عند إلغاء الاشتراك؟",
-    answer:"Credit purchasing is not connected yet. Any future credit validity and cancellation rules must be published before payment is enabled.",
-    answerAr:"شراء النقاط غير مربوط حاليًا. يجب نشر قواعد صلاحية النقاط والإلغاء مستقبلًا قبل تفعيل الدفع.",
+    answer:"Purchased Fix Credits remain in the wallet under the published validity policy. Their use pauses when the subscription expires and resumes with an active Essential, Growth or Pro plan. Credit purchasing is not open yet; validity and refund terms will be published before payment.",
+    answerAr:"تبقى نقاط الإصلاح المشتراة في المحفظة وفق سياسة الصلاحية المعلنة. يتوقف استخدامها عند انتهاء الاشتراك ويُستأنف مع باقة Essential أو Growth أو Pro نشطة. لم يُفتح شراء النقاط بعد، وتُنشر شروط الصلاحية والاسترداد قبل الدفع.",
     keywords:["cancel","expire","credits","wallet","الغاء","النقاط","صلاحية","المحفظة"]
   },
   {
@@ -97,9 +105,9 @@ export const faqEntries: FaqEntry[] = [
   },
   {
     id:"scan-frequency",category:"Reports",question:"How often is AI visibility measured?",questionAr:"كم مرة يُعاد قياس الظهور؟",
-    answer:"The free allowance is initially one eligible scan every 30 days. Paid plans provide a defined recurring cadence based on prompt, engine, market, and plan limits. Important prompts should be repeated because one generative answer is not a stable ranking.",
-    answerAr:"يبدأ الحد المجاني بفحص واحد للحساب والجهاز المؤهل كل 30 يومًا، بينما توفر الخطط المدفوعة دورية محددة وفق عدد الأسئلة والمحركات والأسواق وحدود الباقة، وتُكرر الأسئلة المهمة لأن إجابة واحدة لا تمثل ترتيبًا ثابتًا.",
-    keywords:["often","frequency","30 days","monitoring","متى","مرة","ثلاثين","مراقبة"]
+    answer:"The free allowance is one eligible analysis. Opening saved results does not consume another analysis. Paid plans provide a defined recurring cadence based on prompt, engine, market, and plan limits. Important prompts should be repeated because one generative answer is not a stable ranking.",
+    answerAr:"يشمل المجاني تحليلًا واحدًا للحساب المؤهل، ولا يستهلك فتح تقرير محفوظ تحليلًا جديدًا، بينما توفر الخطط المدفوعة دورية محددة وفق عدد الأسئلة والمحركات والأسواق وحدود الباقة، وتُكرر الأسئلة المهمة لأن إجابة واحدة لا تمثل ترتيبًا ثابتًا.",
+    keywords:["often","frequency","monitoring","متى","مرة","مراقبة"]
   },
   {
     id:"freshness-cache",category:"Reports",question:"What does “last analyzed” mean?",questionAr:"ماذا تعني عبارة «آخر تحليل»؟",

@@ -29,6 +29,20 @@
       "when": 1791595613157,
       "tag": "0003_entity_targets",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1792068753193,
+      "tag": "0004_plan_report_access",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1792094495607,
+      "tag": "0005_plan_analysis_runtime",
+      "breakpoints": true
     }
   ]
 }

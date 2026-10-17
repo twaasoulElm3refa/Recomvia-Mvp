@@ -16,7 +16,8 @@
     "test:public": "node scripts/test-public-fixes.mjs",
     "test:visibility": "node scripts/test-ai-visibility.mjs",
     "test:targets": "node scripts/test-target-analysis.mjs",
-    "test:entitlements": "node scripts/test-entitlements.mjs"
+    "test:entitlements": "node scripts/test-entitlements.mjs",
+    "test:plans": "node scripts/test-plan-analysis.mjs"
   },
   "dependencies": {
     "@base-ui/react": "^1.7.0",

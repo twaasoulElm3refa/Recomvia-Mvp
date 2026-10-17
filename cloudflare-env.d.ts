@@ -8,6 +8,8 @@ declare namespace Cloudflare {
     GOOGLE_CLIENT_SECRET?: string;
     OPENROUTER_API_KEY?: string;
     OPENROUTER_MODEL?: string;
+    OPENROUTER_MODELS_JSON?: string;
+    MONITORING_SECRET?: string;
     AI_TEST_MODE?: string;
   }
 }

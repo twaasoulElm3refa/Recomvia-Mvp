@@ -1,4 +1,7 @@
 "use client";
+import { useState } from "react";
+import { planById } from "@/lib/plans";
+import type { ReportEntitlement } from "@/lib/report-entitlements";
 import { NavigationLink as Link } from "@/app/components/navigation-link";
 import { AppShell, StatusPill } from "@/app/components/app-shell";
 import { Button } from "@/components/ui/button";
@@ -19,12 +22,18 @@ export function DashboardContent({
   displayName,
   latest,
   scans,
+  entitlement,
 }: {
   displayName: string;
   latest: ReportSummary | null;
   scans: ScanRow[];
+  entitlement: ReportEntitlement;
 }) {
   const ar = useSiteLocale() === "ar";
+  const [project, setProject] = useState("");
+  const plan = planById(entitlement.planId || "free")!;
+  const projectNames = [...new Set(scans.map((scan) => scan.target?.name || scan.displayName).filter(Boolean))];
+  const visibleScans = project ? scans.filter((scan) => (scan.target?.name || scan.displayName) === project) : scans;
   const t = (en: string, arabic: string) => (ar ? arabic : en);
   const kinds = {
     website: t("Website", "موقع"),
@@ -52,6 +61,10 @@ export function DashboardContent({
         </Button>
       }
     >
+      <section className="mb-6 flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-blue-200 bg-blue-50 p-5">
+        <div><p className="font-extrabold">{t("Monthly access", "الوصول الشهري")}: {plan.name[ar ? "ar" : "en"]}</p><p className="mt-2 text-sm leading-7 text-slate-600">{entitlement.canMonitor ? t(`${entitlement.projectLimit} active project${entitlement.projectLimit > 1 ? "s" : ""}. Fix Credits are purchased separately.`, `${entitlement.projectLimit} من المشروعات النشطة. تُشترى نقاط الإصلاح منفصلة.`) : t("One free analysis. Starter unlocks one initial report; monthly plans add deeper analysis and monitoring.", "تحليل مجاني واحد. تفتح Starter تقريرًا أوليًا واحدًا، وتضيف الباقات الشهرية التحليل الأعمق والمتابعة.")}</p></div>
+        <Button asChild variant="outline" className="rounded-xl bg-white"><Link href={entitlement.canUseFixCredits ? "/fix-center" : "/pricing"}>{entitlement.canUseFixCredits ? t("Fix Center & credits", "مركز الإصلاح والنقاط") : t("Compare plans", "مقارنة الباقات")}</Link></Button>
+      </section>
       {latest ? (
         <div className="grid gap-5 md:grid-cols-3">
           {[
@@ -132,8 +145,9 @@ export function DashboardContent({
         <h2 className="text-lg font-extrabold">
           {t("Recent analyses", "التحليلات الأخيرة")}
         </h2>
+        {projectNames.length > 1 && <label className="mt-4 block text-sm font-semibold">{t("Filter by project", "تصفية حسب المشروع")}<select className="mt-2 block w-full rounded-xl border border-slate-200 bg-white p-3 sm:max-w-sm" value={project} onChange={(event) => setProject(event.target.value)}><option value="">{t("All projects", "جميع المشروعات")}</option>{projectNames.map((name) => <option key={name} value={name}>{name}</option>)}</select></label>}
         <div className="mt-5 space-y-3">
-          {scans.map((scan) => (
+          {visibleScans.map((scan) => (
             <Link
               key={scan.id}
               href={

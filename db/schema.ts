@@ -124,6 +124,9 @@ export const scans = sqliteTable(
     targetId: text("target_id").references(() => analysisTargets.id),
     targetInputJson: text("target_input_json").notNull().default("{}"),
     discoveryJson: text("discovery_json"),
+    analysisPlan: text("analysis_plan").notNull().default("free"),
+    projectKey: text("project_key"),
+    analysisPolicyJson: text("analysis_policy_json").notNull().default("{}"),
     requestedByUserId: text("requested_by_user_id")
       .notNull()
       .references(() => users.id),
@@ -354,6 +357,44 @@ export const subscriptions = sqliteTable(
   ],
 );
 
+/** Project slots are allocated atomically before paid analysis. Historical
+ * reports do not allocate a slot until the project is measured again. */
+export const subscriptionProjects = sqliteTable(
+  "subscription_projects",
+  {
+    id: text("id").primaryKey(),
+    organizationId: text("organization_id").notNull().references(() => organizations.id),
+    projectKey: text("project_key").notNull(),
+    displayName: text("display_name").notNull(),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [uniqueIndex("idx_subscription_projects_owner_key").on(table.organizationId, table.projectKey)],
+);
+
+/** A verified one-time purchase unlocks only its owned initial scan.
+ * Only the payment webhook/server fulfillment may write paid/refunded status. */
+export const reportPurchases = sqliteTable(
+  "report_purchases",
+  {
+    id: text("id").primaryKey(),
+    organizationId: text("organization_id").notNull().references(() => organizations.id),
+    scanId: text("scan_id").notNull().references(() => scans.id),
+    plan: text("plan").notNull().default("starter"),
+    status: text("status").notNull().default("pending"),
+    provider: text("provider").notNull(),
+    providerPaymentId: text("provider_payment_id").notNull(),
+    amountCents: integer("amount_cents").notNull(),
+    currency: text("currency").notNull().default("USD"),
+    paidAt: text("paid_at"),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    uniqueIndex("idx_report_purchases_provider_payment").on(table.provider, table.providerPaymentId),
+    index("idx_report_purchases_owner_scan_status").on(table.organizationId, table.scanId, table.status),
+  ],
+);
+
 export const fixes = sqliteTable(
   "fixes",
   {
@@ -468,3 +509,25 @@ export const supportTickets = sqliteTable(
     ),
   ],
 );
+
+
+export const scanInsights = sqliteTable("scan_insights", {
+  scanId: text("scan_id").primaryKey().references(() => scans.id),
+  detailsJson: text("details_json").notNull(),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+});
+export const monitoringSchedules = sqliteTable("monitoring_schedules", {
+  id: text("id").primaryKey(),
+  organizationId: text("organization_id").notNull().references(() => organizations.id),
+  userId: text("user_id").notNull().references(() => users.id),
+  projectKey: text("project_key").notNull(),
+  inputJson: text("input_json").notNull(),
+  targetJson: text("target_json").notNull(),
+  lastScanId: text("last_scan_id").references(() => scans.id),
+  nextRunAt: text("next_run_at").notNull(),
+  state: text("state").notNull().default("active"),
+  lastStatus: text("last_status"),
+  leaseToken: text("lease_token"),
+  leaseUntil: text("lease_until"),
+  updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (table) => [uniqueIndex("idx_monitor_owner_project").on(table.organizationId, table.projectKey), index("idx_monitor_due").on(table.state, table.nextRunAt)]);

@@ -24,11 +24,11 @@ const candidate = {
   websiteUrl: null,
   sources: [url],
 };
-function engineReply(content: string, cited = true) {
+function engineReply(content: string, cited = true, model = "test/model") {
   return new Response(
     JSON.stringify({
       id: crypto.randomUUID(),
-      model: "test/model",
+      model,
       choices: [
         {
           message: {
@@ -100,7 +100,10 @@ test("authenticated API: entity discovery, topic mode, isolation, confirmation, 
     engineReply("Sample");
   globalThis.fetch = async (_url, init) => {
     calls++;
-    return handler(JSON.parse(String(init?.body)));
+    const body = JSON.parse(String(init?.body));
+    const response = handler(body);
+    const data = await response.json() as Record<string, unknown>;
+    return Response.json({ ...data, model: body.model });
   };
   try {
     await t.test(
@@ -130,31 +133,31 @@ test("authenticated API: entity discovery, topic mode, isolation, confirmation, 
         assert.equal(body.scan.readinessScore, null);
         assert.deepEqual(body.scan.categoryScores, {});
         assert.equal(body.scan.actualVisibilityScore, 0);
-        assert.equal(body.scan.engineRuns.length, 3);
+        assert.equal(body.scan.engineRuns.length, 12);
         assert.equal(
           db.prepare("SELECT COUNT(*) n FROM engine_runs WHERE response_text LIKE '%think%'").get()?.n,
           0,
         );
         assert.equal(
           db.prepare("SELECT COUNT(*) n FROM engine_runs WHERE intent != 'identity'").get()?.n,
-          2,
+          10,
         );
         assert.equal(
           db.prepare("SELECT COUNT(*) n FROM engine_runs WHERE citations_json LIKE '%profiles.example%'").get()?.n,
-          3,
+          12,
         );
-        assert.equal(calls, 4);
+        assert.equal(calls, 13);
         assert.equal(db.prepare("SELECT COUNT(*) n FROM sites").get()?.n, 0);
         assert.equal(
           db.prepare("SELECT SUM(cost_micros) total FROM cost_ledger").get()
             ?.total,
-          4000,
+          13000,
         );
         const again = await POST(
           request({ input: "Ada Example", kind: "person" }),
         );
         assert.equal((await readBody(again)).cached, true);
-        assert.equal(calls, 4);
+        assert.equal(calls, 13);
         db.close();
       },
     );
@@ -235,7 +238,7 @@ test("authenticated API: entity discovery, topic mode, isolation, confirmation, 
           ).status,
           409,
         );
-        assert.equal(calls, 4);
+        assert.equal(calls, 13);
         db.close();
       },
     );
@@ -269,7 +272,7 @@ test("authenticated API: entity discovery, topic mode, isolation, confirmation, 
         );
         const body = await readBody(result);
         assert.equal(result.status, 201);
-        assert.equal(calls, 2);
+        assert.equal(calls, 12);
         assert.equal(body.scan.actualVisibilityScore, null);
         assert.equal(body.scan.readinessScore, null);
         assert.equal(body.scan.target!.kind, "topic");
@@ -323,9 +326,9 @@ test("authenticated API: entity discovery, topic mode, isolation, confirmation, 
       },
     );
     await t.test(
-      "URL-only requests remain supported with an unconfigured engine",
+      "free URL-only requests remain supported with an unconfigured engine",
       async () => {
-        const db = createFixture();
+        const db = createFixture(false, false);
         delete state.env.OPENROUTER_API_KEY;
         globalThis.fetch = async (remote) => {
           const address = String(remote);
@@ -353,7 +356,10 @@ test("authenticated API: entity discovery, topic mode, isolation, confirmation, 
         db.close();
         globalThis.fetch = async (_url, init) => {
           calls++;
-          return handler(JSON.parse(String(init?.body)));
+          const body = JSON.parse(String(init?.body));
+    const response = handler(body);
+    const data = await response.json() as Record<string, unknown>;
+    return Response.json({ ...data, model: body.model });
         };
       },
     );
@@ -362,11 +368,11 @@ test("authenticated API: entity discovery, topic mode, isolation, confirmation, 
       async () => {
         const db = createFixture();
         let providerCalls = 0;
-        globalThis.fetch = async (remote) => {
+        globalThis.fetch = async (remote, init) => {
           const address = String(remote);
           if (address.includes("openrouter.ai")) {
             providerCalls++;
-            return engineReply("A search-evidenced answer.");
+            return engineReply("A search-evidenced answer.", true, JSON.parse(String(init?.body)).model);
           }
           return new Response(
             address.endsWith("robots.txt")
@@ -394,8 +400,8 @@ test("authenticated API: entity discovery, topic mode, isolation, confirmation, 
         );
         const data = await readBody(res);
         assert.equal(res.status, 201);
-        assert.equal(providerCalls, 3);
-        assert.equal(data.scan.engineRuns.length, 3);
+        assert.equal(providerCalls, 12);
+        assert.equal(data.scan.engineRuns.length, 12);
         assert.ok(data.scan.target?.category);
         assert.ok(
           data.scan.engineRuns
@@ -413,7 +419,10 @@ test("authenticated API: entity discovery, topic mode, isolation, confirmation, 
         db.close();
         globalThis.fetch = async (_url, init) => {
           calls++;
-          return handler(JSON.parse(String(init?.body)));
+          const body = JSON.parse(String(init?.body));
+    const response = handler(body);
+    const data = await response.json() as Record<string, unknown>;
+    return Response.json({ ...data, model: body.model });
         };
       },
     );
@@ -458,27 +467,30 @@ test("authenticated API: entity discovery, topic mode, isolation, confirmation, 
         db.close();
         globalThis.fetch = async (_url, init) => {
           calls++;
-          return handler(JSON.parse(String(init?.body)));
+          const body = JSON.parse(String(init?.body));
+    const response = handler(body);
+    const data = await response.json() as Record<string, unknown>;
+    return Response.json({ ...data, model: body.model });
         };
       },
     );
     await t.test(
-      "quota is reserved atomically before a sixth scan calls a provider",
+      "quota is reserved atomically before a fifth monthly Essential scan calls a provider",
       async () => {
         const db = createFixture();
         calls = 0;
         handler = () => engineReply("A cited topic answer.");
-        for (let i = 0; i < 5; i++)
+        for (let i = 0; i < 4; i++)
           assert.equal(
-            (await POST(request({ input: `Topic ${i}`, kind: "topic" })))
+            (await POST(request({ input: "Same topic", kind: "topic", context: `Run ${i}` })))
               .status,
             201,
           );
         const res = await POST(
-          request({ input: "Sixth topic", kind: "topic" }),
+          request({ input: "Same topic", kind: "topic", context: "Run 6" }),
         );
         assert.equal(res.status, 429);
-        assert.equal(calls, 10);
+        assert.equal(calls, 48);
         db.close();
       },
     );

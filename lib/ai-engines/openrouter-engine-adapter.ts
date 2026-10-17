@@ -208,6 +208,7 @@ export class OpenRouterEngineAdapter implements EngineAdapter {
     const timestamp = new Date().toISOString();
     let retries = 0;
     let lastError: EngineProviderError | null = null;
+    let lastBody: OpenRouterResponse | null = null;
 
     while (retries <= this.maxRetries) {
       const controller = new AbortController();
@@ -242,20 +243,21 @@ export class OpenRouterEngineAdapter implements EngineAdapter {
                     type: "openrouter:web_search",
                     parameters: {
                       engine: "auto",
-                      max_results: 5,
-                      max_total_results: 10,
-                      max_uses: 2,
+                      max_results: request.searchResults ?? 5,
+                      max_total_results: (request.searchResults ?? 5) * (request.searchUses ?? 2),
+                      max_uses: request.searchUses ?? 2,
                       search_context_size: "low",
                     },
                   },
                 ]
               : undefined,
-            max_tool_calls: request.useSearch ? 3 : undefined,
+            max_tool_calls: request.useSearch ? (request.searchUses ?? 2) + 1 : undefined,
           }),
         });
         const body = (await response
           .json()
           .catch(() => null)) as OpenRouterResponse | null;
+        lastBody = body;
         if (!response.ok || !body) {
           lastError = safeError(
             response.status,
@@ -319,11 +321,11 @@ export class OpenRouterEngineAdapter implements EngineAdapter {
       responseText: null,
       sources: [],
       citations: [],
-      usage: emptyUsage(),
-      estimatedCostMicros: null,
+      usage: lastBody ? usageFrom(lastBody) : emptyUsage(),
+      estimatedCostMicros: actualProviderCostMicros(lastBody?.usage?.cost),
       durationMs: Date.now() - started,
       retryCount: retries,
-      providerRunId: null,
+      providerRunId: lastBody?.id || null,
       timestamp,
       error: lastError || safeError(null, null, "OpenRouter request failed."),
     };

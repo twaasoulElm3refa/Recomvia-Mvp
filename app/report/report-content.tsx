@@ -1,4 +1,5 @@
 "use client";
+import { AnalysisInsightsView } from "./analysis-insights-view";
 import { useState, type ReactNode } from "react";
 import { NavigationLink as Link } from "@/app/components/navigation-link";
 import { AppShell, StatusPill } from "@/app/components/app-shell";
@@ -9,7 +10,9 @@ import { safeSourceUrl } from "@/lib/analysis-target";
 import { normalizeDisplayText } from "@/lib/answer-text";
 import { REPORT_PAYWALL_COPY } from "@/lib/report-copy";
 import type { ReportView } from "@/db/product";
-import { LockKeyhole } from "lucide-react";
+import { PrintableReport } from "./printable-report";
+import { planRequestHref } from "@/lib/plans";
+import { LockKeyhole, Printer } from "lucide-react";
 
 function Panel({
   children,
@@ -40,7 +43,7 @@ function Source({ url, label }: { url: string; label?: string }) {
   ) : null;
 }
 
-function LockedReportCard({ ar }: { ar: boolean }) {
+function LockedReportCard({ ar, scanId }: { ar: boolean; scanId: string }) {
   const copy = REPORT_PAYWALL_COPY[ar ? "ar" : "en"];
   return (
     <Panel>
@@ -55,8 +58,10 @@ function LockedReportCard({ ar }: { ar: boolean }) {
           {copy.description}
         </p>
         <Button asChild className="mt-6 rounded-xl bg-blue-600">
-          <Link href="/pricing">{copy.cta}</Link>
+          <Link href={planRequestHref("starter", scanId)}>{copy.cta}</Link>
         </Button>
+        <p className="mt-4"><Link href="/pricing#essential" className="text-sm font-bold text-blue-700 underline">{copy.compare}</Link></p>
+        <p className="mt-3 text-xs leading-6 text-slate-500">{copy.notice}</p>
       </div>
     </Panel>
   );
@@ -74,9 +79,10 @@ export function ReportContent({
   const t = (en: string, arabic: string) => (ar ? arabic : en);
   const [tab, setTab] = useState("summary");
   const scan = report?.scan ?? null;
-  const canViewFullReport = report?.entitlement.canViewFullReport ?? false;
+  const canViewReport = report?.entitlement.canViewStarterReport ?? false;
+  const isStarter = report?.entitlement.reportLevel === "starter";
   const fullScan =
-    canViewFullReport && scan && "engineRuns" in scan ? scan : null;
+    canViewReport && scan && "engineRuns" in scan ? scan : null;
   const kind = scan?.target?.kind || "website";
   const topic = kind === "topic";
   const runs = fullScan?.engineRuns || [];
@@ -155,12 +161,12 @@ export function ReportContent({
           : t("Identity and visibility report", "تقرير الهوية والظهور")
       }
       description={t(
-        canViewFullReport
+        canViewReport
           ? "Inspect the questions, answers and sources behind each observation."
-          : "Review your scores and summary statistics. Full evidence requires an active plan.",
-        canViewFullReport
+          : "Review your headline numbers. Unlock the initial report with Starter or choose a monthly plan.",
+        canViewReport
           ? "راجع الأسئلة والإجابات والمصادر التي تستند إليها كل نتيجة."
-          : "راجع الدرجات والإحصاءات الملخصة. تتطلب الأدلة الكاملة خطة نشطة.",
+          : "راجع أرقامك الرئيسية. افتح التقرير المبدئي عبر Starter أو اختر باقة شهرية.",
       )}
       workspaceLabel={displayName}
       userInitial={displayName}
@@ -181,7 +187,9 @@ export function ReportContent({
           </p>
         </Panel>
       ) : (
-        <div className="space-y-5">
+        <div className="report-screen space-y-5">
+          {isStarter && <Panel><h2 className="font-extrabold">{t("Starter · one initial report", "Starter · تقرير أولي واحد")}</h2><p className="mt-3 text-sm leading-7 text-slate-600">{t("This report shows a limited initial sample and priority findings from your saved analysis. It does not include a fresh deep scan, ongoing monitoring or Fix Center access.", "يعرض هذا التقرير عينة أولية محدودة وأبرز الملاحظات من التحليل المحفوظ. لا يشمل فحصًا عميقًا جديدًا أو متابعة دورية أو استخدام مركز الإصلاح.")}</p><Link href="/pricing#essential" className="mt-4 inline-block text-sm font-bold text-blue-700 underline">{t("Explore deeper analysis and monitoring", "استعرض التحليل الأعمق والمتابعة")}</Link></Panel>}
+          {canViewReport && <Button type="button" variant="outline" className="rounded-xl print:hidden" onClick={() => window.print()}><Printer className="size-4" />{t("Print / save PDF", "طباعة / حفظ PDF")}</Button>}
           <div className="flex flex-wrap gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-xs text-slate-600">
             <strong>{scan.target?.name || scan.displayName}</strong>
             <span>
@@ -223,9 +231,11 @@ export function ReportContent({
               ["summary", t("Summary & next steps", "الخلاصة والتوصيات")],
               ["identity", t("Identity", "الهوية")],
               ["answers", t("Answers & sources", "الإجابات والمصادر")],
+              ["insights", t("Analysis & action plan", "التحليل وخطة التحسين")],
               ["technical", t("Technical evidence", "الأدلة التقنية")],
             ]
               .filter(([id]) => !topic || id !== "identity")
+              .filter(([id]) => id !== "insights" || (!isStarter && fullScan?.insights))
               .map(([id, label]) => (
                 <button
                   type="button"
@@ -238,7 +248,7 @@ export function ReportContent({
                   className={`rounded-xl px-4 py-3 text-sm font-bold ${tab === id ? "bg-blue-600 text-white" : "border border-slate-200 bg-white text-slate-600"}`}
                 >
                   <span className="inline-flex items-center gap-2">
-                    {id !== "summary" && !canViewFullReport && (
+                    {id !== "summary" && !canViewReport && (
                       <LockKeyhole className="size-3.5" aria-hidden="true" />
                     )}
                     {label}
@@ -252,8 +262,10 @@ export function ReportContent({
             aria-labelledby={`tab-${tab}`}
             className="space-y-5"
           >
+            {tab === "insights" && !isStarter && fullScan?.insights && <Panel><AnalysisInsightsView data={fullScan.insights} ar={ar} /></Panel>}
             {tab === "summary" && (
               <>
+                {!isStarter && fullScan?.insights && <Button variant="outline" onClick={() => setTab("insights")}>{t("View the evidence-based action plan and comparisons", "عرض خطة التحسين والمقارنات المستندة إلى الأدلة")}</Button>}
                 <div className="grid gap-5 md:grid-cols-2">
                   <Panel dark>
                     <p className="text-sm text-cyan-200">
@@ -280,7 +292,7 @@ export function ReportContent({
                             "الموضوع العام لا يُمنح درجة شخص أو علامة.",
                           )
                         : scan.methodologyVersion.startsWith("entity-")
-                          ? canViewFullReport
+                          ? canViewReport && !isStarter
                             ? t(
                                 `${mentions} of ${observed.length} completed search-enabled, unbranded answers mentioned the selected name. ${eligible.length} unbranded tests were requested.`,
                                 `ورد الاسم المختار في ${mentions} من ${observed.length} إجابات مكتملة بالبحث دون ذكر الاسم مسبقًا. عدد الاختبارات المطلوبة لهذا القياس: ${eligible.length}.`,
@@ -342,7 +354,7 @@ export function ReportContent({
                     ))}
                   </div>
                 )}
-                {canViewFullReport && topic && names.length > 0 && (
+                {canViewReport && topic && names.length > 0 && (
                   <Panel>
                     <h2 className="font-extrabold">
                       {t(
@@ -365,13 +377,13 @@ export function ReportContent({
                     </div>
                   </Panel>
                 )}
-                {canViewFullReport ? (
+                {canViewReport ? (
                   <Panel>
                     <h2 className="text-lg font-extrabold">
                       {t("Recommended next steps", "الخطوات المقترحة")}
                     </h2>
                     <ol className="mt-4 list-decimal space-y-3 ps-5 text-sm leading-7 text-slate-600">
-                      {suggestions.map((s) => (
+                      {(isStarter ? suggestions.slice(0, 3) : suggestions).map((s) => (
                         <li key={s}>{s}</li>
                       ))}
                     </ol>
@@ -383,14 +395,14 @@ export function ReportContent({
                     </p>
                   </Panel>
                 ) : (
-                  <LockedReportCard ar={ar} />
+                  <LockedReportCard ar={ar} scanId={scan.id} />
                 )}
               </>
             )}
-            {tab !== "summary" && !canViewFullReport && (
-              <LockedReportCard ar={ar} />
+            {tab !== "summary" && !canViewReport && (
+              <LockedReportCard ar={ar} scanId={scan.id} />
             )}
-            {tab === "identity" && canViewFullReport && fullScan && (
+            {tab === "identity" && canViewReport && fullScan && (
               <>
                 <Panel>
                   <h2 className="text-lg font-extrabold">
@@ -462,7 +474,7 @@ export function ReportContent({
                 )}
               </>
             )}
-            {tab === "answers" && canViewFullReport && fullScan && (
+            {tab === "answers" && canViewReport && fullScan && (
               <>
                 {!runs.length && (
                   <Panel>
@@ -577,7 +589,7 @@ export function ReportContent({
                 ))}
               </>
             )}
-            {tab === "technical" && canViewFullReport && fullScan &&
+            {tab === "technical" && canViewReport && fullScan &&
               (hasReadiness ? (
                 fullScan.findings.map((f) => (
                   <Panel key={f.id}>
@@ -625,6 +637,7 @@ export function ReportContent({
           </div>
         </div>
       )}
+      {fullScan && <PrintableReport scan={fullScan} starter={isStarter} ar={ar} suggestions={isStarter ? suggestions.slice(0, 3) : suggestions} />}
     </AppShell>
   );
 }

@@ -1,5 +1,9 @@
+import { analysisPolicy, configuredModels, policyFingerprint } from "@/lib/analysis-policy";
+import { auditPlanPages, runPlanVisibility } from "@/lib/plan-analysis";
+import { buildAnalysisInsights } from "@/lib/analysis-insights";
+import { recordEngineCost, recordPageCrawl, saveInsights, scanCostGuard, scanPolicyForOwner, scheduleMonitoring } from "@/db/analysis";
 import { env } from "cloudflare:workers";
-import { getAuthenticatedUser } from "@/app/auth";
+import { getAuthenticatedUser, type AuthUser } from "@/app/auth";
 import {
   attachAnalysisTarget,
   claimIdentityChoice,
@@ -9,6 +13,7 @@ import {
   failScan,
   findCachedScan,
   getOrCreateSite,
+  getEntitlementForUser,
   getReportForUser,
   getScanForUser,
   storeDiscovery,
@@ -16,11 +21,10 @@ import {
 } from "@/db/product";
 import {
   businessContextForVisibility,
-  runActualVisibility,
   type ActualVisibilityMeasurement,
 } from "@/lib/ai-visibility";
 import { OpenRouterEngineAdapter } from "@/lib/ai-engines/openrouter-engine-adapter";
-import { runLiveReadinessScan } from "@/lib/live-readiness";
+import { runLiveReadinessScan, type LiveReadinessResult } from "@/lib/live-readiness";
 import {
   contextForTarget,
   discoveryPrompt,
@@ -75,27 +79,36 @@ export async function POST(request: Request) {
     return json({ code: "invalid_input", error: "Invalid request body." }, 400);
   }
 
+  return runScanForUser(user, payload);
+}
+
+// The caller supplies authenticated identity. Options are internal-only, never copied from payload.
+export async function runScanForUser(user: AuthUser, payload: Record<string, unknown>, options: { monitoring?: boolean; confirmedTarget?: AnalysisTarget } = {}) {
   const workspace = await ensureWorkspace(user);
+  const entitlement = await getEntitlementForUser(user);
+  if (options.monitoring && !entitlement.canMonitor) return json({ code: "subscription_required" }, 403);
+  const policy = analysisPolicy(entitlement.planId);
+  let models: string[];
+  try { models = configuredModels(policy, env); }
+  catch { return json({ code: "analysis_configuration", error: "The models required for this plan have not been configured." }, 503); }
+  if (policy.plan !== "free" && !models.length) return json({ code: "engine_unavailable" }, 503);
   const key = env.OPENROUTER_API_KEY?.trim();
-  const model = env.OPENROUTER_MODEL?.trim();
   const mockAi = env.AI_TEST_MODE?.trim().toLowerCase() === "mock";
-  const adapter =
-    key && model
-      ? new OpenRouterEngineAdapter({
-          apiKey: key,
-          model,
+  const adapters = key ? models.map((model) => new OpenRouterEngineAdapter({
+          apiKey: key, model,
           maxRetries: 0,
           timeoutMs: 25_000,
           ...(mockAi ? { fetchImpl: fetch, testMode: "mock" as const } : {}),
-        })
-      : null;
+        })) : [];
+  const adapter = adapters[0] || null;
+  const fingerprint = policyFingerprint(policy, models);
   let scanId: string | null = null;
 
   async function finish(
     input: TargetInput,
     target: AnalysisTarget,
     cacheKey: string,
-    result?: ScanCompletion,
+    result?: LiveReadinessResult,
     candidate?: IdentityCandidate,
   ) {
     await attachAnalysisTarget(workspace, scanId!, target, input, cacheKey);
@@ -116,22 +129,17 @@ export async function POST(request: Request) {
             },
           }
         : baseContext;
-    const prompts = generateTargetPrompts(target);
-    const visibility: ActualVisibilityMeasurement = adapter
-      ? await runActualVisibility({
-          adapter,
-          context,
-          prompts,
-          aliases: target.aliases,
-          useDomainAlias: target.kind === "website",
-        })
-      : {
-          status: "not_configured",
-          score: null,
-          confidence: 0,
-          engineRuns: [],
-          prompts,
-        };
+    const prompts = generateTargetPrompts(target, policy.promptLimit);
+    const pages = result ? await auditPlanPages(result, policy, (url, usage, failed) => recordPageCrawl(workspace, scanId!, url, usage, failed)) : [];
+    const visibility: ActualVisibilityMeasurement = await runPlanVisibility({ adapters, context, target, prompts, policy,
+      initialCostMicros: await scanCostGuard(workspace, scanId!, policy.unknownCallReserveMicros),
+      onRun: (run) => recordEngineCost(workspace, scanId!, run) });
+    if (visibility.engineRuns.length && visibility.engineRuns.every((run) => run.error)) {
+      await failScan(workspace, scanId!, "All provider observations failed; no visibility score was assigned.");
+      return json({ code: "engine_failed", scanId }, 502);
+    }
+    const insights = await buildAnalysisInsights({ target, policy, models, prompts, runs: visibility.engineRuns, pages });
+    await saveInsights(workspace, scanId!, input, insights, visibility.score);
     const completion: ScanCompletion = result || {
       sourceUrl: "",
       finalUrl: null,
@@ -153,6 +161,7 @@ export async function POST(request: Request) {
       findings: [],
     };
     await completeScan(workspace, scanId!, completion, visibility);
+    await scheduleMonitoring(workspace, scanId!, input, target, policy);
     const report = await getReportForUser(workspace.userId, scanId!);
     if (!report) throw new Error("Stored report could not be loaded.");
     return json(
@@ -193,6 +202,11 @@ export async function POST(request: Request) {
         pending.status !== "awaiting_identity"
       )
         return json({ code: "invalid_choice" }, 409);
+      const reservedPolicy = await scanPolicyForOwner(workspace, pending.id);
+      if (reservedPolicy && reservedPolicy.plan !== policy.plan && !(["growth", "pro"].includes(reservedPolicy.plan) && ["growth", "pro"].includes(policy.plan))) {
+        await failScan(workspace, pending.id, "Plan changed while awaiting identity. Start a new analysis.");
+        return json({ code: "plan_changed" }, 409);
+      }
       if (!(await claimIdentityChoice(workspace, pending.id)))
         return json({ code: "expired_choice" }, 409);
       scanId = pending.id;
@@ -202,7 +216,7 @@ export async function POST(request: Request) {
           ...pending.targetInput,
           context: `${pending.targetInput.context}|${candidate.name}|${candidate.sources.join("|")}`,
         },
-        model!,
+        fingerprint,
         true,
       );
       if (pending.targetInput.websiteUrl) {
@@ -247,10 +261,10 @@ export async function POST(request: Request) {
       );
     const cacheKey = await targetCacheKey(
       input,
-      model || "unconfigured",
+      fingerprint,
       Boolean(adapter),
     );
-    const cached = await findCachedScan(workspace, cacheKey);
+    const cached = options.monitoring ? null : await findCachedScan(workspace, cacheKey);
     if (cached) {
       const report = await getReportForUser(workspace.userId, cached.id);
       if (!report) throw new Error("Cached report could not be loaded.");
@@ -281,6 +295,7 @@ export async function POST(request: Request) {
           ? "readiness_and_actual_visibility"
           : "entity_visibility",
       targetInput: input,
+      executionPolicy: policy,
     });
 
     if (input.websiteUrl) {
@@ -342,12 +357,16 @@ export async function POST(request: Request) {
         cacheKey,
       );
 
+    if (options.confirmedTarget && options.confirmedTarget.input === input.input && options.confirmedTarget.kind !== "website")
+      return await finish(input, options.confirmedTarget, cacheKey);
+
     const response = await adapter!.run({
       prompt: discoveryPrompt(input),
       language: input.language,
       country: "Global",
       useSearch: true,
       maxOutputTokens: 2_400,
+      searchResults: policy.searchResults, searchUses: policy.searchUses,
     });
     const discovery = parseTargetDiscovery(response, input);
     await storeDiscovery(workspace, scanId, discovery);
@@ -405,11 +424,16 @@ export async function POST(request: Request) {
       candidate,
     );
   } catch (error) {
+    if (error instanceof Error && error.message === "plan_changed") return json({ code: "plan_changed" }, 409);
+    if (error instanceof Error && error.message === "project_limit")
+      return json({ code: "project_limit", error: "Your active plan's project limit has been reached." }, 403);
+    if (error instanceof Error && error.message === "free_scan_limit")
+      return json({ code: "free_scan_limit", error: "The free analysis allowance or retry limit has been reached." }, 429);
     if (error instanceof Error && error.message === "scan_limit")
       return json(
         {
           code: "scan_limit",
-          error: "Private beta limit: five analyses per 24 hours.",
+          error: "A project analysis is already running or the daily/monthly analysis allowance has been reached.",
         },
         429,
       );

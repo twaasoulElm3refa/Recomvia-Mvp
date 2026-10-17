@@ -1,11 +1,12 @@
 "use client";
 
-import { FormEvent, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 import { CheckCircle2, Loader2, Send } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import { planById } from "@/lib/plans";
 import type { SiteLocale } from "@/lib/site-locale";
 
 const ticketStorageKey = "recomvia-support-ticket";
@@ -33,13 +34,26 @@ export function ContactForm({ locale }: { locale: SiteLocale }) {
   const [sending, setSending] = useState(false);
   const [error, setError] = useState("");
   const [reference, setReference] = useState("");
+  const [interest, setInterest] = useState<{ plan: string | null; credits: boolean; scan: string | null } | null>(null);
+  useEffect(() => {
+    const query = new URLSearchParams(window.location.search);
+    const plan = planById(query.get("plan"));
+    const scan = query.get("scan");
+    if ((plan && plan.billing !== "free") || query.get("product") === "fix-credits") {
+      setInterest({ plan: plan && plan.billing !== "free" ? plan.id : null, credits: query.get("product") === "fix-credits", scan: scan && /^[a-zA-Z0-9_-]{1,100}$/.test(scan) ? scan : null });
+    }
+  }, []);
+  const selectedPlan = planById(interest?.plan);
+  const interestText = selectedPlan
+    ? `${selectedPlan.name[locale]} · ${selectedPlan.price.amount} ${selectedPlan.price.cadence[locale]}${interest?.scan ? ` · ${locale === "ar" ? "التقرير" : "Report"} ${interest.scan}` : ""}`
+    : interest?.credits ? (locale === "ar" ? "نقاط الإصلاح" : "Fix Credits") : "";
 
   async function submit(event: FormEvent) {
     event.preventDefault();
     setSending(true);
     setError("");
     try {
-      const question = `[${category}] ${message.trim()}`;
+      const question = `[${category}] ${interestText ? `[Plan enquiry: ${interestText}] ` : ""}${message.trim()}`;
       const response = await fetch("/api/support/tickets", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -71,12 +85,13 @@ export function ContactForm({ locale }: { locale: SiteLocale }) {
 
   return (
     <form onSubmit={submit} className="space-y-5 rounded-[26px] border border-slate-200 bg-white p-6 shadow-[0_24px_70px_rgba(7,17,31,.08)] sm:p-8">
+      {interestText && <div className="rounded-2xl border border-blue-200 bg-blue-50 p-4"><p className="font-bold text-blue-950">{interestText}</p><p className="mt-2 text-xs leading-6 text-blue-900">{locale === "ar" ? "طلب اهتمام فقط. لا يُخصم مبلغ ولا تُفعّل باقة من هذه الرسالة. يُوضح الفريق موعد التفعيل والحصص قبل الشراء." : "An enquiry only. This message does not charge you or activate a plan. Our team will confirm availability and allowances before purchase."}</p></div>}
       <div className="grid gap-5 sm:grid-cols-2">
         <label className="space-y-2 text-sm font-bold text-slate-700">{t.name}<Input value={name} onChange={(event) => setName(event.target.value)} minLength={2} maxLength={80} required placeholder={t.namePlaceholder} className="h-12 rounded-xl font-normal" /></label>
         <label className="space-y-2 text-sm font-bold text-slate-700">{t.email}<Input value={email} onChange={(event) => setEmail(event.target.value)} type="email" required placeholder="you@company.com" className="h-12 rounded-xl font-normal" dir="ltr" /></label>
       </div>
       <label className="block space-y-2 text-sm font-bold text-slate-700">{t.topic}<Select value={category} onValueChange={setCategory}><SelectTrigger className="h-12 w-full rounded-xl font-normal"><SelectValue /></SelectTrigger><SelectContent>{t.categories.map(([value, label]) => <SelectItem key={value} value={value}>{label}</SelectItem>)}</SelectContent></Select></label>
-      <label className="block space-y-2 text-sm font-bold text-slate-700">{t.message}<Textarea value={message} onChange={(event) => setMessage(event.target.value)} minLength={10} maxLength={2000} required placeholder={t.messagePlaceholder} className="min-h-40 rounded-xl font-normal" dir="auto" /></label>
+      <label className="block space-y-2 text-sm font-bold text-slate-700">{t.message}<Textarea value={message} onChange={(event) => setMessage(event.target.value)} minLength={interestText ? undefined : 10} maxLength={1800} required={!interestText} placeholder={t.messagePlaceholder} className="min-h-40 rounded-xl font-normal" dir="auto" /></label>
       <div className="hidden" aria-hidden="true"><label>{t.website}<input tabIndex={-1} autoComplete="off" value={companyWebsite} onChange={(event) => setCompanyWebsite(event.target.value)} /></label></div>
       {error && <p className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm font-semibold text-red-700" role="alert">{error}</p>}
       <Button type="submit" disabled={sending} className="h-12 w-full rounded-xl bg-blue-600 text-base font-bold hover:bg-blue-700">{sending ? <><Loader2 className="size-4 animate-spin" />{t.sending}</> : <><Send className="size-4" />{t.send}</>}</Button>

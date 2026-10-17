@@ -248,7 +248,7 @@ export function contextForTarget(
   };
 }
 
-export function generateTargetPrompts(target: AnalysisTarget): IntentPrompt[] {
+export function generateTargetPrompts(target: AnalysisTarget, limit = 3): IntentPrompt[] {
   const ar = target.language === "ar";
   const make = (
     id: string,
@@ -261,8 +261,8 @@ export function generateTargetPrompts(target: AnalysisTarget): IntentPrompt[] {
     language: target.language,
     country: target.country,
   });
-  if (target.kind === "topic")
-    return [
+  if (target.kind === "topic") {
+    const topics = [
       make(
         "topic_sources",
         "topic",
@@ -278,6 +278,15 @@ export function generateTargetPrompts(target: AnalysisTarget): IntentPrompt[] {
           : `Which people, organizations or brands are associated with ${target.name}? List concrete names with relevance and sources; do not claim a global ranking.`,
       ),
     ];
+    const angles = ar
+      ? ["الأسئلة المتكررة", "الخلافات والأدلة", "معايير التقييم", "البدائل", "حالات الاستخدام", "الفئات المستفيدة", "التكلفة والقيود", "الأبحاث الأصلية", "المصادر المحلية", "تغير المعلومات مع الزمن"]
+      : ["frequent questions", "disagreements and evidence", "evaluation criteria", "alternatives", "use cases", "audiences", "costs and constraints", "original research", "local sources", "changes over time"];
+    for (const [i, angle] of angles.entries()) topics.push(make(`topic_angle_${i}`, "topic", ar
+      ? `ما أهم ما يجب معرفته عن «${target.name}» فيما يخص ${angle}؟ استند إلى مصادر محددة وروابط، وبيّن حدود الأدلة.`
+      : `What should someone know about ${target.name} concerning ${angle}? Cite specific sources and links and explain evidence limits.`));
+    // Preserve the existing default two-question topic scan.
+    return topics.slice(0, limit === 3 ? 2 : Math.min(12, limit));
+  }
   const prompts = [
     make(
       "identity",
@@ -325,9 +334,8 @@ export function generateTargetPrompts(target: AnalysisTarget): IntentPrompt[] {
     const token = normalized(name);
     return token.length >= 2 && normalized(subject).includes(token);
   });
-  if ((!subject || stillLeaks) && target.kind === "website") return prompts;
-  if (!subject || stillLeaks)
-    subject = ar ? "هذا المجال" : target.kind === "person" ? "this field" : "this category";
+  // A generic placeholder cannot support a defensible unbranded visibility score.
+  if (!subject || stillLeaks) return prompts;
   const audience =
     target.kind === "person"
       ? ar
@@ -354,7 +362,21 @@ export function generateTargetPrompts(target: AnalysisTarget): IntentPrompt[] {
         : `Which ${audience} would you recommend considering for expertise in ${subject} in ${target.country}, and why?`,
     ),
   );
-  return prompts;
+  const angles: Array<[IntentPrompt["intent"], string, string]> = [
+    ["comparison", "قارن الخيارات المتاحة وحدد نقاط القوة والقيود بأدلة", "Compare available options, strengths and constraints with evidence"],
+    ["alternatives", "ما البدائل المناسبة وما أسباب اختيار كل بديل", "What alternatives are appropriate and why choose each one"],
+    ["recommendation", "ما الخيارات المناسبة لمؤسسة صغيرة بميزانية محدودة", "Which options suit a small organization with a limited budget"],
+    ["recommendation", "ما الخيارات المناسبة لمؤسسة تحتاج قدرات متقدمة", "Which options suit an organization needing advanced capabilities"],
+    ["comparison", "قارن التخصص والخبرة المثبتة وخدمة العملاء", "Compare specialization, demonstrated expertise and customer service"],
+    ["discovery", "من يقدم أمثلة عمل أو دراسات حالة موثقة", "Who provides documented work examples or case studies"],
+    ["recommendation", "من يناسب من يستخدم هذه الخدمة لأول مرة ولماذا", "Who suits a first-time buyer of this service and why"],
+    ["comparison", "ما المعلومات التي يجب التحقق منها قبل الاختيار وقارن الخيارات بناء عليها", "What should a buyer verify before choosing and how do options compare"],
+    ["alternatives", "ما الخيارات المتخصصة مقابل الخيارات العامة وما حدود كل منها", "What specialized and general options exist and what are their limits"],
+  ];
+  for (const [i, [intent, arabic, english]] of angles.entries()) prompts.push(make(`intent_${i}`, intent, ar
+    ? `في مجال «${subject}» في ${target.country}: ${arabic}؟ اذكر أسماء محددة ومصادر قابلة للتحقق، ولا تفترض ترتيبًا عالميًا.`
+    : `For ${subject} in ${target.country}: ${english}? Name specific options and verifiable sources; do not assume a global ranking.`));
+  return prompts.slice(0, Math.max(1, Math.min(12, limit)));
 }
 
 export async function targetCacheKey(

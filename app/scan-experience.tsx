@@ -35,6 +35,7 @@ import type {
   IdentityCandidate,
   TargetInput,
 } from "@/lib/analysis-target";
+import { PLAN_CATALOG } from "@/lib/plans";
 import { faqEntries } from "@/lib/knowledge-base";
 import { normalizeDisplayText } from "@/lib/answer-text";
 
@@ -402,12 +403,28 @@ export function ScanExperience() {
               "أدخل رابطًا عامًا أو اسمًا أو علامة أو موضوعًا.",
             ],
             scan_limit: [
-              "Private beta limit: five analyses per 24 hours.",
-              "حد النسخة التجريبية: خمسة تحليلات كل 24 ساعة.",
+              "An analysis is already running for this project, or its daily/monthly allowance has been reached. View your saved report and retry when eligible.",
+              "يوجد تحليل جارٍ لهذا المشروع، أو بلغت حد الاستخدام اليومي أو الشهري. راجع تقريرك المحفوظ وأعد المحاولة عند إتاحة الرصيد.",
+            ],
+            free_scan_limit: [
+              "Your free analysis allowance or retry limit has been reached. View your saved report or compare plans.",
+              "بلغت حد الفحص المجاني أو محاولاته. راجع تقريرك المحفوظ أو قارن الباقات.",
+            ],
+            project_limit: [
+              "Your plan's project limit has been reached. Essential and Growth cover one project; Pro covers three.",
+              "بلغت حد مشروعات الباقة. تشمل Essential وGrowth مشروعًا واحدًا، وتشمل Pro ثلاثة مشروعات.",
+            ],
+            analysis_configuration: [
+              "The analysis models for this plan are awaiting configuration. Your request has not started a paid analysis.",
+              "نماذج التحليل لهذه الباقة تحتاج إكمال الإعداد. لم يبدأ هذا الطلب تحليلًا مدفوع التكلفة.",
+            ],
+            plan_changed: [
+              "Your plan changed during this analysis. Please start a new analysis.",
+              "تغير اشتراكك أثناء هذا التحليل. يرجى بدء تحليل جديد.",
             ],
             engine_unavailable: [
-              "Name and topic analysis is awaiting engine activation. Please try later.",
-              "تحليل الأسماء والموضوعات ينتظر تفعيل المحرك. يرجى المحاولة لاحقًا.",
+              "AI analysis is awaiting engine activation. Please try later.",
+              "تحليل الذكاء الاصطناعي ينتظر تفعيل المحرك. يرجى المحاولة لاحقًا.",
             ],
             engine_failed: [
               "The AI engine is temporarily unavailable. Please try later.",
@@ -1160,6 +1177,20 @@ export function ScanExperience() {
                 </span>
               </Link>
             ))}
+          </div>
+        </section>
+
+        <section id="plans" className="border-t border-slate-200 bg-slate-50">
+          <div className="mx-auto max-w-[1240px] px-5 py-16 sm:px-8">
+            <h2 className="text-3xl font-extrabold">{locale === "ar" ? "باقة لكل خطوة في رحلتك" : "A plan for every step"}</h2>
+            <p className="mt-4 text-sm leading-7 text-slate-600">{locale === "ar" ? "ابدأ بفحص مجاني، وافتح التقرير المبدئي أو اختر التحليل الأعمق والمتابعة. الباقات المدفوعة متاحة لطلب التفعيل؛ لا تُحصّل رسوم حاليًا." : "Start free, unlock an initial report or choose deeper analysis and monitoring. Register your interest in paid plans; no payment is collected yet."}</p>
+            <div className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-5">{PLAN_CATALOG.map((plan) => <Link key={plan.id} href={`/pricing#${plan.id}`} className="rounded-2xl border border-slate-200 bg-white p-5 transition hover:border-blue-500">
+              <h3 className="font-extrabold">{plan.name[locale]}</h3>
+              <strong className="mt-4 inline-block text-3xl tracking-tight" dir="ltr">{plan.price.amount}</strong>
+              <p className="mt-1 text-xs text-slate-500">{plan.price.cadence[locale]}</p>
+              <p className="mt-4 text-sm leading-7 text-slate-600">{plan.description[locale]}</p>
+            </Link>)}</div>
+            <p className="mt-5 text-xs leading-6 text-slate-500">{locale === "ar" ? "جميع الأسعار بالدولار. تُشترى نقاط الإصلاح منفصلة مع اشتراك شهري نشط." : "All prices in USD. Fix Credits are purchased separately with an active monthly subscription."}</p>
           </div>
         </section>
 

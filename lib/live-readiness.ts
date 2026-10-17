@@ -38,6 +38,8 @@ export type LiveReadinessResult = {
   identityCandidates: WebsiteIdentityCandidate[];
   categoryScores: Record<ReadinessFinding["category"], number>;
   findings: ReadinessFinding[];
+  internalLinks: string[];
+  pageText: string;
 };
 
 const MAX_HTML_BYTES = 1_500_000;
@@ -76,14 +78,18 @@ export function normalizeWebsiteInput(input: string) {
   return url;
 }
 
-async function fetchText(startUrl: URL, maxBytes: number, accept: string) {
+export type CrawlUsage = { requestCount: number; bytesFetched: number };
+
+async function fetchText(startUrl: URL, maxBytes: number, accept: string, requiredOrigin?: string, usage?: CrawlUsage) {
   let current = new URL(startUrl);
   for (let redirects = 0; redirects <= 3; redirects += 1) {
     assertPublicUrl(current);
+    if (requiredOrigin && current.origin !== requiredOrigin) throw new Error("Cross-origin page crawl blocked");
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 12_000);
     let response: Response;
     try {
+      if (usage) usage.requestCount++;
       response = await fetch(current, {
         redirect: "manual",
         signal: controller.signal,
@@ -92,26 +98,25 @@ async function fetchText(startUrl: URL, maxBytes: number, accept: string) {
           "User-Agent": "RecomviaBot/0.1 (+https://recomvia.ai/methodology)",
         },
       });
-    } finally {
-      clearTimeout(timer);
-    }
-    if ([301, 302, 303, 307, 308].includes(response.status)) {
-      const location = response.headers.get("location");
-      if (!location) throw new Error("The website returned an incomplete redirect.");
-      current = new URL(location, current);
-      continue;
-    }
-    const announcedLength = Number(response.headers.get("content-length") || "0");
-    if (announcedLength > maxBytes) throw new Error("The response is larger than the scan safety limit.");
-    const bytes = new Uint8Array(await response.arrayBuffer());
-    if (bytes.byteLength > maxBytes) throw new Error("The response is larger than the scan safety limit.");
-    return {
-      url: current.toString(),
-      status: response.status,
-      contentType: response.headers.get("content-type") || "",
-      text: new TextDecoder().decode(bytes),
-      bytes: bytes.byteLength,
-    };
+      if ([301, 302, 303, 307, 308].includes(response.status)) {
+        const location = response.headers.get("location");
+        if (!location) throw new Error("The website returned an incomplete redirect.");
+        current = new URL(location, current);
+        continue;
+      }
+      const announcedLength = Number(response.headers.get("content-length") || "0");
+      if (announcedLength > maxBytes) throw new Error("The response is larger than the scan safety limit.");
+      const bytes = new Uint8Array(await response.arrayBuffer());
+      if (usage) usage.bytesFetched += bytes.byteLength;
+      if (bytes.byteLength > maxBytes) throw new Error("The response is larger than the scan safety limit.");
+      return {
+        url: current.toString(),
+        status: response.status,
+        contentType: response.headers.get("content-type") || "",
+        text: new TextDecoder().decode(bytes),
+        bytes: bytes.byteLength,
+      };
+    } finally { clearTimeout(timer); }
   }
   throw new Error("The website redirected too many times.");
 }
@@ -159,9 +164,9 @@ function makeFinding(input: Omit<ReadinessFinding, "sortOrder">, sortOrder: numb
   return { ...input, sortOrder };
 }
 
-export async function runLiveReadinessScan(input: string): Promise<LiveReadinessResult> {
+export async function runLiveReadinessScan(input: string, requiredOrigin?: string, usage: CrawlUsage = { requestCount: 0, bytesFetched: 0 }): Promise<LiveReadinessResult> {
   const source = normalizeWebsiteInput(input);
-  const page = await fetchText(source, MAX_HTML_BYTES, "text/html,application/xhtml+xml;q=0.9,*/*;q=0.1");
+  const page = await fetchText(source, MAX_HTML_BYTES, "text/html,application/xhtml+xml;q=0.9,*/*;q=0.1", requiredOrigin, usage);
   if (!page.contentType.toLowerCase().includes("text/html") && !page.text.match(/<!doctype html|<html\b/i)) {
     throw new Error("The address did not return an HTML webpage.");
   }
@@ -170,12 +175,12 @@ export async function runLiveReadinessScan(input: string): Promise<LiveReadiness
   const origin = finalUrl.origin;
   const robotsUrl = new URL("/robots.txt", origin);
   let robots: Awaited<ReturnType<typeof fetchText>> | null = null;
-  try { robots = await fetchText(robotsUrl, MAX_AUX_BYTES, "text/plain,*/*;q=0.1"); } catch { robots = null; }
+  try { robots = await fetchText(robotsUrl, MAX_AUX_BYTES, "text/plain,*/*;q=0.1", requiredOrigin, usage); } catch { robots = null; }
   const sitemapHint = robots?.text.match(/^\s*sitemap:\s*(\S+)/im)?.[1];
   let sitemapUrl: URL;
   try { sitemapUrl = sitemapHint ? new URL(sitemapHint, origin) : new URL("/sitemap.xml", origin); } catch { sitemapUrl = new URL("/sitemap.xml", origin); }
   let sitemap: Awaited<ReturnType<typeof fetchText>> | null = null;
-  try { sitemap = await fetchText(sitemapUrl, MAX_AUX_BYTES, "application/xml,text/xml,text/plain,*/*;q=0.1"); } catch { sitemap = null; }
+  try { sitemap = await fetchText(sitemapUrl, MAX_AUX_BYTES, "application/xml,text/xml,text/plain,*/*;q=0.1", requiredOrigin, usage); } catch { sitemap = null; }
 
   const html = page.text;
   const text = plainText(html);
@@ -229,8 +234,8 @@ export async function runLiveReadinessScan(input: string): Promise<LiveReadiness
     return [category, possible ? Math.round((awarded / possible) * 100) : 0];
   })) as LiveReadinessResult["categoryScores"];
   const issueRows = findings.filter((finding) => finding.status !== "pass");
-  const requestCount = 1 + (robots ? 1 : 0) + (sitemap ? 1 : 0);
-  const bytesFetched = page.bytes + (robots?.bytes || 0) + (sitemap?.bytes || 0);
+  const requestCount = usage.requestCount;
+  const bytesFetched = usage.bytesFetched;
   const confidence = Math.min(92, 72 + (robots ? 5 : 0) + (sitemap ? 5 : 0) + (jsonLdBlocks.length ? 4 : 0) + (page.status === 200 ? 4 : 0));
   const discoveredContext = discoverWebsiteContext({
     sourceUrl: source.toString(), finalUrl: page.url, title, description, htmlLang, html, visibleText: text,
@@ -241,7 +246,19 @@ export async function runLiveReadinessScan(input: string): Promise<LiveReadiness
     html,
   });
 
+  const internalLinks: string[] = [];
+  for (const tag of html.match(/<a\b[^>]*>/gi) || []) {
+    try {
+      const raw = attributes(tag).href;
+      if (!raw || /^(?:mailto|tel|javascript|data):/i.test(raw)) continue;
+      const link = normalizeWebsiteInput(new URL(decodeHtmlEntities(raw), page.url).toString());
+      if (link.origin !== finalUrl.origin || link.search || link.toString() === page.url || /\.(?:pdf|zip|png|jpe?g|gif|svg|mp4)$/i.test(link.pathname)) continue;
+      if (!internalLinks.includes(link.toString())) internalLinks.push(link.toString());
+      if (internalLinks.length >= 40) break;
+    } catch { /* Skip invalid or private links. */ }
+  }
   return {
+    internalLinks, pageText: text.slice(0, 16000),
     sourceUrl: source.toString(), finalUrl: page.url, httpStatus: page.status, readinessScore, confidence,
     issueCount: issueRows.length,
     criticalCount: issueRows.filter((finding) => finding.severity === "critical").length,

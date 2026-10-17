@@ -29,6 +29,8 @@ export type EngineRunRequest = {
   country: string;
   useSearch: boolean;
   maxOutputTokens?: number;
+  searchResults?: number;
+  searchUses?: number;
 };
 
 export type EngineProviderError = {

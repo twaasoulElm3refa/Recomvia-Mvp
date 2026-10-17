@@ -1,3 +1,5 @@
+import { analysisPolicy, analysisProjectKey, type AnalysisPolicy } from "@/lib/analysis-policy";
+import type { AnalysisInsights } from "@/lib/analysis-insights";
 import type {
   AnalysisTarget,
   TargetDiscovery,
@@ -18,11 +20,12 @@ import type {
 } from "@/lib/ai-visibility";
 import {
   resolveReportEntitlement,
+  FREE_REPORT_ENTITLEMENT,
   type ReportEntitlement,
   type SubscriptionRecord,
 } from "@/lib/report-entitlements";
 
-type Workspace = {
+export type Workspace = {
   organizationId: string;
   userId: string;
   email: string;
@@ -66,6 +69,7 @@ export type StoredScan = {
   errorMessage: string | null;
   completedAt: string | null;
   createdAt: string;
+  insights?: AnalysisInsights | null;
   findings: StoredFinding[];
   categoryScores: Record<string, number>;
   discoveredContext: DiscoveredSiteContext | null;
@@ -99,9 +103,36 @@ export type ReportSummary = Pick<
 };
 
 export type ReportView = {
-  scan: StoredScan | ReportSummary;
+  scan: StoredScan | ReportSummary | StarterReport | PendingReport;
   entitlement: ReportEntitlement;
 };
+
+export type StarterReport = StoredScan & { detailLevel: "starter" };
+type PendingReport = ReportSummary & {
+  targetInput: TargetInput | null;
+  discovery: Pick<TargetDiscovery, "status" | "candidates"> | null;
+};
+
+// This is a small view of the already stored scan, never a new provider run.
+function toStarterReport(scan: StoredScan): StarterReport {
+  const severityOrder: Record<string, number> = { critical: 0, high: 1, medium: 2, low: 3, info: 4 };
+  const first = scan.engineRuns.find((run) => !run.error) || scan.engineRuns[0];
+  const engineRuns = scan.engineRuns
+    .filter((run) => first && run.provider === first.provider && run.model === first.model && run.surfaceType === first.surfaceType)
+    .slice(0, 3);
+  const competitor = engineRuns.flatMap((run) => run.analysis.competitorsMentioned)[0];
+  const { targetInputJson: _input, discoveryJson: _discovery, ...safe } = scan;
+  void _input; void _discovery;
+  return {
+    ...safe, insights: null, detailLevel: "starter", targetInput: null, discovery: null, discoveredContext: null,
+    findings: scan.findings.filter((finding) => finding.status !== "pass")
+      .sort((a, b) => (severityOrder[a.severity] ?? 5) - (severityOrder[b.severity] ?? 5)).slice(0, 3),
+    engineRuns: engineRuns.map((run) => ({
+      ...run,
+      analysis: { ...run.analysis, competitorsMentioned: competitor && run.analysis.competitorsMentioned.includes(competitor) ? [competitor] : [] },
+    })),
+  };
+}
 
 function database() {
   if (!env.DB) throw new Error("Product storage is temporarily unavailable.");
@@ -547,7 +578,7 @@ async function toReportSummary(row: ReportSummaryRow): Promise<ReportSummary> {
   };
 }
 
-async function reportEntitlementForOrganization(organizationId: string) {
+async function reportEntitlementForOrganization(organizationId: string, scanId?: string) {
   const result = await database()
     .prepare(
       `
@@ -559,7 +590,19 @@ async function reportEntitlementForOrganization(organizationId: string) {
     )
     .bind(organizationId)
     .all<SubscriptionRecord>();
-  return resolveReportEntitlement(result.results);
+  const purchase = scanId ? await database().prepare(`
+    SELECT p.id FROM report_purchases p
+    JOIN scans s ON s.id = p.scan_id AND s.organization_id = p.organization_id
+    WHERE p.organization_id = ? AND p.scan_id = ? AND p.plan = 'starter'
+      AND p.status = 'paid' AND p.paid_at IS NOT NULL AND s.status = 'completed'
+    LIMIT 1
+  `).bind(organizationId, scanId).first() : null;
+  return resolveReportEntitlement(result.results, new Date(), Boolean(purchase));
+}
+
+export async function getEntitlementForUser(user: AuthUser) {
+  const workspace = await ensureWorkspace(user);
+  return reportEntitlementForOrganization(workspace.organizationId);
 }
 
 async function hydrateScan(
@@ -582,6 +625,7 @@ async function hydrateScan(
     categoryScores: computeCategoryScores(findings),
     discoveredContext,
     engineRuns,
+    insights: parseJson<AnalysisInsights | null>((await database().prepare("SELECT details_json AS details FROM scan_insights WHERE scan_id=?").bind(row.id).first<{ details: string }>())?.details, null),
   };
 }
 
@@ -628,16 +672,43 @@ export async function createRunningScan(input: {
   methodologyVersion: string;
   scanKind: string;
   targetInput?: TargetInput;
+  executionPolicy?: AnalysisPolicy;
 }) {
   const id = createId("scan");
+  const entitlement = await reportEntitlementForOrganization(input.workspace.organizationId);
+  const policy = analysisPolicy(entitlement.planId);
+  const projectKey = input.targetInput ? analysisProjectKey(input.targetInput) : `website:${input.siteId || input.sourceUrl}`;
+  if (input.executionPolicy && input.executionPolicy.plan !== policy.plan) throw new Error("plan_changed");
+  if (entitlement.canMonitor) {
+    const target = input.targetInput;
+    await database().prepare(`
+      INSERT INTO subscription_projects (id, organization_id, project_key, display_name)
+      SELECT ?, ?, ?, ? WHERE
+        (SELECT COUNT(*) FROM subscription_projects WHERE organization_id = ?) < ?
+      ON CONFLICT(organization_id, project_key) DO NOTHING
+    `).bind(createId("project"), input.workspace.organizationId, projectKey,
+      target?.input || input.sourceUrl, input.workspace.organizationId, entitlement.projectLimit).run();
+    // On downgrade only the oldest N slots remain active; stored reports survive.
+    const project = await database().prepare(`
+      SELECT project_key FROM (
+        SELECT project_key FROM subscription_projects WHERE organization_id = ?
+        ORDER BY created_at ASC, rowid ASC LIMIT ?
+      ) WHERE project_key = ?
+    `).bind(input.workspace.organizationId, entitlement.projectLimit, projectKey).first();
+    if (!project) throw new Error("project_limit");
+  }
   // One SQL statement reserves quota before any paid call; parallel requests cannot overrun it.
   const result = await database()
     .prepare(
       `
     INSERT INTO scans
-      (id, organization_id, site_id, requested_by_user_id, scan_kind, methodology_version, language, country, source_url, cache_key, target_input_json)
-    SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
-    WHERE (SELECT COUNT(*) FROM scans WHERE organization_id = ? AND created_at >= datetime('now', '-24 hours')) < 5
+      (id, organization_id, site_id, requested_by_user_id, scan_kind, methodology_version, language, country, source_url, cache_key, target_input_json, analysis_plan, project_key, analysis_policy_json)
+    SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+    WHERE (SELECT COUNT(*) FROM scans WHERE organization_id = ? AND created_at >= datetime('now', '-24 hours')) < ?
+      AND (? = 1 OR (SELECT COUNT(*) FROM scans WHERE organization_id = ?
+        AND (status = 'completed' OR (status IN ('running', 'awaiting_identity') AND created_at >= datetime('now', '-1 hour')))) < 1)
+      AND (? = 0 OR (SELECT COUNT(*) FROM scans WHERE organization_id=? AND project_key=? AND analysis_plan<>'free' AND created_at > datetime('now', '-30 days') AND (status='completed' OR (status IN ('running','awaiting_identity') AND created_at >= datetime('now', '-1 hour')))) < ?)
+      AND NOT EXISTS (SELECT 1 FROM scans WHERE organization_id=? AND project_key=? AND status IN ('running','awaiting_identity') AND created_at >= datetime('now', '-1 hour'))
   `,
     )
     .bind(
@@ -652,10 +723,16 @@ export async function createRunningScan(input: {
       input.sourceUrl,
       input.cacheKey,
       JSON.stringify({ request: input.targetInput || null }),
+      policy.plan, projectKey, JSON.stringify(policy),
       input.workspace.organizationId,
+      entitlement.canMonitor ? 5 : 3,
+      entitlement.canMonitor ? 1 : 0,
+      input.workspace.organizationId,
+      entitlement.canMonitor ? 1 : 0, input.workspace.organizationId, projectKey, policy.measurementsPer30Days,
+      input.workspace.organizationId, projectKey,
     )
     .run();
-  if (!result.meta.changes) throw new Error("scan_limit");
+  if (!result.meta.changes) throw new Error(entitlement.canMonitor ? "scan_limit" : "free_scan_limit");
   return id;
 }
 
@@ -739,7 +816,7 @@ export async function storeDiscovery(
         scanId,
         workspace.organizationId,
       ),
-    ...(run?.estimatedCostMicros != null
+    ...(run
       ? [
           database()
             .prepare(
@@ -753,8 +830,9 @@ export async function storeDiscovery(
               scanId,
               run.provider,
               run.usage.totalTokens || 0,
-              run.estimatedCostMicros,
+              run.estimatedCostMicros ?? 0,
               JSON.stringify({
+                costKnown: run.estimatedCostMicros !== null,
                 providerRunId: run.providerRunId,
                 model: run.model,
                 status: discovery.status,
@@ -781,7 +859,7 @@ export async function claimIdentityChoice(
 
 export type ScanCompletion = Omit<
   LiveReadinessResult,
-  "readinessScore" | "finalUrl" | "httpStatus" | "identityCandidates"
+  "readinessScore" | "finalUrl" | "httpStatus" | "identityCandidates" | "internalLinks" | "pageText"
 > & {
   readinessScore: number | null;
   finalUrl: string | null;
@@ -935,6 +1013,7 @@ export async function completeScan(
         result.requestCount,
         JSON.stringify({
           bytesFetched: result.bytesFetched,
+          costKnown: false,
           methodologyVersion: result.methodologyVersion,
         }),
       ),
@@ -1029,13 +1108,13 @@ export async function completeScan(
         db
           .prepare(
             `
-      INSERT INTO cost_ledger
+      INSERT OR IGNORE INTO cost_ledger
         (id, organization_id, scan_id, category, provider, units, cost_micros, metadata_json)
       VALUES (?, ?, ?, 'ai_engine', ?, ?, ?, ?)
     `,
           )
           .bind(
-            createId("cost"),
+            `engine_${run.id}`,
             workspace.organizationId,
             scanId,
             run.provider,
@@ -1129,23 +1208,29 @@ export async function getReportForUser(
   const row = await getReportSummaryRowForUser(userId, scanId);
   if (!row) return null;
 
-  // Incomplete scans need their stored identity-choice state to resume. They do
-  // not contain a completed paid report yet.
+  // Only the identity-choice fields are needed to resume an incomplete scan.
+  // Never serialize partially written paid findings/answers through this path.
   if (row.status !== "completed") {
+    const summary = await toReportSummary(row);
+    if (row.status !== "awaiting_identity")
+      return { scan: summary, entitlement: { ...FREE_REPORT_ENTITLEMENT } };
     const scan = await getScanForUser(userId, scanId);
     if (!scan) return null;
     return {
-      scan,
-      entitlement: { canViewFullReport: false, planId: null },
+      scan: { ...summary, targetInput: scan.targetInput,
+        discovery: scan.discovery ? { status: scan.discovery.status, candidates: scan.discovery.candidates } : null },
+      entitlement: { ...FREE_REPORT_ENTITLEMENT },
     };
   }
 
-  const entitlement = await reportEntitlementForOrganization(row.organizationId);
-  if (!entitlement.canViewFullReport) {
+  const entitlement = await reportEntitlementForOrganization(row.organizationId, row.id);
+  if (!entitlement.canViewStarterReport) {
     return { scan: await toReportSummary(row), entitlement };
   }
   const scan = await getScanForUser(userId, scanId);
-  return scan ? { scan, entitlement } : null;
+  if (!scan) return null;
+  if (scan.insights && !entitlement.canViewAdvancedReport) scan.insights = { ...scan.insights, advanced: null };
+  return { scan: entitlement.canViewFullReport ? scan : toStarterReport(scan), entitlement };
 }
 
 export async function getLatestReportForUser(

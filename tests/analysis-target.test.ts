@@ -189,10 +189,10 @@ test("named identity questions are separated from unbranded questions and aliase
     "",
   ]) {
     const protectedPrompts = generateTargetPrompts({ ...target, category });
-    assert.equal(protectedPrompts.length, 3);
+    assert.equal(protectedPrompts.length, category ? 3 : 1);
     assert.equal(
       protectedPrompts.filter((prompt) => prompt.intent !== "identity").length,
-      2,
+      category ? 2 : 0,
     );
     for (const prompt of protectedPrompts.slice(1)) {
       assert.ok(!prompt.question.includes(target.name));
@@ -295,4 +295,9 @@ test("cache separates kinds, clarification, language, model and URL path case", 
       true,
     ),
   );
+});
+
+test("unknown personal-brand specialty cannot generate generic unbranded visibility measurements", () => {
+  const prompts = generateTargetPrompts({ kind: "person", input: "Ada Example", name: "Ada Example", aliases: [], category: "", language: "en", country: "Global", websiteUrl: null, identityConfirmed: true }, 12);
+  assert.deepEqual(prompts.map((prompt) => prompt.intent), ["identity"]);
 });

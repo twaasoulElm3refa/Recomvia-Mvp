@@ -30,7 +30,10 @@ export function createFixture(legacy = false, activeSubscription = true) {
   const migrations = readdirSync(join(process.cwd(), "drizzle"))
     .filter((file) => file.endsWith(".sql"))
     .sort();
-  for (const file of migrations.slice(0, -1))
+  // Seed old data before the entity migration, even as later migrations are added.
+  const upgradeStart = migrations.indexOf("0003_entity_targets.sql");
+  if (upgradeStart < 0) throw new Error("Missing entity migration fixture boundary");
+  for (const file of migrations.slice(0, upgradeStart))
     sqlite.exec(readFileSync(join(process.cwd(), "drizzle", file), "utf8"));
   if (legacy)
     sqlite.exec(`
@@ -49,15 +52,15 @@ export function createFixture(legacy = false, activeSubscription = true) {
     INSERT INTO cost_ledger (id,organization_id,scan_id,category,provider,cost_micros) VALUES ('legacy-cost','legacy-org','legacy-scan','crawl','direct',100);
   `);
   // D1 applies a migration in a transaction with foreign keys enabled.
-  sqlite.exec("BEGIN");
-  try {
-    sqlite.exec(
-      readFileSync(join(process.cwd(), "drizzle", migrations.at(-1)!), "utf8"),
-    );
-    sqlite.exec("COMMIT");
-  } catch (error) {
-    sqlite.exec("ROLLBACK");
-    throw error;
+  for (const file of migrations.slice(upgradeStart)) {
+    sqlite.exec("BEGIN");
+    try {
+      sqlite.exec(readFileSync(join(process.cwd(), "drizzle", file), "utf8"));
+      sqlite.exec("COMMIT");
+    } catch (error) {
+      sqlite.exec("ROLLBACK");
+      throw error;
+    }
   }
   if (activeSubscription)
     sqlite.exec(`
@@ -111,6 +114,8 @@ export function createFixture(legacy = false, activeSubscription = true) {
   state.env.DB = db;
   state.env.OPENROUTER_API_KEY = "test-only-no-real-key";
   state.env.OPENROUTER_MODEL = "test/model";
+  state.env.OPENROUTER_MODELS_JSON = '["test/second","test/third"]';
   state.env.AI_TEST_MODE = "mock";
+  delete state.env.MONITORING_SECRET;
   return sqlite;
 }
