@@ -22,6 +22,7 @@ import {
   Sparkles,
 } from "lucide-react";
 import { KnowledgeAssistant } from "@/app/components/knowledge-assistant";
+import { PlansPreviewDialog } from "@/app/components/plans-preview-dialog";
 import {
   MobileSiteMenu,
   type SiteNavItem,
@@ -719,7 +720,7 @@ export function ScanExperience() {
                 onSubmit={submit}
                 className="mt-9 rounded-[24px] border border-slate-200 bg-white p-2.5 shadow-[0_28px_70px_rgba(7,17,31,.11)]"
               >
-                <div className="flex flex-col gap-2 md:flex-row">
+                <div className="flex flex-col gap-2">
                   <div className="flex min-w-0 flex-1 items-center gap-2 rounded-2xl bg-slate-50 px-4">
                     <Globe2 className="size-4 shrink-0 text-slate-400" />
                     <Input
@@ -739,20 +740,23 @@ export function ScanExperience() {
                       }
                     />
                   </div>
-                  <Button
-                    disabled={status === "scanning"}
-                    className="h-14 rounded-2xl bg-blue-600 px-6 text-base font-bold hover:bg-blue-700"
-                  >
-                    {status === "scanning" && (
-                      <Sparkles className="size-4 animate-pulse" />
-                    )}
-                    {status === "scanning" ? t.scanning : t.scan}
-                    {status !== "scanning" && (
-                      <ArrowRight
-                        className={`size-4 ${rtl ? "rotate-180" : ""}`}
-                      />
-                    )}
-                  </Button>
+                  <div className="flex flex-col gap-2 sm:flex-row">
+                    <Button
+                      disabled={status === "scanning"}
+                      className="h-14 min-w-0 flex-1 rounded-2xl bg-blue-600 px-6 text-base font-bold hover:bg-blue-700"
+                    >
+                      {status === "scanning" && (
+                        <Sparkles className="size-4 animate-pulse" />
+                      )}
+                      {status === "scanning" ? t.scanning : t.scan}
+                      {status !== "scanning" && (
+                        <ArrowRight
+                          className={`size-4 ${rtl ? "rotate-180" : ""}`}
+                        />
+                      )}
+                    </Button>
+                    <PlansPreviewDialog locale={locale} />
+                  </div>
                 </div>
                 <p className="px-3 pb-1 pt-3 text-center text-xs font-semibold text-slate-500">
                   {t.autoContext}
