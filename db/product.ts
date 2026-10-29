@@ -582,10 +582,10 @@ async function reportEntitlementForOrganization(organizationId: string, scanId?:
   const result = await database()
     .prepare(
       `
-      SELECT plan, status, current_period_end AS currentPeriodEnd
+      SELECT id, plan, status, current_period_end AS currentPeriodEnd, updated_at AS updatedAt
       FROM subscriptions
       WHERE organization_id = ?
-      ORDER BY updated_at DESC
+      ORDER BY updated_at DESC, id DESC
     `,
     )
     .bind(organizationId)
@@ -1347,16 +1347,23 @@ export async function upsertPayPalSubscription(input: {
 }) {
   const db = database();
   const id = createId("sub");
-  await db.prepare(`
+  const result = await db.prepare(`
     INSERT INTO subscriptions
       (id, organization_id, plan, status, provider, provider_subscription_id, current_period_end, cancel_at_period_end)
-    VALUES (?, ?, ?, ?, 'paypal', ?, ?, ?)
+    SELECT ?, ?, ?, ?, 'paypal', ?, ?, ?
+    WHERE ? <> 'active' OR NOT EXISTS (
+      SELECT 1 FROM subscriptions other
+      WHERE other.organization_id = ? AND other.status IN ('active', 'suspended', 'payment_failed')
+        AND other.plan IN ('essential', 'growth', 'pro')
+        AND (other.provider IS NOT 'paypal' OR other.provider_subscription_id IS NOT ?)
+    )
     ON CONFLICT(provider, provider_subscription_id) DO UPDATE SET
       plan = excluded.plan,
       status = excluded.status,
       current_period_end = COALESCE(excluded.current_period_end, subscriptions.current_period_end),
       cancel_at_period_end = excluded.cancel_at_period_end,
       updated_at = CURRENT_TIMESTAMP
+    WHERE subscriptions.organization_id = excluded.organization_id
   `).bind(
     id,
     input.organizationId,
@@ -1365,8 +1372,65 @@ export async function upsertPayPalSubscription(input: {
     input.providerSubscriptionId,
     input.currentPeriodEnd || null,
     input.cancelAtPeriodEnd ? 1 : 0,
+    input.status,
+    input.organizationId,
+    input.providerSubscriptionId,
   ).run();
 
-  return { id, organizationId: input.organizationId, plan: input.plan, status: input.status };
+  return { accepted: Boolean(result.meta.changes), id, organizationId: input.organizationId, plan: input.plan, status: input.status };
+}
+
+export type ActivePaidSubscription = {
+  id: string;
+  plan: "essential" | "growth" | "pro";
+  provider: string | null;
+  providerSubscriptionId: string | null;
+  status: string;
+  updatedAt: string;
+};
+
+/** Includes historical conflicts so callers never mistake a second active
+ * PayPal billing agreement for a safe new checkout. The most recently updated
+ * row wins for display and entitlement; other agreements need PayPal review. */
+export async function activePaidSubscriptions(organizationId: string): Promise<ActivePaidSubscription[]> {
+  const rows = await database().prepare(`
+    SELECT id, plan, status, provider, provider_subscription_id AS providerSubscriptionId, updated_at AS updatedAt
+    FROM subscriptions
+    WHERE organization_id = ? AND status IN ('active', 'suspended', 'payment_failed')
+      AND plan IN ('essential', 'growth', 'pro')
+    ORDER BY updated_at DESC, id DESC
+  `).bind(organizationId).all<ActivePaidSubscription>();
+  return rows.results;
+}
+
+export async function paypalSubscriptionOwner(providerSubscriptionId: string) {
+  return database().prepare(`
+    SELECT organization_id AS organizationId, plan, status
+    FROM subscriptions WHERE provider = 'paypal' AND provider_subscription_id = ?
+  `).bind(providerSubscriptionId).first<{ organizationId: string; plan: string; status: string }>();
+}
+
+/** A short-lived organization claim closes the race before the PayPal create
+ * or revise request. Abandoned claims expire; inactive subscription rows do
+ * not block a fresh checkout. */
+export async function claimSubscriptionCheckout(organizationId: string, targetPlan: string, kind: "create" | "revise", providerSubscriptionId: string | null = null) {
+  const db = database();
+  await db.prepare(`DELETE FROM subscription_checkout_claims WHERE organization_id = ? AND created_at <= datetime('now', '-15 minutes')`).bind(organizationId).run();
+  const result = await db.prepare(`
+    INSERT OR IGNORE INTO subscription_checkout_claims (organization_id, target_plan, kind, provider_subscription_id)
+    VALUES (?, ?, ?, ?)
+  `).bind(organizationId, targetPlan, kind, providerSubscriptionId).run();
+  return Boolean(result.meta.changes);
+}
+
+export async function attachSubscriptionCheckout(organizationId: string, providerSubscriptionId: string) {
+  await database().prepare(`UPDATE subscription_checkout_claims SET provider_subscription_id = ? WHERE organization_id = ?`).bind(providerSubscriptionId, organizationId).run();
+}
+
+export async function releaseSubscriptionCheckout(organizationId: string, providerSubscriptionId?: string) {
+  await database().prepare(`
+    DELETE FROM subscription_checkout_claims
+    WHERE organization_id = ? AND (? IS NULL OR provider_subscription_id = ?)
+  `).bind(organizationId, providerSubscriptionId ?? null, providerSubscriptionId ?? null).run();
 }
 

@@ -1,6 +1,6 @@
 import { FIX_CREDITS_CAPABILITY, isSubscriptionPlan, planById, type PlanId, type ReportLevel } from "./plans";
 
-export type SubscriptionRecord = { plan: string; status: string; currentPeriodEnd: string | null };
+export type SubscriptionRecord = { plan: string; status: string; currentPeriodEnd: string | null; updatedAt?: string; id?: string };
 export type ReportEntitlement = {
   canViewFullReport: boolean;
   canViewStarterReport: boolean;
@@ -28,11 +28,18 @@ export function isSubscriptionActive(subscription: SubscriptionRecord, now = new
 /** hasPaidStarter must come from an owner- and scan-scoped verified purchase,
  * never a request parameter or the browser's checkout return URL. */
 export function resolveReportEntitlement(subscriptions: readonly SubscriptionRecord[], now = new Date(), hasPaidStarter = false): ReportEntitlement {
-  const plan = subscriptions
+  // DB callers supply update order (updated_at, id). For legacy callers
+  // without timestamps, use a deterministic price tie-breaker.
+  const plan = [...subscriptions]
     .filter((subscription) => isSubscriptionActive(subscription, now))
+    .filter((subscription) => isSubscriptionPlan(planById(subscription.plan)))
+    .sort((a, b) => {
+      if (a.updatedAt && b.updatedAt && a.updatedAt !== b.updatedAt) return b.updatedAt.localeCompare(a.updatedAt);
+      if (a.id && b.id && a.id !== b.id) return b.id.localeCompare(a.id);
+      return (planById(b.plan)?.price.amountCents ?? 0) - (planById(a.plan)?.price.amountCents ?? 0);
+    })
     .map((subscription) => planById(subscription.plan))
-    .filter(isSubscriptionPlan)
-    .sort((a, b) => b.price.amountCents - a.price.amountCents)[0];
+    .filter(isSubscriptionPlan)[0];
   if (plan) return {
     canViewFullReport: true, canViewStarterReport: true,
     canViewAdvancedReport: plan.reportLevel === "advanced",

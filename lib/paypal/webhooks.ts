@@ -2,7 +2,7 @@ import { paypalRequest, PayPalError } from "./client";
 import { getPayPalConfig, getPlanFromPayPalPlanId } from "./config";
 import { mapPayPalSubscriptionStatus } from "./status-mapping";
 import { parseStarterCustomId, STARTER_CURRENCY, STARTER_PRICE_AMOUNT, STARTER_AMOUNT_CENTS } from "./orders";
-import { parseSubscriptionCustomId } from "./subscriptions";
+import { cancelConflictingPayPalSubscription, parseSubscriptionCustomId } from "./subscriptions";
 import type {
   PayPalConfig,
   PayPalTransport,
@@ -88,6 +88,26 @@ export type DbExecutor = {
   };
 };
 
+async function cancelNewWebhookConflict(db: DbExecutor, subscriptionId: string, fallback?: { organizationId: string; plan: string }) {
+  const row = await db.prepare(`
+    SELECT organization_id AS organizationId, plan, status
+    FROM subscriptions WHERE provider = 'paypal' AND provider_subscription_id = ?
+  `).bind(subscriptionId).first<{ organizationId: string; plan: string; status: string }>();
+  if (row?.status === "active") throw new PayPalError("Historical active subscription conflict requires billing review.", 409);
+  if (row && fallback && row.organizationId !== fallback.organizationId) throw new PayPalError("Webhook subscription ownership conflict.", 409);
+  if (row && ["cancelled", "expired"].includes(row.status)) return false;
+  const owner = row ?? fallback;
+  if (!owner) throw new PayPalError("Unknown conflicting subscription requires billing review.", 409);
+  await cancelConflictingPayPalSubscription(subscriptionId);
+  await db.prepare(`
+    INSERT INTO subscriptions (id, organization_id, plan, status, provider, provider_subscription_id, cancel_at_period_end)
+    VALUES (?, ?, ?, 'cancelled', 'paypal', ?, 1)
+    ON CONFLICT(provider, provider_subscription_id) DO UPDATE SET status = 'cancelled', cancel_at_period_end = 1, updated_at = CURRENT_TIMESTAMP
+  `).bind(`sub_${subscriptionId.slice(0, 36)}`, owner.organizationId, owner.plan, subscriptionId).run();
+  await db.prepare("DELETE FROM subscription_checkout_claims WHERE provider_subscription_id = ?").bind(subscriptionId).run();
+  return true;
+}
+
 /**
  * Processes a verified PayPal webhook event with full idempotency.
  */
@@ -133,7 +153,7 @@ export async function processVerifiedWebhookEvent(
           INSERT INTO subscriptions (id, organization_id, plan, status, provider, provider_subscription_id, current_period_end)
           VALUES (?, ?, ?, 'inactive', 'paypal', ?, ?)
           ON CONFLICT(provider, provider_subscription_id) DO UPDATE SET
-            status = 'inactive',
+            status = subscriptions.status,
             updated_at = CURRENT_TIMESTAMP
         `,
           )
@@ -160,17 +180,25 @@ export async function processVerifiedWebhookEvent(
 
       if (subId && verifiedPlan) {
         if (customData?.organizationId) {
-          await db
+          const applied = await db
             .prepare(
               `
             INSERT INTO subscriptions (id, organization_id, plan, status, provider, provider_subscription_id, current_period_end, cancel_at_period_end)
-            VALUES (?, ?, ?, ?, 'paypal', ?, ?, 0)
+            SELECT ?, ?, ?, ?, 'paypal', ?, ?, 0
+            WHERE NOT EXISTS (
+              SELECT 1 FROM subscriptions other
+              WHERE other.organization_id = ? AND other.status IN ('active', 'suspended', 'payment_failed')
+                AND other.plan IN ('essential', 'growth', 'pro')
+                AND (other.provider IS NOT 'paypal' OR other.provider_subscription_id IS NOT ?)
+            )
             ON CONFLICT(provider, provider_subscription_id) DO UPDATE SET
               plan = excluded.plan,
               status = excluded.status,
               current_period_end = excluded.current_period_end,
               cancel_at_period_end = 0,
               updated_at = CURRENT_TIMESTAMP
+            WHERE subscriptions.organization_id = excluded.organization_id
+              AND subscriptions.status NOT IN ('cancelled', 'expired')
           `,
             )
             .bind(
@@ -180,10 +208,16 @@ export async function processVerifiedWebhookEvent(
               mapped.internalStatus,
               subId,
               nextBilling,
+              customData.organizationId,
+              subId,
             )
             .run();
+          if (!applied.meta.changes) {
+            actionTaken = await cancelNewWebhookConflict(db, subId, { organizationId: customData.organizationId, plan: verifiedPlan })
+              ? "subscription_conflict_cancelled" : "stale_activation_ignored";
+          }
         } else {
-          await db
+          const applied = await db
             .prepare(
               `
             UPDATE subscriptions SET
@@ -191,12 +225,22 @@ export async function processVerifiedWebhookEvent(
               current_period_end = COALESCE(?, current_period_end),
               updated_at = CURRENT_TIMESTAMP
             WHERE provider = 'paypal' AND provider_subscription_id = ?
+              AND status NOT IN ('cancelled', 'expired')
+              AND NOT EXISTS (
+                SELECT 1 FROM subscriptions other WHERE other.organization_id = subscriptions.organization_id
+                  AND other.status IN ('active', 'suspended', 'payment_failed') AND other.plan IN ('essential', 'growth', 'pro')
+                  AND (other.provider IS NOT 'paypal' OR other.provider_subscription_id IS NOT ?)
+              )
           `,
             )
-            .bind(mapped.internalStatus, nextBilling, subId)
+            .bind(mapped.internalStatus, nextBilling, subId, subId)
             .run();
+          if (!applied.meta.changes) {
+            actionTaken = await cancelNewWebhookConflict(db, subId) ? "subscription_conflict_cancelled" : "stale_activation_ignored";
+          }
         }
-        actionTaken = "subscription_activated";
+        if (actionTaken === "none") actionTaken = "subscription_activated";
+        await db.prepare("DELETE FROM subscription_checkout_claims WHERE provider_subscription_id = ?").bind(subId).run();
       }
       break;
     }
@@ -209,20 +253,30 @@ export async function processVerifiedWebhookEvent(
       const nextBilling = resource.billing_info?.next_billing_time || null;
 
       if (subId) {
-        await db
+        const applied = await db
           .prepare(
             `
           UPDATE subscriptions SET
-            plan = COALESCE(?, plan),
-            status = ?,
+            plan = CASE WHEN subscriptions.status IN ('active', 'suspended', 'payment_failed') AND ? = 'inactive' THEN subscriptions.plan ELSE COALESCE(?, subscriptions.plan) END,
+            status = CASE WHEN subscriptions.status IN ('active', 'suspended', 'payment_failed') AND ? = 'inactive' THEN subscriptions.status ELSE ? END,
             current_period_end = COALESCE(?, current_period_end),
             updated_at = CURRENT_TIMESTAMP
           WHERE provider = 'paypal' AND provider_subscription_id = ?
+            AND subscriptions.status NOT IN ('cancelled', 'expired')
+            AND (? <> 'active' OR NOT EXISTS (
+              SELECT 1 FROM subscriptions other WHERE other.organization_id = subscriptions.organization_id
+                AND other.status IN ('active', 'suspended', 'payment_failed') AND other.plan IN ('essential', 'growth', 'pro')
+                AND (other.provider IS NOT 'paypal' OR other.provider_subscription_id IS NOT ?)
+            ))
         `,
           )
-          .bind(verifiedPlan, mapped.internalStatus, nextBilling, subId)
+          .bind(mapped.internalStatus, verifiedPlan, mapped.internalStatus, mapped.internalStatus, nextBilling, subId, mapped.internalStatus, subId)
           .run();
-        actionTaken = "subscription_updated";
+        if (!applied.meta.changes && mapped.isActive) {
+          actionTaken = await cancelNewWebhookConflict(db, subId) ? "subscription_conflict_cancelled" : "stale_update_ignored";
+        } else actionTaken = "subscription_updated";
+        if (mapped.isActive || ["cancelled", "suspended", "expired", "payment_failed"].includes(mapped.internalStatus))
+          await db.prepare("DELETE FROM subscription_checkout_claims WHERE provider_subscription_id = ?").bind(subId).run();
       }
       break;
     }
@@ -242,6 +296,7 @@ export async function processVerifiedWebhookEvent(
           )
           .bind(subId)
           .run();
+        await db.prepare("DELETE FROM subscription_checkout_claims WHERE provider_subscription_id = ?").bind(subId).run();
         actionTaken = "subscription_cancelled";
       }
       break;
@@ -256,11 +311,12 @@ export async function processVerifiedWebhookEvent(
           UPDATE subscriptions SET
             status = 'suspended',
             updated_at = CURRENT_TIMESTAMP
-          WHERE provider = 'paypal' AND provider_subscription_id = ?
+          WHERE provider = 'paypal' AND provider_subscription_id = ? AND status NOT IN ('cancelled', 'expired')
         `,
           )
           .bind(subId)
           .run();
+        await db.prepare("DELETE FROM subscription_checkout_claims WHERE provider_subscription_id = ?").bind(subId).run();
         actionTaken = "subscription_suspended";
       }
       break;
@@ -280,6 +336,7 @@ export async function processVerifiedWebhookEvent(
           )
           .bind(subId)
           .run();
+        await db.prepare("DELETE FROM subscription_checkout_claims WHERE provider_subscription_id = ?").bind(subId).run();
         actionTaken = "subscription_expired";
       }
       break;
@@ -294,11 +351,12 @@ export async function processVerifiedWebhookEvent(
           UPDATE subscriptions SET
             status = 'payment_failed',
             updated_at = CURRENT_TIMESTAMP
-          WHERE provider = 'paypal' AND provider_subscription_id = ?
+          WHERE provider = 'paypal' AND provider_subscription_id = ? AND status NOT IN ('cancelled', 'expired')
         `,
           )
           .bind(subId)
           .run();
+        await db.prepare("DELETE FROM subscription_checkout_claims WHERE provider_subscription_id = ?").bind(subId).run();
         actionTaken = "subscription_payment_failed";
       }
       break;
@@ -310,18 +368,26 @@ export async function processVerifiedWebhookEvent(
     case "PAYMENT.SALE.COMPLETED": {
       const subId = resource.billing_agreement_id;
       if (subId) {
-        await db
+        const applied = await db
           .prepare(
             `
           UPDATE subscriptions SET
             status = 'active',
             updated_at = CURRENT_TIMESTAMP
           WHERE provider = 'paypal' AND provider_subscription_id = ?
+            AND status IN ('active', 'suspended', 'payment_failed')
+            AND NOT EXISTS (
+              SELECT 1 FROM subscriptions other WHERE other.organization_id = subscriptions.organization_id
+                AND other.status IN ('active', 'suspended', 'payment_failed') AND other.plan IN ('essential', 'growth', 'pro')
+                AND (other.provider IS NOT 'paypal' OR other.provider_subscription_id IS NOT ?)
+            )
         `,
           )
-          .bind(subId)
+          .bind(subId, subId)
           .run();
-        actionTaken = "sale_completed";
+        if (!applied.meta.changes) {
+          actionTaken = await cancelNewWebhookConflict(db, subId) ? "subscription_conflict_cancelled" : "stale_sale_ignored";
+        } else actionTaken = "sale_completed";
       }
       break;
     }
@@ -336,7 +402,7 @@ export async function processVerifiedWebhookEvent(
           UPDATE subscriptions SET
             status = 'suspended',
             updated_at = CURRENT_TIMESTAMP
-          WHERE provider = 'paypal' AND provider_subscription_id = ?
+          WHERE provider = 'paypal' AND provider_subscription_id = ? AND status NOT IN ('cancelled', 'expired')
         `,
           )
           .bind(subId)

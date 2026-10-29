@@ -1,6 +1,6 @@
 import { getAuthenticatedUser } from "@/app/auth";
-import { ensureWorkspace, upsertPayPalSubscription } from "@/db/product";
-import { verifyAndMapSubscription } from "@/lib/paypal";
+import { ensureWorkspace, paypalSubscriptionOwner, releaseSubscriptionCheckout, upsertPayPalSubscription } from "@/db/product";
+import { cancelConflictingPayPalSubscription, verifyAndMapSubscription } from "@/lib/paypal";
 
 export const runtime = "edge";
 const headers = { "Cache-Control": "no-store" };
@@ -25,6 +25,9 @@ export async function POST(request: Request) {
   }
 
   const workspace = await ensureWorkspace(user);
+  const owner = await paypalSubscriptionOwner(subscriptionId);
+  if (!owner || owner.organizationId !== workspace.organizationId)
+    return json({ error: "Subscription does not belong to this organization.", code: "subscription_not_found" }, 404);
 
   try {
     const verified = await verifyAndMapSubscription(subscriptionId, {
@@ -32,7 +35,12 @@ export async function POST(request: Request) {
       plan: body.plan,
     });
 
-    await upsertPayPalSubscription({
+    if (owner.status === "active" && verified.mappedState.internalStatus === "inactive") {
+      // PayPal keeps billing the old plan until the buyer approves a revision.
+      return json({ subscriptionId, plan: owner.plan, status: "active", paypalStatus: verified.subscription.status, isActive: false, pendingPlanChange: true });
+    }
+
+    const stored = await upsertPayPalSubscription({
       organizationId: workspace.organizationId,
       plan: verified.verifiedPlan,
       status: verified.mappedState.internalStatus,
@@ -40,6 +48,16 @@ export async function POST(request: Request) {
       currentPeriodEnd: verified.nextBillingTime,
       cancelAtPeriodEnd: verified.mappedState.internalStatus === "cancelled",
     });
+    if (!stored.accepted) {
+      if (verified.mappedState.isActive && owner.status !== "active") {
+        await cancelConflictingPayPalSubscription(subscriptionId);
+        await upsertPayPalSubscription({ organizationId: workspace.organizationId, plan: verified.verifiedPlan, status: "cancelled", providerSubscriptionId: subscriptionId, cancelAtPeriodEnd: true });
+        await releaseSubscriptionCheckout(workspace.organizationId, subscriptionId);
+      }
+      return json({ error: "Another paid subscription is already active. The conflicting checkout was cancelled or requires billing review.", code: "billing_conflict" }, 409);
+    }
+    if (verified.mappedState.isActive || ["cancelled", "suspended", "expired", "payment_failed"].includes(verified.mappedState.internalStatus))
+      await releaseSubscriptionCheckout(workspace.organizationId, subscriptionId);
 
     return json({
       subscriptionId,

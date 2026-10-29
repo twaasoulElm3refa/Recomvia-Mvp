@@ -16,12 +16,15 @@ import {
   STARTER_PRICE_AMOUNT,
   STARTER_CURRENCY,
   STARTER_AMOUNT_CENTS,
+  processVerifiedWebhookEvent,
 } from "../lib/paypal";
-import { getReportForUser } from "../db/product";
+import { database, getEntitlementForUser, getReportForUser } from "../db/product";
 import { POST as createOrderRoute } from "../app/api/payments/paypal/create-order/route";
 import { POST as captureOrderRoute } from "../app/api/payments/paypal/capture-order/route";
 import { POST as createSubscriptionRoute } from "../app/api/payments/paypal/create-subscription/route";
 import { POST as syncSubscriptionRoute } from "../app/api/payments/paypal/sync-subscription/route";
+import { POST as reviseSubscriptionRoute } from "../app/api/payments/paypal/revise-subscription/route";
+import { GET as currentSubscriptionRoute } from "../app/api/payments/paypal/current-subscription/route";
 import { POST as webhookRoute } from "../app/api/payments/paypal/webhook/route";
 
 const TEST_CONFIG = {
@@ -73,6 +76,19 @@ function seedSecondOrg(sqlite: any) {
     VALUES ('org-b', '${userB.userId}', 'owner')
     ON CONFLICT(organization_id, user_id) DO NOTHING;
   `);
+}
+
+function seedPaidSubscription(sqlite: any, id: string, plan: "essential" | "growth" | "pro", status = "active", updatedAt = "2026-10-29 12:00:00") {
+  seedUserAndOrg(sqlite);
+  sqlite.prepare(`INSERT INTO subscriptions (id, organization_id, plan, status, provider, provider_subscription_id, current_period_end, updated_at)
+    VALUES (?, 'org-target-test-a', ?, ?, 'paypal', ?, '2099-01-01T00:00:00Z', ?)`)
+    .run(`row-${id}`, plan, status, id, updatedAt);
+}
+
+function subscriptionRequest(route: string, plan: string) {
+  return new Request(`https://recomvia.test/api/payments/paypal/${route}`, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ plan }),
+  });
 }
 
 test("Sandbox-only guard strictly rejects live mode and accepts sandbox", () => {
@@ -572,6 +588,250 @@ test("PayPal Webhook: verification required, invalid rejected, event idempotency
     .get() as any;
   assert.equal(refundedRow.status, "refunded");
 
+  sqlite.close();
+});
+
+test("active Essential, Growth, and Pro block same-plan checkout and require revision for every other plan", async () => {
+  for (const current of ["essential", "growth", "pro"] as const) {
+    const sqlite = createFixture(false, false);
+    seedPaidSubscription(sqlite, `I-${current}`, current);
+    state.user = userA;
+    setPayPalTransport(async () => { throw new Error("A guarded checkout must not call PayPal"); });
+    const currentResponse = await currentSubscriptionRoute();
+    assert.equal((await currentResponse.json() as any).currentPlan, current);
+    for (const target of ["essential", "growth", "pro"] as const) {
+      const response = await createSubscriptionRoute(subscriptionRequest("create-subscription", target));
+      assert.equal(response.status, 409);
+      const data = await response.json() as any;
+      assert.equal(data.code, target === current ? "already_active" : "plan_change_required");
+      assert.equal(data.currentPlan, current);
+    }
+    assert.equal((sqlite.prepare("SELECT COUNT(*) AS n FROM subscriptions").get() as any).n, 1);
+    sqlite.close();
+  }
+});
+
+test("plan changes revise the same PayPal agreement and retain the old entitlement pending consent", async () => {
+  const transitions = [
+    ["essential", "growth"], ["essential", "pro"], ["growth", "pro"],
+    ["growth", "essential"], ["pro", "growth"], ["pro", "essential"],
+  ] as const;
+  for (const [current, target] of transitions) {
+    const sqlite = createFixture(false, false);
+    seedPaidSubscription(sqlite, "I-EXISTING", current);
+    Object.assign(state.env, TEST_CONFIG);
+    clearPayPalTokenCache();
+    state.user = userA;
+    let reviseCalls = 0;
+    let paypalPlan: "essential" | "growth" | "pro" = current;
+    let paypalStatus = "ACTIVE";
+    setPayPalTransport(async (url, init) => {
+      const path = String(url);
+      if (path.endsWith("/v1/oauth2/token")) return Response.json({ access_token: "mock-token", expires_in: 3600 });
+      if (path.endsWith("/I-EXISTING/revise")) {
+        reviseCalls += 1;
+        assert.equal(init?.method, "POST");
+        const payload = JSON.parse(String(init?.body));
+        assert.equal(payload.plan_id, getPayPalPlanId(target, TEST_CONFIG));
+        assert.match(payload.application_context.return_url, /subscription_id=I-EXISTING/);
+        return Response.json({ links: [{ rel: "approve", href: "https://sandbox.paypal.com/approve-revision" }] });
+      }
+      if (path.endsWith("/I-EXISTING")) return Response.json({ id: "I-EXISTING", status: paypalStatus, plan_id: getPayPalPlanId(paypalPlan, TEST_CONFIG), custom_id: `org-target-test-a:${current}`, billing_info: { next_billing_time: "2099-01-01T00:00:00Z" } });
+      throw new Error(`Unexpected PayPal request: ${path}`);
+    });
+    const response = await reviseSubscriptionRoute(subscriptionRequest("revise-subscription", target));
+    assert.equal(response.status, 200);
+    const data = await response.json() as any;
+    assert.equal(data.subscriptionId, "I-EXISTING");
+    assert.equal(data.approveUrl, "https://sandbox.paypal.com/approve-revision");
+    assert.equal(reviseCalls, 1);
+    const row = sqlite.prepare("SELECT plan, status FROM subscriptions WHERE provider_subscription_id = 'I-EXISTING'").get() as any;
+    assert.deepEqual([row.plan, row.status], [current, "active"]);
+    assert.equal((sqlite.prepare("SELECT COUNT(*) AS n FROM subscriptions").get() as any).n, 1);
+    paypalStatus = "APPROVAL_PENDING";
+    const pending = await syncSubscriptionRoute(new Request("https://recomvia.test/api/payments/paypal/sync-subscription", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ subscriptionId: "I-EXISTING" }),
+    }));
+    assert.equal((await pending.json() as any).pendingPlanChange, true);
+    assert.equal((sqlite.prepare("SELECT plan FROM subscriptions WHERE provider_subscription_id='I-EXISTING'").get() as any).plan, current);
+    paypalStatus = "ACTIVE";
+    paypalPlan = target;
+    const approved = await syncSubscriptionRoute(new Request("https://recomvia.test/api/payments/paypal/sync-subscription", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ subscriptionId: "I-EXISTING" }),
+    }));
+    assert.equal((await approved.json() as any).isActive, true);
+    assert.equal((sqlite.prepare("SELECT plan FROM subscriptions WHERE provider_subscription_id='I-EXISTING'").get() as any).plan, target);
+    assert.equal((sqlite.prepare("SELECT COUNT(*) AS n FROM subscriptions WHERE status='active'").get() as any).n, 1);
+    sqlite.close();
+  }
+});
+
+test("abandoned inactive rows do not block checkout; a second pending checkout is claimed once", async () => {
+  const sqlite = createFixture(false, false);
+  seedPaidSubscription(sqlite, "I-ABANDONED", "essential", "inactive");
+  Object.assign(state.env, TEST_CONFIG);
+  clearPayPalTokenCache();
+  state.user = userA;
+  let creations = 0;
+  setPayPalTransport(async (url) => {
+    const path = String(url);
+    if (path.endsWith("/v1/oauth2/token")) return Response.json({ access_token: "mock-token", expires_in: 3600 });
+    if (path.endsWith("/v1/billing/subscriptions")) {
+      creations += 1;
+      return Response.json({ id: "I-NEW", status: "APPROVAL_PENDING", links: [{ rel: "approve", href: "https://sandbox.paypal.com/new" }] }, { status: 201 });
+    }
+    throw new Error(`Unexpected PayPal request: ${path}`);
+  });
+  const first = await createSubscriptionRoute(subscriptionRequest("create-subscription", "growth"));
+  assert.equal(first.status, 200);
+  const second = await createSubscriptionRoute(subscriptionRequest("create-subscription", "pro"));
+  assert.equal(second.status, 409);
+  assert.equal((await second.json() as any).code, "checkout_in_progress");
+  assert.equal(creations, 1);
+  assert.equal((sqlite.prepare("SELECT status FROM subscriptions WHERE provider_subscription_id='I-ABANDONED'").get() as any).status, "inactive");
+  sqlite.close();
+});
+
+test("historical active rows yield one latest verified entitlement and block new checkout", async () => {
+  const sqlite = createFixture(false, false);
+  // Simulate duplicate rows written before migration 0007 installed its trigger.
+  sqlite.exec("DROP TRIGGER subscriptions_one_active_insert; DROP TRIGGER subscriptions_one_active_update;");
+  seedPaidSubscription(sqlite, "I-OLD-PRO", "pro", "active", "2026-10-29 10:00:00");
+  seedPaidSubscription(sqlite, "I-NEW-ESSENTIAL", "essential", "active", "2026-10-29 11:00:00");
+  Object.assign(state.env, TEST_CONFIG);
+  state.user = userA;
+  const entitlement = await getEntitlementForUser(userA);
+  assert.equal(entitlement.planId, "essential");
+  assert.equal(entitlement.projectLimit, 1);
+  assert.equal(entitlement.canViewAdvancedReport, false);
+  const current = await currentSubscriptionRoute();
+  assert.equal((await current.json() as any).billingConflict, true);
+  const checkout = await createSubscriptionRoute(subscriptionRequest("create-subscription", "growth"));
+  assert.equal((await checkout.json() as any).code, "billing_conflict");
+  sqlite.close();
+});
+
+test("database triggers prevent a second active paid row while allowing inactive audit rows", () => {
+  const sqlite = createFixture(false, false);
+  seedPaidSubscription(sqlite, "I-FIRST", "essential");
+  seedPaidSubscription(sqlite, "I-ABANDONED", "growth", "inactive");
+  assert.throws(() => seedPaidSubscription(sqlite, "I-SECOND", "pro"), /organization already has an active paid subscription/);
+  assert.throws(() => sqlite.prepare("UPDATE subscriptions SET status='active' WHERE provider_subscription_id='I-ABANDONED'").run(), /organization already has an active paid subscription/);
+  assert.equal((sqlite.prepare("SELECT COUNT(*) AS n FROM subscriptions WHERE status='active'").get() as any).n, 1);
+  sqlite.close();
+});
+
+test("conflicting activation webhook cancels the new PayPal agreement and remains idempotent", async () => {
+  const sqlite = createFixture(false, false);
+  seedPaidSubscription(sqlite, "I-KEEP", "essential", "active");
+  seedPaidSubscription(sqlite, "I-CONFLICT", "growth", "inactive");
+  Object.assign(state.env, TEST_CONFIG);
+  clearPayPalTokenCache();
+  let cancellations = 0;
+  setPayPalTransport(async (url, init) => {
+    const path = String(url);
+    if (path.endsWith("/v1/oauth2/token")) return Response.json({ access_token: "mock-token", expires_in: 3600 });
+    if (path.endsWith("/verify-webhook-signature")) return Response.json({ verification_status: "SUCCESS" });
+    if (path.endsWith("/I-CONFLICT/cancel")) { cancellations += 1; assert.equal(init?.method, "POST"); return new Response(null, { status: 204 }); }
+    if (path.endsWith("/I-CONFLICT")) return Response.json({ id: "I-CONFLICT", status: "CANCELLED", plan_id: TEST_CONFIG.PAYPAL_GROWTH_PLAN_ID });
+    throw new Error(`Unexpected PayPal request: ${path}`);
+  });
+  const event = {
+    id: "WH-CONFLICT-1", event_type: "BILLING.SUBSCRIPTION.ACTIVATED", resource_type: "subscription",
+    resource: { id: "I-CONFLICT", status: "ACTIVE", plan_id: TEST_CONFIG.PAYPAL_GROWTH_PLAN_ID, custom_id: "org-target-test-a:growth" },
+  };
+  const headers = {
+    "paypal-auth-algo": "SHA256withRSA", "paypal-cert-url": "https://api.sandbox.paypal.com/cert.pem",
+    "paypal-transmission-id": "conflict-transmission", "paypal-transmission-sig": "signed",
+    "paypal-transmission-time": "2026-10-29T12:00:00Z", "Content-Type": "application/json",
+  };
+  const send = () => webhookRoute(new Request("https://recomvia.test/api/payments/paypal/webhook", { method: "POST", headers, body: JSON.stringify(event) }));
+  const first = await send();
+  assert.equal(first.status, 200);
+  assert.equal((await first.json() as any).action, "subscription_conflict_cancelled");
+  const rows = sqlite.prepare("SELECT provider_subscription_id AS id, status FROM subscriptions ORDER BY id").all() as any[];
+  assert.deepEqual(rows.map((row) => [row.id, row.status]).sort(), [["I-CONFLICT", "cancelled"], ["I-KEEP", "active"]]);
+  const duplicate = await send();
+  assert.equal((await duplicate.json() as any).duplicate, true);
+  assert.equal(cancellations, 1);
+  sqlite.close();
+});
+
+test("webhook cancellation, suspension, expiry, and payment failure revoke access without deleting history", async () => {
+  const cases = [
+    ["BILLING.SUBSCRIPTION.CANCELLED", "cancelled"],
+    ["BILLING.SUBSCRIPTION.SUSPENDED", "suspended"],
+    ["BILLING.SUBSCRIPTION.EXPIRED", "expired"],
+    ["BILLING.SUBSCRIPTION.PAYMENT.FAILED", "payment_failed"],
+  ] as const;
+  for (const [eventType, status] of cases) {
+    const sqlite = createFixture(false, false);
+    seedPaidSubscription(sqlite, "I-LIFECYCLE", "growth");
+    Object.assign(state.env, TEST_CONFIG);
+    const event = { id: `WH-${status}`, event_type: eventType, resource_type: "subscription", resource: { id: "I-LIFECYCLE" } };
+    const first = await processVerifiedWebhookEvent(database(), event);
+    assert.equal(first.processed, true);
+    assert.equal((sqlite.prepare("SELECT status FROM subscriptions WHERE provider_subscription_id='I-LIFECYCLE'").get() as any).status, status);
+    assert.equal((await getEntitlementForUser(userA)).planId, null);
+    const current = await currentSubscriptionRoute();
+    const currentData = await current.json() as any;
+    assert.equal(currentData.billingReview, status === "suspended" || status === "payment_failed");
+    if (currentData.billingReview) {
+      const guarded = await createSubscriptionRoute(subscriptionRequest("create-subscription", "pro"));
+      assert.equal((await guarded.json() as any).code, "subscription_review_required");
+    }
+    const repeated = await processVerifiedWebhookEvent(database(), event);
+    assert.equal(repeated.duplicate, true);
+    assert.equal((sqlite.prepare("SELECT COUNT(*) AS n FROM subscriptions").get() as any).n, 1);
+    sqlite.close();
+  }
+});
+
+test("pending revision webhooks preserve the current plan and late sales cannot revive cancelled plans", async () => {
+  const sqlite = createFixture(false, false);
+  seedPaidSubscription(sqlite, "I-LIFECYCLE", "essential");
+  Object.assign(state.env, TEST_CONFIG);
+  const pending = await processVerifiedWebhookEvent(database(), {
+    id: "WH-PENDING-REVISE", event_type: "BILLING.SUBSCRIPTION.UPDATED", resource_type: "subscription",
+    resource: { id: "I-LIFECYCLE", status: "APPROVAL_PENDING", plan_id: TEST_CONFIG.PAYPAL_GROWTH_PLAN_ID },
+  });
+  assert.equal(pending.processed, true);
+  const pendingRow = sqlite.prepare("SELECT plan,status FROM subscriptions WHERE provider_subscription_id='I-LIFECYCLE'").get() as any;
+  assert.deepEqual([pendingRow.plan, pendingRow.status], ["essential", "active"]);
+  await processVerifiedWebhookEvent(database(), { id: "WH-CANCEL-LATE", event_type: "BILLING.SUBSCRIPTION.CANCELLED", resource_type: "subscription", resource: { id: "I-LIFECYCLE" } });
+  const lateSale = await processVerifiedWebhookEvent(database(), { id: "WH-LATE-SALE", event_type: "PAYMENT.SALE.COMPLETED", resource_type: "sale", resource: { billing_agreement_id: "I-LIFECYCLE" } });
+  assert.equal(lateSale.action, "stale_sale_ignored");
+  for (const [id, eventType, resource] of [
+    ["WH-LATE-UPDATE", "BILLING.SUBSCRIPTION.UPDATED", { id: "I-LIFECYCLE", status: "APPROVAL_PENDING", plan_id: TEST_CONFIG.PAYPAL_GROWTH_PLAN_ID }],
+    ["WH-LATE-SUSPEND", "BILLING.SUBSCRIPTION.SUSPENDED", { id: "I-LIFECYCLE" }],
+    ["WH-LATE-FAIL", "BILLING.SUBSCRIPTION.PAYMENT.FAILED", { id: "I-LIFECYCLE" }],
+    ["WH-LATE-REFUND", "PAYMENT.SALE.REFUNDED", { billing_agreement_id: "I-LIFECYCLE" }],
+  ] as const) {
+    await processVerifiedWebhookEvent(database(), { id, event_type: eventType, resource_type: "subscription", resource });
+  }
+  assert.equal((sqlite.prepare("SELECT status FROM subscriptions WHERE provider_subscription_id='I-LIFECYCLE'").get() as any).status, "cancelled");
+  sqlite.close();
+});
+
+test("Starter checkout remains available with an active monthly subscription", async () => {
+  const sqlite = createFixture(false, false);
+  seedPaidSubscription(sqlite, "I-ESSENTIAL", "essential", "active");
+  seedScan(sqlite, "scan-starter", "org-target-test-a", userA.userId, "completed");
+  Object.assign(state.env, TEST_CONFIG);
+  clearPayPalTokenCache();
+  state.user = userA;
+  setPayPalTransport(async (url) => {
+    const path = String(url);
+    if (path.endsWith("/v1/oauth2/token")) return Response.json({ access_token: "mock-token", expires_in: 3600 });
+    if (path.endsWith("/v2/checkout/orders")) return Response.json({ id: "ORDER-STARTER-ALONGSIDE", status: "CREATED", links: [{ rel: "approve", href: "https://sandbox.paypal.com/starter" }] }, { status: 201 });
+    throw new Error(`Unexpected PayPal request: ${path}`);
+  });
+  const response = await createOrderRoute(new Request("https://recomvia.test/api/payments/paypal/create-order", {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ scanId: "scan-starter" }),
+  }));
+  assert.equal(response.status, 200);
+  assert.equal((await response.json() as any).approveUrl, "https://sandbox.paypal.com/starter");
+  assert.equal((sqlite.prepare("SELECT COUNT(*) AS n FROM subscriptions WHERE status='active'").get() as any).n, 1);
   sqlite.close();
 });
 

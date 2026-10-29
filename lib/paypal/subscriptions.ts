@@ -112,6 +112,44 @@ export async function getPayPalSubscription(
   );
 }
 
+/** Revise the existing PayPal agreement; PayPal approval is required before
+ * its new plan can be used as an entitlement. No second agreement is created. */
+export async function revisePayPalSubscription(
+  subscriptionId: string,
+  plan: "essential" | "growth" | "pro",
+  returnUrl: string,
+  cancelUrl: string,
+  options: { config?: Partial<PayPalConfig>; transport?: PayPalTransport } = {},
+) {
+  const config = getPayPalConfig(options.config);
+  const revised = await paypalRequest<{ links?: PayPalSubscription["links"] }>(
+    `/v1/billing/subscriptions/${encodeURIComponent(subscriptionId)}/revise`,
+    {
+      method: "POST",
+      body: {
+        plan_id: getPayPalPlanId(plan, config),
+        application_context: { return_url: returnUrl, cancel_url: cancelUrl },
+      },
+      config,
+      transport: options.transport,
+    },
+  );
+  return { approveUrl: revised.links?.find((link) => link.rel === "approve")?.href ?? null };
+}
+
+export async function cancelConflictingPayPalSubscription(
+  subscriptionId: string,
+  options: { config?: Partial<PayPalConfig>; transport?: PayPalTransport } = {},
+) {
+  await paypalRequest(`/v1/billing/subscriptions/${encodeURIComponent(subscriptionId)}/cancel`, {
+    method: "POST",
+    body: { reason: "Duplicate active organization subscription" },
+    ...options,
+  });
+  const confirmed = await getPayPalSubscription(subscriptionId, options);
+  if (confirmed.status !== "CANCELLED") throw new PayPalError("PayPal has not confirmed cancellation of the conflicting subscription.", 409);
+}
+
 export async function verifyAndMapSubscription(
   subscriptionId: string,
   expected: {

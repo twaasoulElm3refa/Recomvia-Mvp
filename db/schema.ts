@@ -357,6 +357,14 @@ export const subscriptions = sqliteTable(
   ],
 );
 
+export const subscriptionCheckoutClaims = sqliteTable("subscription_checkout_claims", {
+  organizationId: text("organization_id").primaryKey().references(() => organizations.id),
+  targetPlan: text("target_plan").notNull(),
+  kind: text("kind").notNull(),
+  providerSubscriptionId: text("provider_subscription_id"),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+});
+
 /** Project slots are allocated atomically before paid analysis. Historical
  * reports do not allocate a slot until the project is measured again. */
 export const subscriptionProjects = sqliteTable(

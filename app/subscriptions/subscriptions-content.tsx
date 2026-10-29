@@ -45,6 +45,12 @@ const copy = {
     subscribeEssential: "Subscribe — $24/month",
     subscribeGrowth: "Subscribe — $49/month",
     subscribePro: "Subscribe — $99/month",
+    currentPlan: "Current plan",
+    upgrade: "Upgrade plan",
+    downgrade: "Downgrade plan",
+    billingConflict: "More than one active subscription needs billing review. Contact support before changing plans.",
+    billingReview: "An existing PayPal agreement needs billing review before another checkout. Contact support.",
+    planStatusUnavailable: "Could not verify your current plan. Refresh this page before checkout.",
     processingCheckout: "Connecting to PayPal...",
     compare: "Compare the plans",
     feature: "Included scope",
@@ -106,6 +112,12 @@ const copy = {
     subscribeEssential: "اشتراك — 24$/شهريًا",
     subscribeGrowth: "اشتراك — 49$/شهريًا",
     subscribePro: "اشتراك — 99$/شهريًا",
+    currentPlan: "الباقة الحالية",
+    upgrade: "ترقية الباقة",
+    downgrade: "تخفيض الباقة",
+    billingConflict: "توجد اشتراكات نشطة متعددة تتطلب مراجعة الفوترة. تواصل مع الدعم قبل تغيير الباقة.",
+    billingReview: "يوجد اشتراك PayPal سابق يحتاج إلى مراجعة الفوترة قبل بدء دفع جديد. تواصل مع الدعم.",
+    planStatusUnavailable: "تعذر التحقق من باقتك الحالية. حدّث الصفحة قبل الدفع.",
     processingCheckout: "جارٍ الاتصال بـ PayPal...",
     compare: "قارن الباقات",
     feature: "نطاق الباقة",
@@ -165,9 +177,31 @@ export function SubscriptionsContent() {
     "idle" | "processing" | "active" | "failed" | "cancelled"
   >("idle");
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
-  const [activePlan, setActivePlan] = useState<string | null>(null);
+  const [activePlan, setActivePlan] = useState<"essential" | "growth" | "pro" | null>(null);
+  const [planStatus, setPlanStatus] = useState<"loading" | "ready" | "error">("loading");
+  const [billingConflict, setBillingConflict] = useState(false);
+  const [billingReview, setBillingReview] = useState(false);
   const [targetScanId, setTargetScanId] = useState<string | null>(null);
   const [loadingPlan, setLoadingPlan] = useState<string | null>(null);
+
+  useEffect(() => {
+    let mounted = true;
+    fetch("/api/payments/paypal/current-subscription", { cache: "no-store" })
+      .then(async (response) => {
+        if (response.status === 401) return { currentPlan: null, billingConflict: false, billingReview: false };
+        if (!response.ok) throw new Error("Current plan unavailable");
+        return response.json() as Promise<{ currentPlan: string | null; billingConflict: boolean; billingReview: boolean }>;
+      })
+      .then((data) => {
+        if (!mounted) return;
+        setActivePlan(data.currentPlan === "essential" || data.currentPlan === "growth" || data.currentPlan === "pro" ? data.currentPlan : null);
+        setBillingConflict(data.billingConflict);
+        setBillingReview(data.billingReview);
+        setPlanStatus("ready");
+      })
+      .catch(() => { if (mounted) setPlanStatus("error"); });
+    return () => { mounted = false; };
+  }, []);
 
   useEffect(() => {
     if (!selectedPlan || returnFlow) return;
@@ -238,7 +272,7 @@ export function SubscriptionsContent() {
           }
           if (data.isActive) {
             setPaymentStatus("active");
-            setActivePlan(data.plan || null);
+            if (data.plan === "essential" || data.plan === "growth" || data.plan === "pro") setActivePlan(data.plan);
           } else {
             setPaymentStatus("processing");
             setStatusMessage(
@@ -285,12 +319,12 @@ export function SubscriptionsContent() {
   const handleSubscriptionCheckout = async (plan: "essential" | "growth" | "pro") => {
     try {
       setLoadingPlan(plan);
-      const res = await fetch("/api/payments/paypal/create-subscription", {
+      const res = await fetch(activePlan ? "/api/payments/paypal/revise-subscription" : "/api/payments/paypal/create-subscription", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ plan }),
       });
-      const data = (await res.json()) as { error?: string; approveUrl?: string };
+      const data = (await res.json()) as { error?: string; approveUrl?: string; isActive?: boolean };
       if (res.status === 401) {
         window.location.href = "/auth/google";
         return;
@@ -300,6 +334,9 @@ export function SubscriptionsContent() {
       }
       if (data.approveUrl) {
         window.location.href = data.approveUrl;
+      } else if (data.isActive) {
+        setActivePlan(plan);
+        setPaymentStatus("active");
       }
     } catch (err: any) {
       alert(err.message || "Failed to initiate subscription");
@@ -405,11 +442,19 @@ export function SubscriptionsContent() {
               )}
 
               {/* Plans Grid */}
+              {billingConflict && <p role="alert" className="mb-6 rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm font-semibold text-amber-950">{t.billingConflict}</p>}
+              {billingReview && !billingConflict && <p role="alert" className="mb-6 rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm font-semibold text-amber-950">{t.billingReview}</p>}
+              {planStatus === "error" && <p role="alert" className="mb-6 rounded-xl border border-rose-300 bg-rose-50 p-4 text-sm font-semibold text-rose-950">{t.planStatusUnavailable}</p>}
               <div className="grid items-stretch gap-5 sm:grid-cols-2 xl:grid-cols-5">
                 {PLAN_CATALOG.map((plan) => {
                    const highlighted = plan.id === "growth";
                    const selected = plan.id === selectedPlan;
                   const isLoading = loadingPlan === plan.id;
+                  const isCurrent = plan.id === activePlan;
+                  const paidPlan = plan.id === "essential" || plan.id === "growth" || plan.id === "pro" ? plan.id : null;
+                  const changeLabel = activePlan && plan.billing === "monthly"
+                    ? (["essential", "growth", "pro"].indexOf(plan.id) > ["essential", "growth", "pro"].indexOf(activePlan) ? t.upgrade : t.downgrade)
+                    : null;
 
                   return (
                     <article
@@ -421,9 +466,9 @@ export function SubscriptionsContent() {
                            : selected ? "border-blue-600 bg-white ring-4 ring-blue-200" : "border-slate-200 bg-white"
                       }`}
                     >
-                       {(highlighted || selected) && (
+                       {(highlighted || selected || isCurrent) && (
                         <span className="absolute -top-3 start-5 rounded-full bg-blue-600 px-3 py-1 text-xs font-bold text-white">
-                           {selected ? t.selectedPlan : t.recommended}
+                           {isCurrent ? t.currentPlan : selected ? t.selectedPlan : t.recommended}
                         </span>
                       )}
                       <h2 className="text-xl font-extrabold">{plan.name[locale]}</h2>
@@ -521,67 +566,24 @@ export function SubscriptionsContent() {
                         </>
                       )}
 
-                      {plan.id === "essential" && (
-                        <Button
-                          type="button"
-                          disabled={isLoading}
-                          onClick={() => handleSubscriptionCheckout("essential")}
-                          className="h-auto min-h-11 w-full rounded-xl bg-blue-600 px-3 py-3 font-bold text-white hover:bg-blue-700"
-                        >
-                          {isLoading ? (
-                            <>
-                              <Loader2 className="size-4 animate-spin" />
-                              <span>{t.processingCheckout}</span>
-                            </>
-                          ) : (
-                            <>
-                              <span>{t.subscribeEssential}</span>
+                      {paidPlan && (
+                        isCurrent ? (
+                          <div className={`flex min-h-11 items-center justify-center rounded-xl border px-3 py-3 text-sm font-bold ${highlighted ? "border-cyan-300 text-cyan-200" : "border-blue-200 bg-blue-50 text-blue-800"}`}>
+                            <CheckCircle2 className="size-4" aria-hidden="true" /> {t.currentPlan}
+                          </div>
+                        ) : (
+                          <Button
+                            type="button"
+                            disabled={isLoading || planStatus !== "ready" || billingConflict || billingReview}
+                            onClick={() => handleSubscriptionCheckout(paidPlan)}
+                            className={`h-auto min-h-11 w-full rounded-xl px-3 py-3 font-bold ${highlighted ? "bg-white text-[#07111f] hover:bg-slate-100" : "bg-blue-600 text-white hover:bg-blue-700"}`}
+                          >
+                            {isLoading ? <><Loader2 className="size-4 animate-spin" /><span>{t.processingCheckout}</span></> : <>
+                              <span>{changeLabel || (plan.id === "essential" ? t.subscribeEssential : plan.id === "growth" ? t.subscribeGrowth : t.subscribePro)}</span>
                               <ArrowRight className="size-4 shrink-0 rtl:rotate-180" />
-                            </>
-                          )}
-                        </Button>
-                      )}
-
-                      {plan.id === "growth" && (
-                        <Button
-                          type="button"
-                          disabled={isLoading}
-                          onClick={() => handleSubscriptionCheckout("growth")}
-                          className="h-auto min-h-11 w-full rounded-xl bg-white px-3 py-3 font-bold text-[#07111f] hover:bg-slate-100"
-                        >
-                          {isLoading ? (
-                            <>
-                              <Loader2 className="size-4 animate-spin text-[#07111f]" />
-                              <span>{t.processingCheckout}</span>
-                            </>
-                          ) : (
-                            <>
-                              <span>{t.subscribeGrowth}</span>
-                              <ArrowRight className="size-4 shrink-0 rtl:rotate-180" />
-                            </>
-                          )}
-                        </Button>
-                      )}
-
-                      {plan.id === "pro" && (
-                        <Button
-                          type="button"
-                          disabled={isLoading}
-                          onClick={() => handleSubscriptionCheckout("pro")}
-                          className="h-auto min-h-11 w-full rounded-xl bg-blue-600 px-3 py-3 font-bold text-white hover:bg-blue-700"
-                        >
-                          {isLoading ? (
-                            <>
-                              <Loader2 className="size-4 animate-spin" />
-                              <span>{t.processingCheckout}</span>
-                            </>
-                          ) : (
-                            <>
-                              <span>{t.subscribePro}</span>
-                              <ArrowRight className="size-4 shrink-0 rtl:rotate-180" />
-                            </>
-                          )}
-                        </Button>
+                            </>}
+                          </Button>
+                        )
                       )}
                     </article>
                   );
