@@ -19,5 +19,10 @@ try {
       if (tests.error) throw tests.error;
       if (tests.status !== 0) { process.exitCode = tests.status ?? 1; break; }
     }
+    if (!process.exitCode) {
+      const authTests = spawnSync(process.execPath, ["--test", "tests/google-oauth.test.mjs"], { stdio: "inherit" });
+      if (authTests.error) throw authTests.error;
+      if (authTests.status !== 0) process.exitCode = authTests.status ?? 1;
+    }
   }
 } finally { rmSync(output, { recursive: true, force: true }); }

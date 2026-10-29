@@ -18,12 +18,18 @@ type SessionPayload = {
   exp: number;
 };
 
-export const APP_ORIGIN = "https://recomvia.recomvia.workers.dev";
-export const GOOGLE_CALLBACK_URL = `${APP_ORIGIN}/auth/google/callback`;
 export const SESSION_COOKIE = "__Host-recomvia_session";
 export const OAUTH_STATE_COOKIE = "__Host-recomvia_oauth_state";
 export const OAUTH_VERIFIER_COOKIE = "__Host-recomvia_oauth_verifier";
 export const SESSION_MAX_AGE = 60 * 60 * 24 * 7;
+
+export function getAppOrigin(request: Request) {
+  return new URL(request.url).origin;
+}
+
+export function getGoogleCallbackUrl(request: Request) {
+  return `${getAppOrigin(request)}/auth/google/callback`;
+}
 
 export async function getAuthenticatedUser(): Promise<AuthUser | null> {
   const value = (await cookies()).get(SESSION_COOKIE)?.value;
