@@ -94,6 +94,7 @@ export type VisibilityEngineRun = {
   retryCount: number;
   timestamp: string;
   providerRunId: string | null;
+  finishReason?: string | null;
 };
 
 export type ActualVisibilityMeasurement = {
@@ -1185,6 +1186,7 @@ export async function runActualVisibility(input: {
       retryCount: response.retryCount,
       timestamp: response.timestamp,
       providerRunId: response.providerRunId,
+      finishReason: response.finishReason ?? null,
     });
   }
   const aggregate = aggregateActualVisibility(engineRuns, prompts.length);

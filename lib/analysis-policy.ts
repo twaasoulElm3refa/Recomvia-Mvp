@@ -1,7 +1,7 @@
 import type { PlanId } from "./plans";
 import type { TargetInput } from "./analysis-target";
 
-export const ANALYSIS_POLICY_VERSION = "plan-analysis-v1";
+export const ANALYSIS_POLICY_VERSION = "plan-analysis-v2";
 export type AnalysisPolicy = {
   version: string; plan: "free" | "essential" | "growth" | "pro";
   promptLimit: number; modelCount: number; pageLimit: number; competitorLimit: number;
@@ -11,6 +11,9 @@ export type AnalysisPolicy = {
 };
 // Conservative operating defaults for validation. These are not published sales quotas.
 export function analysisPolicy(plan: PlanId | null): AnalysisPolicy {
+  // Visibility answers are short prose/list responses; 1,200 output tokens is
+  // ample for a cited final answer with reasoning disabled. Identity discovery
+  // uses a separate 2,400-token cap for up to four structured candidates.
   const common = { version: ANALYSIS_POLICY_VERSION, unknownCallReserveMicros: 40_000, maxOutputTokens: 1_200, searchResults: 3, searchUses: 1 };
   if (plan === "essential") return { ...common, plan, promptLimit: 6, modelCount: 2, pageLimit: 3, competitorLimit: 3, measurementsPer30Days: 4, monitoringDays: 8, budgetMicros: 1_000_000 };
   if (plan === "growth" || plan === "pro") return { ...common, plan, promptLimit: 12, modelCount: 3, pageLimit: 8, competitorLimit: 8, measurementsPer30Days: 8, monitoringDays: 4, budgetMicros: 3_000_000 };
@@ -38,5 +41,5 @@ export function policyFingerprint(policy: AnalysisPolicy, models: string[]) {
   // Pro has the same per-project measurements as Growth. Price/project count do not alter the sample.
   const { plan: _plan, ...scope } = policy;
   void _plan;
-  return JSON.stringify({ ...scope, models, searchMode: "auto" });
+  return JSON.stringify({ ...scope, models, searchMode: "web_plugin_once", reasoning: "disabled" });
 }

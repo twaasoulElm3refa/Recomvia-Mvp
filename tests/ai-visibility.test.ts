@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { aggregateActualVisibility, analyzeVisibilityResponse, businessContextForVisibility, discoverWebsiteContext, discoverWebsiteIdentityCandidates, generateIntentPrompts, isTechnicalWebsiteVocabulary, runActualVisibility, type DiscoveredSiteContext, type VisibilityEngineRun } from "../lib/ai-visibility";
-import { generateTargetPrompts, type AnalysisTarget } from "../lib/analysis-target";
+import { generateTargetPrompts, parseTargetDiscovery, type AnalysisTarget, type TargetInput } from "../lib/analysis-target";
 import { decodeHtmlEntities, sanitizeProviderAnswer } from "../lib/answer-text";
 import type { EngineAdapter, EngineResponse } from "../lib/ai-engines/engine-adapter";
 import { OpenRouterEngineAdapter } from "../lib/ai-engines/openrouter-engine-adapter";
@@ -320,7 +320,9 @@ test("OpenRouter adapter retries a 429 and records returned sources, citations, 
     const request = JSON.parse(String(init?.body));
     assert.equal(request.model, OPENROUTER_TEST_MODEL);
     assert.deepEqual(request.usage, { include: true });
-    assert.equal(request.tools[0].type, "openrouter:web_search");
+    assert.deepEqual(request.reasoning, { enabled: false });
+    assert.deepEqual(request.plugins, [{ id: "web", max_results: 3 }]);
+    assert.equal(request.tools, undefined);
     if (requests === 1) return new Response(JSON.stringify({ error: { code: "rate_limit", message: "Try again" } }), { status: 429, headers: { "content-type": "application/json" } });
     return new Response(JSON.stringify({
       id: "generation_real_shape", model: OPENROUTER_TEST_MODEL,
@@ -328,7 +330,7 @@ test("OpenRouter adapter retries a 429 and records returned sources, citations, 
         content: "Northstar is listed.",
         annotations: [{ type: "url_citation", url_citation: { url: "https://source.example/a", title: "Source A", start_index: 0, end_index: 9 } }],
       } }],
-      usage: { prompt_tokens: 100, completion_tokens: 20, total_tokens: 120, prompt_tokens_details: { cached_tokens: 20 }, server_tool_use: { web_search_requests: 1 }, cost: 0.010152 },
+      usage: { prompt_tokens: 100, completion_tokens: 20, total_tokens: 120, prompt_tokens_details: { cached_tokens: 20 }, cost: 0.010152 },
     }), { status: 200, headers: { "content-type": "application/json" } });
   };
   const adapter = new OpenRouterEngineAdapter({ apiKey: "test-only-key", model: OPENROUTER_TEST_MODEL, fetchImpl, maxRetries: 1, backoffBaseMs: 0 });
@@ -338,7 +340,7 @@ test("OpenRouter adapter retries a 429 and records returned sources, citations, 
   assert.equal(response.surfaceType, "api_with_search");
   assert.equal(response.retryCount, 1);
   assert.equal(response.providerRunId, "generation_real_shape");
-  assert.deepEqual(response.usage, { inputTokens: 100, cachedInputTokens: 20, outputTokens: 20, totalTokens: 120 });
+  assert.deepEqual(response.usage, { inputTokens: 100, cachedInputTokens: 20, outputTokens: 20, totalTokens: 120, reasoningTokens: null, visibleOutputTokens: null });
   assert.equal(response.sources[0].url, "https://source.example/a");
   assert.equal(response.citations[0].url, "https://source.example/a");
   assert.equal(response.estimatedCostMicros, 10_152);
@@ -347,16 +349,16 @@ test("OpenRouter adapter retries a 429 and records returned sources, citations, 
 test("OpenRouter adapter keeps absent citations and provider cost empty without fabrication", async () => {
   const fetchImpl: typeof fetch = async (_input, init) => {
     const request = JSON.parse(String(init?.body));
-    assert.equal(request.tools[0].type, "openrouter:web_search");
+    assert.deepEqual(request.plugins, [{ id: "web", max_results: 3 }]);
     return new Response(JSON.stringify({
       id: "generation_without_search", model: OPENROUTER_TEST_MODEL,
       choices: [{ message: { content: [{ type: "text", text: "A plain answer." }] } }],
-      usage: { prompt_tokens: 7, completion_tokens: 3, total_tokens: 10, server_tool_use: { web_search_requests: 1 } },
+      usage: { prompt_tokens: 7, completion_tokens: 3, total_tokens: 10 },
     }), { status: 200, headers: { "content-type": "application/json" } });
   };
   const adapter = new OpenRouterEngineAdapter({ apiKey: "test-only-key", model: OPENROUTER_TEST_MODEL, fetchImpl });
   const response = await adapter.run({ prompt: "Answer plainly", language: "en", country: "Global", useSearch: true });
-  assert.equal(response.surfaceType, "api_with_search");
+  assert.equal(response.surfaceType, "api_without_search");
   assert.deepEqual(response.sources, []);
   assert.deepEqual(response.citations, []);
   assert.equal(response.estimatedCostMicros, null);
@@ -379,7 +381,7 @@ test("Qwen reasoning is removed before storage while citations and the final ans
             annotations: [{ type: "url_citation", url_citation: { url: "https://source.example/qwen", title: "Evidence" } }],
           },
         }],
-        usage: { prompt_tokens: 2, completion_tokens: 3, total_tokens: 5, server_tool_use: { web_search_requests: 1 } },
+        usage: { prompt_tokens: 2, completion_tokens: 3, total_tokens: 5 },
       }),
       { headers: { "content-type": "application/json" } },
     );
@@ -395,10 +397,85 @@ test("Qwen reasoning is removed before storage while citations and the final ans
   assert.equal(result.engineRuns[0].citations[0].url, "https://source.example/qwen");
 });
 
+test("empty HTTP 200 with exhausted reasoning budget stays failed and keeps usage, finish reason, and cost", async () => {
+  let calls = 0;
+  const adapter = new OpenRouterEngineAdapter({ apiKey: "test-only-key", model: "qwen/test", fetchImpl: async () => {
+    calls++;
+    return Response.json({ id: "charged-empty", model: "qwen/test", choices: [{ finish_reason: "length", message: { content: "" } }],
+      usage: { prompt_tokens: 100, completion_tokens: 1200, total_tokens: 1300, completion_tokens_details: { reasoning_tokens: 1200 }, cost: 0.007 } });
+  } });
+  const result = await adapter.run({ prompt: "Which options?", language: "en", country: "UK", useSearch: true });
+  assert.equal(calls, 1);
+  assert.equal(result.error?.code, "empty_final_response");
+  assert.equal(result.responseText, null);
+  assert.equal(result.finishReason, "length");
+  assert.equal(result.usage.inputTokens, 100);
+  assert.equal(result.usage.outputTokens, 1200);
+  assert.equal(result.usage.reasoningTokens, 1200);
+  assert.equal(result.usage.visibleOutputTokens, 0);
+  assert.equal(result.estimatedCostMicros, 7_000);
+  assert.equal(result.providerRunId, "charged-empty");
+  assert.equal(result.retryCount, 0);
+});
+
+test("thinking-only content fails while a marked final answer is accepted without exposing reasoning", async () => {
+  let calls = 0;
+  const adapter = new OpenRouterEngineAdapter({ apiKey: "test-only-key", model: "qwen/test", fetchImpl: async () => {
+    calls++;
+    return Response.json({ id: `reasoning-${calls}`, choices: [{ finish_reason: "stop", message: { content: calls === 1
+      ? "Thinking Process:\nFirst I should analyze the options.\nThen I should compare them."
+      : "Thinking Process:\nFirst I should analyze the options.\nFinal Answer: Northstar is recommended." } }],
+      usage: { completion_tokens: 40, completion_tokens_details: { reasoning_tokens: 20 }, cost: 0.002 } });
+  } });
+  const request = { prompt: "Which options?", language: "en", country: "UK", useSearch: true };
+  const failed = await adapter.run(request);
+  assert.equal(failed.error?.code, "reasoning_only_response");
+  assert.equal(failed.responseText, null);
+  assert.equal(failed.estimatedCostMicros, 2_000);
+  const passed = await adapter.run(request);
+  assert.equal(passed.error, null);
+  assert.equal(passed.responseText, "Northstar is recommended.");
+  assert.ok(!passed.responseText?.includes("Thinking Process"));
+});
+
+test("discovery JSON must parse before the adapter reports success", async () => {
+  const input: TargetInput = { input: "Ada Example", kind: "person", context: "", language: "en", websiteUrl: null };
+  const source = "https://source.example/ada";
+  const valid = JSON.stringify({ status: "resolved", candidates: [{ kind: "person", name: "Ada Example", description: "Researcher", category: "Analytics", aliases: [], country: "Global", websiteUrl: null, sources: [source] }] });
+  let calls = 0;
+  const adapter = new OpenRouterEngineAdapter({ apiKey: "test-only-key", model: "qwen/test", fetchImpl: async () => {
+    calls++;
+    return Response.json({ id: `discovery-${calls}`, choices: [{ message: { content: calls === 1 ? "not valid JSON" : valid,
+      annotations: [{ type: "url_citation", url_citation: { url: source, title: "Profile" } }] } }], usage: { cost: 0.001 } });
+  } });
+  const request = { prompt: "Resolve identity", language: "en", country: "Global", useSearch: true, expectedFormat: "discovery_json" as const };
+  const invalid = await adapter.run(request);
+  assert.equal(invalid.error?.code, "invalid_final_response");
+  assert.equal(invalid.estimatedCostMicros, 1_000);
+  const parsed = await adapter.run(request);
+  assert.equal(parsed.error, null);
+  assert.equal(parseTargetDiscovery(parsed, input).status, "resolved");
+});
+
+test("a billed empty final answer is excluded from visibility scoring", async () => {
+  let calls = 0;
+  const adapter = new OpenRouterEngineAdapter({ apiKey: "test-only-key", model: "qwen/test", fetchImpl: async () => {
+    calls++;
+    return Response.json({ id: `score-${calls}`, choices: [{ message: { content: calls === 1 ? "Northstar is recommended." : "",
+      annotations: [{ type: "url_citation", url_citation: { url: "https://source.example/a", title: "Evidence" } }] } }],
+      usage: { cost: 0.001 } });
+  } });
+  const measurement = await runActualVisibility({ adapter, context, prompts: generateIntentPrompts(context).slice(0, 2) });
+  assert.equal(measurement.status, "partial");
+  assert.equal(measurement.score, 100);
+  assert.equal(measurement.engineRuns[1].error?.code, "empty_final_response");
+  assert.equal(measurement.engineRuns[1].estimatedCostMicros, 1_000);
+});
+
 test("OpenRouter adapter labels a run without an executed search accurately", async () => {
   const fetchImpl: typeof fetch = async (_input, init) => {
     const request = JSON.parse(String(init?.body));
-    assert.equal(request.tools, undefined);
+    assert.equal(request.plugins, undefined);
     assert.equal(request.max_tool_calls, undefined);
     return new Response(JSON.stringify({
       id: "generation_no_tool", model: OPENROUTER_TEST_MODEL,

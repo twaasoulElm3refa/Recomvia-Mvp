@@ -21,6 +21,8 @@ export type EngineUsage = {
   cachedInputTokens: number | null;
   outputTokens: number | null;
   totalTokens: number | null;
+  reasoningTokens?: number | null;
+  visibleOutputTokens?: number | null;
 };
 
 export type EngineRunRequest = {
@@ -31,6 +33,7 @@ export type EngineRunRequest = {
   maxOutputTokens?: number;
   searchResults?: number;
   searchUses?: number;
+  expectedFormat?: "discovery_json";
 };
 
 export type EngineProviderError = {
@@ -52,6 +55,7 @@ export type EngineResponse = {
   durationMs: number;
   retryCount: number;
   providerRunId: string | null;
+  finishReason?: string | null;
   timestamp: string;
   error: EngineProviderError | null;
 };

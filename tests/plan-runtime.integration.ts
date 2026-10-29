@@ -10,7 +10,7 @@ import { OpenRouterEngineAdapter } from "../lib/ai-engines/openrouter-engine-ada
 
 type Db = ReturnType<typeof createFixture>;
 type Payload = { scan: StoredScan; cached?: boolean; code?: string; scanId?: string };
-type ProviderRequest = { model: string; messages: { content: string }[]; max_tokens: number };
+type ProviderRequest = { model: string; messages: { content: string }[]; max_tokens: number; reasoning: { enabled: boolean }; plugins: { id: string; max_results: number }[]; tools?: unknown };
 const secret = "test-only-monitoring-secret-with-32-characters";
 const candidate = { kind: "person", name: "Ada Example", description: "Public researcher", category: "Retail analytics", aliases: [], country: "Global", websiteUrl: null, sources: ["https://profiles.example/ada"] };
 const request = (body: unknown) => new Request("https://recomvia.test/api/scans", { method: "POST", headers: { "Content-Type": "application/json", Origin: "https://recomvia.test" }, body: JSON.stringify(body) });
@@ -23,7 +23,7 @@ function reply(body: ProviderRequest, options: { search?: boolean; cost?: number
     id: crypto.randomUUID(), model: options.model || body.model,
     choices: [{ message: { content: options.fail ? "" : discovery ? JSON.stringify({ status: "resolved", candidates: [candidate] }) : body.model === "test/model" ? "1. Ada Example — recommended for retail analytics." : "1. Other Researcher — recommended for retail analytics.",
       annotations: search ? [{ type: "url_citation", url_citation: { url: "https://profiles.example/ada", title: "Profile" } }] : [] } }],
-    usage: { prompt_tokens: 10, completion_tokens: 10, total_tokens: 20, ...(options.cost === null ? {} : { cost: options.cost ?? 0.001 }), ...(search ? { server_tool_use: { web_search_requests: 1 } } : {}) },
+    usage: { prompt_tokens: 10, completion_tokens: 10, total_tokens: 20, ...(options.cost === null ? {} : { cost: options.cost ?? 0.001 }) },
   });
 }
 async function setup(plan: "free" | "essential" | "growth" | "pro", action: (db: Db, requests: ProviderRequest[]) => Promise<void>, handler: (body: ProviderRequest) => Response | Promise<Response> = reply) {
@@ -33,6 +33,9 @@ async function setup(plan: "free" | "essential" | "growth" | "pro", action: (db:
   globalThis.fetch = async (url, init) => {
     assert.ok(String(url).startsWith("https://openrouter.ai/"), `Unexpected network destination: ${url}`);
     const body = JSON.parse(String(init?.body)) as ProviderRequest;
+    assert.deepEqual(body.reasoning, { enabled: false });
+    assert.deepEqual(body.plugins, [{ id: "web", max_results: 3 }]);
+    assert.equal(body.tools, undefined);
     requests.push(body); return handler(body);
   };
   try { await action(db, requests); } finally { globalThis.fetch = original; db.close(); }
@@ -50,6 +53,8 @@ for (const [plan, models, questions, depth] of [
     assert.equal(count(db, "engine_runs"), models * questions);
     assert.equal(requests.length, models * questions + 1); // Identity discovery is a separate recorded request.
     const measurementRequests = requests.filter((item) => !item.messages[1].content.includes("INPUT_DATA:"));
+    assert.equal(requests.find((item) => item.messages[1].content.includes("INPUT_DATA:"))?.max_tokens, 2_400);
+    assert.ok(measurementRequests.every((item) => item.max_tokens === (plan === "free" ? 900 : 1_200)));
     assert.equal(new Set(measurementRequests.map((item) => item.model)).size, models);
     const perModel = [...new Set(measurementRequests.map((item) => item.model))].map((model) => measurementRequests.filter((item) => item.model === model).map((item) => item.messages[1].content).sort());
     for (const questionsForModel of perModel) assert.deepEqual(questionsForModel, perModel[0]);
@@ -225,7 +230,7 @@ test("timeout, empty paid response, and deterministic 4xx do not trigger extra c
     emptyCalls++;
     return Response.json({ id: "charged-empty", choices: [{ message: { content: "" } }], usage: { cost: 0.007 } });
   }, maxRetries: 1 }).run(run);
-  assert.equal(empty.error?.code, "empty_response");
+  assert.equal(empty.error?.code, "empty_final_response");
   assert.equal(empty.estimatedCostMicros, 7_000);
   assert.equal(empty.retryCount, 0);
   assert.equal(emptyCalls, 1);
@@ -256,6 +261,39 @@ test("a single 429 observation stops after two backoff retries", async () => {
   assert.equal(calls, 3);
   assert.equal(result.retryCount, 2);
   assert.equal(result.error?.status, 429);
+});
+
+test("failed billed final answers retain reasoning and finish metadata without reducing visibility to zero", async () => {
+  let secondModelCalls = 0;
+  await setup("essential", async (db) => {
+    const response = await POST(request(person));
+    assert.equal(response.status, 201);
+    const body = await read(response);
+    assert.equal(body.scan.actualVisibilityStatus, "partial");
+    const scored = body.scan.engineRuns.filter((run) => !run.error && run.responseText && run.surfaceType === "api_with_search" && !["identity", "topic", "entity_resolution"].includes(run.intent));
+    assert.equal(body.scan.actualVisibilityScore, Math.round(100 * scored.filter((run) => run.analysis.brandVisible).length / scored.length));
+    const failed = body.scan.engineRuns.find((run) => run.error?.code === "empty_final_response")!;
+    assert.equal(failed.estimatedCostMicros, 6_000);
+    const ledger = db.prepare("SELECT cost_micros AS cost, metadata_json AS metadata FROM cost_ledger WHERE id=?").get(`engine_${failed.id}`) as { cost: number; metadata: string };
+    assert.equal(ledger.cost, 6_000);
+    const metadata = JSON.parse(ledger.metadata);
+    assert.equal(metadata.model, "test/second");
+    assert.equal(metadata.providerRunId, "billed-empty");
+    assert.equal(metadata.promptTokens, 100);
+    assert.equal(metadata.completionTokens, 1200);
+    assert.equal(metadata.reasoningTokens, 1200);
+    assert.equal(metadata.visibleOutputTokens, 0);
+    assert.equal(metadata.finishReason, "length");
+    assert.equal(metadata.errorCode, "empty_final_response");
+    assert.equal(metadata.retryCount, 0);
+    assert.equal(typeof metadata.latencyMs, "number");
+  }, (body) => {
+    if (body.model === "test/second" && ++secondModelCalls === 2) {
+      return Response.json({ id: "billed-empty", model: "test/second", choices: [{ finish_reason: "length", message: { content: "" } }],
+        usage: { prompt_tokens: 100, completion_tokens: 1200, total_tokens: 1300, completion_tokens_details: { reasoning_tokens: 1200 }, cost: 0.006 } });
+    }
+    return reply(body);
+  });
 });
 
 test("failed search coverage remains partial and does not become a zero visibility observation", async () => {

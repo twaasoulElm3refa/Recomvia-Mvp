@@ -36,6 +36,8 @@ type OpenRouterResponse = {
   id?: string;
   model?: string;
   choices?: Array<{
+    finish_reason?: string | null;
+    native_finish_reason?: string | null;
     message?: {
       content?: string | Array<{ type?: string; text?: string }> | null;
       annotations?: OpenRouterAnnotation[];
@@ -48,7 +50,9 @@ type OpenRouterResponse = {
     input_tokens?: number;
     output_tokens?: number;
     prompt_tokens_details?: { cached_tokens?: number };
+    completion_tokens_details?: { reasoning_tokens?: number };
     input_tokens_details?: { cached_tokens?: number };
+    output_tokens_details?: { reasoning_tokens?: number };
     server_tool_use?: { web_search_requests?: number };
     cost?: number;
   };
@@ -60,6 +64,8 @@ function finite(value: unknown): number | null {
 }
 
 function usageFrom(response: OpenRouterResponse): EngineUsage {
+  const outputTokens = finite(response.usage?.completion_tokens ?? response.usage?.output_tokens);
+  const reasoningTokens = finite(response.usage?.completion_tokens_details?.reasoning_tokens ?? response.usage?.output_tokens_details?.reasoning_tokens);
   return {
     inputTokens: finite(
       response.usage?.prompt_tokens ?? response.usage?.input_tokens,
@@ -68,24 +74,56 @@ function usageFrom(response: OpenRouterResponse): EngineUsage {
       response.usage?.prompt_tokens_details?.cached_tokens ??
         response.usage?.input_tokens_details?.cached_tokens,
     ),
-    outputTokens: finite(
-      response.usage?.completion_tokens ?? response.usage?.output_tokens,
-    ),
+    outputTokens,
     totalTokens: finite(response.usage?.total_tokens),
+    reasoningTokens,
+    visibleOutputTokens: outputTokens !== null && reasoningTokens !== null ? Math.max(0, outputTokens - reasoningTokens) : null,
   };
 }
 
-function outputText(response: OpenRouterResponse) {
+function rawOutputText(response: OpenRouterResponse) {
   const content = response.choices?.[0]?.message?.content;
   if (typeof content === "string" && content.trim())
-    return sanitizeProviderAnswer(content);
+    return content;
   if (!Array.isArray(content)) return null;
   const text = content
     .filter((item) => item.type === "text" && typeof item.text === "string")
     .map((item) => item.text!.trim())
     .filter(Boolean)
     .join("\n");
-  return text ? sanitizeProviderAnswer(text) || null : null;
+  return text || null;
+}
+
+function outputText(response: OpenRouterResponse) {
+  const raw = rawOutputText(response);
+  if (!raw) return null;
+  const thinkingHeading = /(?:^|\n)\s*(?:#{1,6}\s*)?(?:thinking process|reasoning|analysis|internal steps)\s*(?::|\n|$)/i;
+  if (thinkingHeading.test(raw)) {
+    const finalHeading = /(?:^|\n)\s*(?:#{1,6}\s*)?(?:final answer|final response)\s*:?\s*/i.exec(raw);
+    if (!finalHeading || finalHeading.index === undefined) return null;
+    return sanitizeProviderAnswer(raw.slice(finalHeading.index + finalHeading[0].length)) || null;
+  }
+  return sanitizeProviderAnswer(raw) || null;
+}
+
+function validDiscoveryJson(text: string) {
+  try {
+    const data: unknown = JSON.parse(text.replace(/^\s*```(?:json)?\s*/i, "").replace(/\s*```\s*$/, ""));
+    if (!data || typeof data !== "object" || Array.isArray(data)) return false;
+    const result = data as { status?: unknown; candidates?: unknown };
+    if (!["resolved", "ambiguous", "unresolved", "topic"].includes(String(result.status)) || !Array.isArray(result.candidates)) return false;
+    if (result.status === "unresolved" || result.status === "topic") return true;
+    return result.candidates.some((candidate: unknown) => {
+      if (!candidate || typeof candidate !== "object") return false;
+      const item = candidate as { kind?: unknown; name?: unknown; sources?: unknown };
+      return ["person", "brand"].includes(String(item.kind)) && typeof item.name === "string" && Boolean(item.name.trim())
+        && Array.isArray(item.sources) && item.sources.some((source: unknown) => typeof source === "string" && Boolean(safeSourceUrl(source)));
+    });
+  } catch { return false; }
+}
+
+function finishReasonFrom(response: OpenRouterResponse) {
+  return response.choices?.[0]?.finish_reason ?? response.choices?.[0]?.native_finish_reason ?? null;
 }
 
 function citationsFrom(response: OpenRouterResponse): EngineCitation[] {
@@ -154,6 +192,8 @@ function emptyUsage(): EngineUsage {
     cachedInputTokens: null,
     outputTokens: null,
     totalTokens: null,
+    reasoningTokens: null,
+    visibleOutputTokens: null,
   };
 }
 
@@ -228,11 +268,12 @@ export class OpenRouterEngineAdapter implements EngineAdapter {
           body: JSON.stringify({
             model: this.model,
             provider: { allow_fallbacks: false, require_parameters: true },
+            reasoning: { enabled: false },
             messages: [
               {
                 role: "system",
                 content:
-                  "Return only the final answer, with no private reasoning, planning, analysis preamble, or <think> tags. Answer the question directly and independently. When web search is available, use current web evidence and cite it. Name concrete options where appropriate, preserve uncertainty, and do not assume any brand must appear.",
+                  "Return only the requested final answer or JSON result. Never output reasoning, analysis, a thinking process, internal steps, or <think> tags. Answer independently using the supplied web evidence and cite sources when appropriate. Name concrete options, preserve uncertainty, and do not assume any brand must appear.",
               },
               { role: "user", content: request.prompt },
             ],
@@ -241,21 +282,10 @@ export class OpenRouterEngineAdapter implements EngineAdapter {
               Math.min(request.maxOutputTokens || 1_200, 2_400),
             ),
             usage: { include: true },
-            tools: request.useSearch
-              ? [
-                  {
-                    type: "openrouter:web_search",
-                    parameters: {
-                      engine: "auto",
-                      max_results: request.searchResults ?? 5,
-                      max_total_results: (request.searchResults ?? 5) * (request.searchUses ?? 2),
-                      max_uses: request.searchUses ?? 2,
-                      search_context_size: "low",
-                    },
-                  },
-                ]
-              : undefined,
-            max_tool_calls: request.useSearch ? (request.searchUses ?? 2) + 1 : undefined,
+            // A comparative measurement needs one search before every answer.
+            // The deprecated web plugin is intentional until methodology changes;
+            // the server tool lets each model choose zero or multiple searches.
+            plugins: request.useSearch ? [{ id: "web", max_results: request.searchResults ?? 3 }] : undefined,
           }),
         });
         const body = (await response
@@ -277,9 +307,12 @@ export class OpenRouterEngineAdapter implements EngineAdapter {
             lastError = safeError(
               response.status,
               body,
-              "OpenRouter returned no answer text.",
-              "empty_response",
+              "OpenRouter returned no usable final answer.",
+              rawOutputText(body) ? "reasoning_only_response" : "empty_final_response",
             );
+            break;
+          } else if (request.expectedFormat === "discovery_json" && !validDiscoveryJson(text)) {
+            lastError = safeError(response.status, body, "OpenRouter returned an invalid discovery JSON result.", "invalid_final_response");
             break;
           } else {
             const citations = citationsFrom(body);
@@ -295,6 +328,7 @@ export class OpenRouterEngineAdapter implements EngineAdapter {
               durationMs: Date.now() - started,
               retryCount: retries,
               providerRunId: body.id || null,
+              finishReason: finishReasonFrom(body),
               timestamp,
               error: null,
             };
@@ -331,6 +365,7 @@ export class OpenRouterEngineAdapter implements EngineAdapter {
       durationMs: Date.now() - started,
       retryCount: retries,
       providerRunId: lastBody?.id || null,
+      finishReason: lastBody ? finishReasonFrom(lastBody) : null,
       timestamp,
       error: lastError || safeError(null, null, "OpenRouter request failed."),
     };

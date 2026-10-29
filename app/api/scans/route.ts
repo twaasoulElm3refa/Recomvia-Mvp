@@ -371,6 +371,7 @@ export async function runScanForUser(user: AuthUser, payload: Record<string, unk
       country: "Global",
       useSearch: true,
       maxOutputTokens: 2_400,
+      expectedFormat: "discovery_json",
       searchResults: policy.searchResults, searchUses: policy.searchUses,
     });
     const discovery = parseTargetDiscovery(response, input);

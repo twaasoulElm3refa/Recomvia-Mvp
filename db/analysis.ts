@@ -19,7 +19,7 @@ export async function recordEngineCost(workspace: Workspace, scanId: string, run
   await db().prepare(`INSERT OR IGNORE INTO cost_ledger
     (id, organization_id, scan_id, category, provider, units, cost_micros, metadata_json)
     VALUES (?, ?, ?, 'ai_engine', ?, ?, ?, ?)`).bind(`engine_${run.id}`, workspace.organizationId, scanId, run.provider, run.usage.totalTokens || 0, run.estimatedCostMicros ?? 0,
-      JSON.stringify({ engineRunId: run.id, model: run.model, providerRunId: run.providerRunId, costKnown: run.estimatedCostMicros !== null, inputTokens: run.usage.inputTokens, outputTokens: run.usage.outputTokens, retryCount: run.retryCount, errorCode: run.error?.code || null, latencyMs: run.durationMs })).run();
+      JSON.stringify({ engineRunId: run.id, model: run.model, providerRunId: run.providerRunId, costKnown: run.estimatedCostMicros !== null, promptTokens: run.usage.inputTokens, completionTokens: run.usage.outputTokens, reasoningTokens: run.usage.reasoningTokens ?? null, visibleOutputTokens: run.usage.visibleOutputTokens ?? null, finishReason: run.finishReason ?? null, retryCount: run.retryCount, errorCode: run.error?.code || null, latencyMs: run.durationMs })).run();
 }
 export async function scanCostGuard(workspace: Workspace, scanId: string, reserve: number) {
   const result = await db().prepare("SELECT cost_micros AS cost, metadata_json AS metadata FROM cost_ledger WHERE scan_id=? AND organization_id=? AND category='entity_discovery'").bind(scanId, workspace.organizationId).all<{ cost: number; metadata: string }>();
