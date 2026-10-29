@@ -134,7 +134,7 @@ function toStarterReport(scan: StoredScan): StarterReport {
   };
 }
 
-function database() {
+export function database() {
   if (!env.DB) throw new Error("Product storage is temporarily unavailable.");
   return env.DB;
 }
@@ -1277,3 +1277,96 @@ export async function listScansForUser(userId: string, limit = 20) {
     .all<ReportSummaryRow>();
   return Promise.all(result.results.map(toReportSummary));
 }
+
+export async function getReportPurchaseForScan(organizationId: string, scanId: string) {
+  return database().prepare(`
+    SELECT id, organization_id AS organizationId, scan_id AS scanId, plan, status,
+      provider, provider_payment_id AS providerPaymentId, amount_cents AS amountCents,
+      currency, paid_at AS paidAt, created_at AS createdAt
+    FROM report_purchases
+    WHERE organization_id = ? AND scan_id = ?
+    ORDER BY created_at DESC LIMIT 1
+  `).bind(organizationId, scanId).first<{
+    id: string;
+    organizationId: string;
+    scanId: string;
+    plan: string;
+    status: string;
+    provider: string;
+    providerPaymentId: string;
+    amountCents: number;
+    currency: string;
+    paidAt: string | null;
+    createdAt: string;
+  }>();
+}
+
+export async function recordStarterPurchase(input: {
+  organizationId: string;
+  scanId: string;
+  providerPaymentId: string;
+  amountCents: number;
+  currency?: string;
+  status?: string;
+}) {
+  const db = database();
+  const id = createId("pur");
+  const currency = input.currency || "USD";
+  const status = input.status || "paid";
+  const paidAt = status === "paid" ? new Date().toISOString() : null;
+
+  await db.prepare(`
+    INSERT INTO report_purchases
+      (id, organization_id, scan_id, plan, status, provider, provider_payment_id, amount_cents, currency, paid_at)
+    VALUES (?, ?, ?, 'starter', ?, 'paypal', ?, ?, ?, ?)
+    ON CONFLICT(provider, provider_payment_id) DO UPDATE SET
+      status = excluded.status,
+      paid_at = COALESCE(excluded.paid_at, report_purchases.paid_at),
+      updated_at = CURRENT_TIMESTAMP
+  `).bind(
+    id,
+    input.organizationId,
+    input.scanId,
+    status,
+    input.providerPaymentId,
+    input.amountCents,
+    currency,
+    paidAt,
+  ).run();
+
+  return { id, organizationId: input.organizationId, scanId: input.scanId, status };
+}
+
+export async function upsertPayPalSubscription(input: {
+  organizationId: string;
+  plan: "essential" | "growth" | "pro";
+  status: string;
+  providerSubscriptionId: string;
+  currentPeriodEnd?: string | null;
+  cancelAtPeriodEnd?: boolean;
+}) {
+  const db = database();
+  const id = createId("sub");
+  await db.prepare(`
+    INSERT INTO subscriptions
+      (id, organization_id, plan, status, provider, provider_subscription_id, current_period_end, cancel_at_period_end)
+    VALUES (?, ?, ?, ?, 'paypal', ?, ?, ?)
+    ON CONFLICT(provider, provider_subscription_id) DO UPDATE SET
+      plan = excluded.plan,
+      status = excluded.status,
+      current_period_end = COALESCE(excluded.current_period_end, subscriptions.current_period_end),
+      cancel_at_period_end = excluded.cancel_at_period_end,
+      updated_at = CURRENT_TIMESTAMP
+  `).bind(
+    id,
+    input.organizationId,
+    input.plan,
+    input.status,
+    input.providerSubscriptionId,
+    input.currentPeriodEnd || null,
+    input.cancelAtPeriodEnd ? 1 : 0,
+  ).run();
+
+  return { id, organizationId: input.organizationId, plan: input.plan, status: input.status };
+}
+

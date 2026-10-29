@@ -27,6 +27,10 @@ const copy = {
     free: "Free access",
     oneTime: "One-time payment",
     monthly: "Monthly subscription",
+    buyStarter: "Buy report — $4.99",
+    subscribeEssential: "Subscribe — $24/month",
+    subscribeGrowth: "Subscribe — $49/month",
+    subscribePro: "Subscribe — $99/month",
   },
   ar: {
     trigger: "عرض الباقات",
@@ -38,10 +42,20 @@ const copy = {
     free: "مجاني",
     oneTime: "دفعة واحدة",
     monthly: "اشتراك شهري",
+    buyStarter: "شراء التقرير — $4.99",
+    subscribeEssential: "اشتراك — 24$/شهريًا",
+    subscribeGrowth: "اشتراك — 49$/شهريًا",
+    subscribePro: "اشتراك — 99$/شهريًا",
   },
 } as const;
 
-export function PlansPreviewDialog({ locale }: { locale: SiteLocale }) {
+export function PlansPreviewDialog({
+  locale,
+  scanId,
+}: {
+  locale: SiteLocale;
+  scanId?: string;
+}) {
   const t = copy[locale];
   const billingLabel = {
     free: t.free,
@@ -65,12 +79,19 @@ export function PlansPreviewDialog({ locale }: { locale: SiteLocale }) {
         showCloseButton={false}
         className="max-h-[90dvh] overflow-y-auto rounded-[24px] border-slate-200 bg-white p-5 shadow-[0_32px_90px_rgba(7,17,31,.24)] sm:max-w-2xl sm:p-7"
       >
-        <DialogClose className="absolute end-4 top-4 grid size-9 place-items-center rounded-full text-slate-500 transition hover:bg-slate-100 hover:text-slate-900 focus-visible:outline-2 focus-visible:outline-blue-600" aria-label={t.close}>
+        <DialogClose
+          className="absolute end-4 top-4 grid size-9 place-items-center rounded-full text-slate-500 transition hover:bg-slate-100 hover:text-slate-900 focus-visible:outline-2 focus-visible:outline-blue-600"
+          aria-label={t.close}
+        >
           <X className="size-5" aria-hidden="true" />
         </DialogClose>
         <DialogHeader className="pe-10 text-start">
-          <DialogTitle className="text-2xl font-extrabold tracking-tight text-[#07111f]">{t.title}</DialogTitle>
-          <DialogDescription className="leading-6 text-slate-600">{t.description}</DialogDescription>
+          <DialogTitle className="text-2xl font-extrabold tracking-tight text-[#07111f]">
+            {t.title}
+          </DialogTitle>
+          <DialogDescription className="leading-6 text-slate-600">
+            {t.description}
+          </DialogDescription>
         </DialogHeader>
         <Tabs defaultValue="free" className="mt-2 gap-5">
           <TabsList className="h-auto w-full justify-start gap-1 overflow-x-auto rounded-xl bg-slate-100 p-1">
@@ -84,39 +105,88 @@ export function PlansPreviewDialog({ locale }: { locale: SiteLocale }) {
               </TabsTrigger>
             ))}
           </TabsList>
-          {PLAN_CATALOG.map((plan) => (
-            <TabsContent key={plan.id} value={plan.id} className="mt-0">
-              <div className="rounded-2xl border border-blue-100 bg-gradient-to-br from-blue-50 via-white to-white p-5 sm:p-6">
-                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                  <div>
-                    <h3 className="text-xl font-extrabold text-[#07111f]">{plan.name[locale]}</h3>
-                    <p className="mt-2 max-w-md text-sm leading-6 text-slate-600">{plan.description[locale]}</p>
+          {PLAN_CATALOG.map((plan) => {
+            let buttonLabel: string = t.fullPlan;
+            let targetHref = "/subscriptions";
+
+            if (plan.id === "starter") {
+              buttonLabel = t.buyStarter;
+              targetHref = scanId
+                ? `/subscriptions?flow=starter&scan=${encodeURIComponent(scanId)}#starter`
+                : "/subscriptions#starter";
+            } else if (plan.id === "essential") {
+              buttonLabel = t.subscribeEssential;
+              targetHref = "/subscriptions?plan=essential";
+            } else if (plan.id === "growth") {
+              buttonLabel = t.subscribeGrowth;
+              targetHref = "/subscriptions?plan=growth";
+            } else if (plan.id === "pro") {
+              buttonLabel = t.subscribePro;
+              targetHref = "/subscriptions?plan=pro";
+            } else if (plan.id === "free") {
+              buttonLabel = t.free;
+              targetHref = "/";
+            }
+
+            return (
+              <TabsContent key={plan.id} value={plan.id} className="mt-0">
+                <div className="rounded-2xl border border-blue-100 bg-gradient-to-br from-blue-50 via-white to-white p-5 sm:p-6">
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                    <div>
+                      <h3 className="text-xl font-extrabold text-[#07111f]">
+                        {plan.name[locale]}
+                      </h3>
+                      <p className="mt-2 max-w-md text-sm leading-6 text-slate-600">
+                        {plan.description[locale]}
+                      </p>
+                    </div>
+                    <div className="shrink-0 sm:text-end">
+                      <strong
+                        className="text-3xl font-extrabold tracking-tight text-[#07111f]"
+                        dir="ltr"
+                      >
+                        {plan.price.amount}
+                      </strong>
+                      <p className="mt-1 text-xs font-semibold text-slate-500">
+                        {billingLabel[plan.billing]}
+                      </p>
+                    </div>
                   </div>
-                  <div className="shrink-0 sm:text-end">
-                    <strong className="text-3xl font-extrabold tracking-tight text-[#07111f]" dir="ltr">{plan.price.amount}</strong>
-                    <p className="mt-1 text-xs font-semibold text-slate-500">{billingLabel[plan.billing]}</p>
+                  <div className="mt-5 border-t border-blue-100 pt-5">
+                    <p className="text-xs font-extrabold uppercase tracking-wider text-blue-700">
+                      {t.included}
+                    </p>
+                    <ul className="mt-3 grid gap-x-5 gap-y-3 sm:grid-cols-2">
+                      {plan.features.map((feature) => (
+                        <li
+                          key={feature.en}
+                          className="flex gap-2 text-sm leading-6 text-slate-700"
+                        >
+                          <Check
+                            className="mt-1 size-4 shrink-0 text-blue-600"
+                            aria-hidden="true"
+                          />
+                          <span>{feature[locale]}</span>
+                        </li>
+                      ))}
+                    </ul>
                   </div>
                 </div>
-                <div className="mt-5 border-t border-blue-100 pt-5">
-                  <p className="text-xs font-extrabold uppercase tracking-wider text-blue-700">{t.included}</p>
-                  <ul className="mt-3 grid gap-x-5 gap-y-3 sm:grid-cols-2">
-                    {plan.features.map((feature) => (
-                      <li key={feature.en} className="flex gap-2 text-sm leading-6 text-slate-700">
-                        <Check className="mt-1 size-4 shrink-0 text-blue-600" aria-hidden="true" />
-                        <span>{feature[locale]}</span>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              </div>
-              <Button asChild className="mt-5 h-12 w-full rounded-xl bg-blue-600 font-bold hover:bg-blue-700">
-                <Link href="/subscriptions">
-                  {t.fullPlan}
-                  <ArrowRight className={`size-4 ${locale === "ar" ? "rotate-180" : ""}`} aria-hidden="true" />
-                </Link>
-              </Button>
-            </TabsContent>
-          ))}
+                <Button
+                  asChild
+                  className="mt-5 h-12 w-full rounded-xl bg-blue-600 font-bold hover:bg-blue-700"
+                >
+                  <Link href={targetHref}>
+                    {buttonLabel}
+                    <ArrowRight
+                      className={`size-4 ${locale === "ar" ? "rotate-180" : ""}`}
+                      aria-hidden="true"
+                    />
+                  </Link>
+                </Button>
+              </TabsContent>
+            );
+          })}
         </Tabs>
       </DialogContent>
     </Dialog>

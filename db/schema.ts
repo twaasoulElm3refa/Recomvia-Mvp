@@ -531,3 +531,25 @@ export const monitoringSchedules = sqliteTable("monitoring_schedules", {
   leaseUntil: text("lease_until"),
   updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
 }, (table) => [uniqueIndex("idx_monitor_owner_project").on(table.organizationId, table.projectKey), index("idx_monitor_due").on(table.state, table.nextRunAt)]);
+
+
+export const paymentEvents = sqliteTable(
+  "payment_events",
+  {
+    id: text("id").primaryKey(),
+    provider: text("provider").notNull().default("paypal"),
+    eventType: text("event_type").notNull(),
+    resourceType: text("resource_type"),
+    resourceId: text("resource_id"),
+    status: text("status").notNull().default("processed"),
+    createdAt: text("created_at")
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    index("idx_payment_events_provider_resource").on(
+      table.provider,
+      table.resourceId,
+    ),
+  ],
+);

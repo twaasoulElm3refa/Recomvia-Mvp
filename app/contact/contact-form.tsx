@@ -85,7 +85,7 @@ export function ContactForm({ locale }: { locale: SiteLocale }) {
 
   return (
     <form onSubmit={submit} className="space-y-5 rounded-[26px] border border-slate-200 bg-white p-6 shadow-[0_24px_70px_rgba(7,17,31,.08)] sm:p-8">
-      {interestText && <div className="rounded-2xl border border-blue-200 bg-blue-50 p-4"><p className="font-bold text-blue-950">{interestText}</p><p className="mt-2 text-xs leading-6 text-blue-900">{locale === "ar" ? "طلب اهتمام فقط. لا يُخصم مبلغ ولا تُفعّل باقة من هذه الرسالة. يُوضح الفريق موعد التفعيل والحصص قبل الشراء." : "An enquiry only. This message does not charge you or activate a plan. Our team will confirm availability and allowances before purchase."}</p></div>}
+      {interestText && <div className="rounded-2xl border border-blue-200 bg-blue-50 p-4"><p className="font-bold text-blue-950">{interestText}</p><p className="mt-2 text-xs leading-6 text-blue-900">{locale === "ar" ? "هذه رسالة إلى فريق الدعم ولا تبدأ عملية دفع أو اشتراكًا. للاشتراك، استخدم صفحة الاشتراكات." : "This message to our team does not start checkout or a subscription. To subscribe, use the Subscriptions page."}</p></div>}
       <div className="grid gap-5 sm:grid-cols-2">
         <label className="space-y-2 text-sm font-bold text-slate-700">{t.name}<Input value={name} onChange={(event) => setName(event.target.value)} minLength={2} maxLength={80} required placeholder={t.namePlaceholder} className="h-12 rounded-xl font-normal" /></label>
         <label className="space-y-2 text-sm font-bold text-slate-700">{t.email}<Input value={email} onChange={(event) => setEmail(event.target.value)} type="email" required placeholder="you@company.com" className="h-12 rounded-xl font-normal" dir="ltr" /></label>

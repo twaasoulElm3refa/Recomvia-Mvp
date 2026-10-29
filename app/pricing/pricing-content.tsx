@@ -4,7 +4,7 @@ import { ArrowRight, Check, Coins, Layers3 } from "lucide-react";
 import { NavigationLink as Link } from "@/app/components/navigation-link";
 import { PublicShell, type LocalizedMetadata } from "@/app/components/public-shell";
 import { Button } from "@/components/ui/button";
-import { PLAN_CATALOG, planRequestHref } from "@/lib/plans";
+import { PLAN_CATALOG } from "@/lib/plans";
 
 const pageMetadata: LocalizedMetadata = {
   en: { title: "Recomvia Pricing — Reports, Monitoring & Fix Credits", description: "One free score, a $4.99 initial report, and monthly plans at $24, $49 and $99. Compare detailed and advanced analysis for one or three projects." },
@@ -14,8 +14,8 @@ const copy = {
   en: {
     eyebrow: "Plans & pricing", title: "Understand your visibility. Choose your next step.",
     intro: "Start with one free analysis. Unlock an initial report, or choose deeper analysis and recurring monitoring for your projects.",
-    recommended: "Advanced insight", start: "Get my free score", request: "Request this plan",
-    launch: "Launch plans · paid activation is not open yet. Register your interest; this request does not charge you or start a subscription. Usage allowances and activation timing will be confirmed before purchase.",
+    recommended: "Advanced insight", start: "Get my free score", unlockStarter: "Unlock a report — $4.99",
+    subscribeEssential: "Subscribe — $24/month", subscribeGrowth: "Subscribe — $49/month", subscribePro: "Subscribe — $99/month",
     compare: "Compare the plans", feature: "Included scope", projects: "Projects", depth: "Report depth",
     depths: { summary: "Headline numbers", starter: "Initial report", detailed: "Detailed", advanced: "Very advanced" },
     monitoring: "Recurring monitoring & history", credits: "Fix Center & credit eligibility", yes: "Included", no: "Not included", separate: "Credits sold separately",
@@ -29,8 +29,8 @@ const copy = {
   ar: {
     eyebrow: "الباقات والأسعار", title: "افهم ظهورك. واختر خطوتك التالية.",
     intro: "ابدأ بتحليل مجاني واحد. افتح التقرير المبدئي، أو اختر تحليلًا أعمق ومتابعة دورية لمشروعاتك.",
-    recommended: "تحليل متقدم", start: "ابدأ الفحص المجاني", request: "طلب الباقة",
-    launch: "باقات الإطلاق · لم يُفتح التفعيل المدفوع بعد. سجّل اهتمامك؛ هذا الطلب لا يخصم أي مبلغ ولا يبدأ اشتراكًا. تُوضح حصص الاستخدام وموعد التفعيل قبل الشراء.",
+    recommended: "تحليل متقدم", start: "ابدأ الفحص المجاني", unlockStarter: "افتح تقريرًا — 4.99$",
+    subscribeEssential: "اشترك — 24$/شهريًا", subscribeGrowth: "اشترك — 49$/شهريًا", subscribePro: "اشترك — 99$/شهريًا",
     compare: "قارن الباقات", feature: "نطاق الباقة", projects: "المشروعات", depth: "عمق التقرير",
     depths: { summary: "الأرقام الرئيسية", starter: "تقرير مبدئي", detailed: "تفصيلي", advanced: "متقدم جدًا" },
     monitoring: "المتابعة الدورية وسجل النتائج", credits: "مركز الإصلاح وأهلية شراء النقاط", yes: "مشمول", no: "غير مشمول", separate: "تُشترى النقاط منفصلة",
@@ -57,10 +57,12 @@ export function PricingContent() {
         </div>
       </section>
       <section className="mx-auto max-w-[1400px] px-5 py-12 sm:px-8 sm:py-16">
-        <p role="status" className="mb-8 rounded-2xl border border-blue-200 bg-blue-50 px-5 py-4 text-sm leading-7 text-blue-950">{t.launch}</p>
         <div className="grid items-stretch gap-5 sm:grid-cols-2 xl:grid-cols-5">
           {PLAN_CATALOG.map((plan) => {
             const highlighted = plan.id === "growth";
+            const action = plan.id === "free" ? { href: "/", label: t.start }
+              : plan.id === "starter" ? { href: "/dashboard", label: t.unlockStarter }
+              : { href: `/subscriptions?plan=${plan.id}`, label: plan.id === "essential" ? t.subscribeEssential : plan.id === "growth" ? t.subscribeGrowth : t.subscribePro };
             return <article id={plan.id} key={plan.id} className={`relative flex scroll-mt-24 flex-col rounded-3xl border p-6 ${highlighted ? "border-blue-600 bg-[#07111f] text-white ring-4 ring-blue-100" : "border-slate-200 bg-white"}`}>
               {highlighted && <span className="absolute -top-3 start-5 rounded-full bg-blue-600 px-3 py-1 text-xs font-bold text-white">{t.recommended}</span>}
               <h2 className="text-xl font-extrabold">{plan.name[locale]}</h2>
@@ -68,7 +70,7 @@ export function PricingContent() {
               <div className="mt-5"><strong className="inline-block text-4xl font-extrabold tracking-tight" dir="ltr">{plan.price.amount}</strong><p className={`mt-2 text-xs ${highlighted ? "text-slate-400" : "text-slate-500"}`}>{plan.price.cadence[locale]}</p></div>
               <p className={`mt-5 min-h-16 text-sm leading-7 ${highlighted ? "text-slate-300" : "text-slate-600"}`}>{plan.description[locale]}</p>
               <ul className="my-6 flex-1 space-y-4">{plan.features.map((feature) => <li key={feature.en} className="flex gap-2 text-sm leading-6"><Check className={`mt-1 size-4 shrink-0 ${highlighted ? "text-cyan-300" : "text-blue-600"}`} aria-hidden="true" /><span>{feature[locale]}</span></li>)}</ul>
-              <Button asChild className={`h-auto min-h-11 w-full whitespace-normal rounded-xl px-3 py-3 font-bold ${highlighted ? "bg-white text-[#07111f] hover:bg-slate-100" : "bg-blue-600 text-white hover:bg-blue-700"}`}><Link href={plan.id === "free" ? "/" : planRequestHref(plan.id)}>{plan.id === "free" ? t.start : t.request}<ArrowRight className="size-4 shrink-0 rtl:rotate-180" /></Link></Button>
+              <Button asChild className={`h-auto min-h-11 w-full whitespace-normal rounded-xl px-3 py-3 font-bold ${highlighted ? "bg-white text-[#07111f] hover:bg-slate-100" : "bg-blue-600 text-white hover:bg-blue-700"}`}><Link href={action.href}>{action.label}<ArrowRight className="size-4 shrink-0 rtl:rotate-180" /></Link></Button>
             </article>;
           })}
         </div>

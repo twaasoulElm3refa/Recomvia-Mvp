@@ -11,7 +11,6 @@ import { normalizeDisplayText } from "@/lib/answer-text";
 import { REPORT_PAYWALL_COPY } from "@/lib/report-copy";
 import type { ReportView } from "@/db/product";
 import { PrintableReport } from "./printable-report";
-import { planRequestHref } from "@/lib/plans";
 import { LockKeyhole, Printer } from "lucide-react";
 
 function Panel({
@@ -58,9 +57,9 @@ function LockedReportCard({ ar, scanId }: { ar: boolean; scanId: string }) {
           {copy.description}
         </p>
         <Button asChild className="mt-6 rounded-xl bg-blue-600">
-          <Link href={planRequestHref("starter", scanId)}>{copy.cta}</Link>
+          <Link href={`/subscriptions?flow=starter&scan=${encodeURIComponent(scanId)}`}>{copy.cta}</Link>
         </Button>
-        <p className="mt-4"><Link href="/pricing#essential" className="text-sm font-bold text-blue-700 underline">{copy.compare}</Link></p>
+        <p className="mt-4"><Link href="/subscriptions?plan=essential" className="text-sm font-bold text-blue-700 underline">{copy.compare}</Link></p>
         <p className="mt-3 text-xs leading-6 text-slate-500">{copy.notice}</p>
       </div>
     </Panel>

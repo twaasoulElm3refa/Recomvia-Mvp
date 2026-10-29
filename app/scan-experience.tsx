@@ -1187,7 +1187,7 @@ export function ScanExperience() {
         <section id="plans" className="border-t border-slate-200 bg-slate-50">
           <div className="mx-auto max-w-[1240px] px-5 py-16 sm:px-8">
             <h2 className="text-3xl font-extrabold">{locale === "ar" ? "باقة لكل خطوة في رحلتك" : "A plan for every step"}</h2>
-            <p className="mt-4 text-sm leading-7 text-slate-600">{locale === "ar" ? "ابدأ بفحص مجاني، وافتح التقرير المبدئي أو اختر التحليل الأعمق والمتابعة. الباقات المدفوعة متاحة لطلب التفعيل؛ لا تُحصّل رسوم حاليًا." : "Start free, unlock an initial report or choose deeper analysis and monitoring. Register your interest in paid plans; no payment is collected yet."}</p>
+            <p className="mt-4 text-sm leading-7 text-slate-600">{locale === "ar" ? "ابدأ بالفحص المجاني، وافتح التقرير المبدئي، أو اختر باقة مدفوعة لتحليل أعمق ومتابعة دورية." : "Start free, unlock an initial report, or choose a paid plan for deeper analysis and recurring monitoring."}</p>
             <div className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-5">{PLAN_CATALOG.map((plan) => <Link key={plan.id} href={`/pricing#${plan.id}`} className="rounded-2xl border border-slate-200 bg-white p-5 transition hover:border-blue-500">
               <h3 className="font-extrabold">{plan.name[locale]}</h3>
               <strong className="mt-4 inline-block text-3xl tracking-tight" dir="ltr">{plan.price.amount}</strong>

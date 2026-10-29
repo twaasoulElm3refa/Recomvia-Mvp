@@ -115,8 +115,8 @@ function Sidebar() {
         </p>
         <p className="mt-2 text-xs leading-5 text-slate-400">
           {ar
-            ? "النتائج مبنية على الفحوص المكتملة. تحليل الأسماء والموضوعات يتطلب تفعيل المحرك؛ الدفع لم يُفعّل بعد."
-            : "Results reflect completed tests. Name and topic analysis requires engine activation; billing is not active yet."}
+            ? "النتائج مبنية على الفحوص المكتملة. تحليل الأسماء والموضوعات يتطلب تفعيل المحرك."
+            : "Results reflect completed tests. Name and topic analysis requires engine activation."}
         </p>
       </div>
     </div>
