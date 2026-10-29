@@ -94,10 +94,15 @@ export async function runScanForUser(user: AuthUser, payload: Record<string, unk
   if (policy.plan !== "free" && !models.length) return json({ code: "engine_unavailable" }, 503);
   const key = env.OPENROUTER_API_KEY?.trim();
   const mockAi = env.AI_TEST_MODE?.trim().toLowerCase() === "mock";
+  const configuredTimeout = Number(env.OPENROUTER_SEARCH_TIMEOUT_MS);
+  const searchTimeoutMs = Number.isFinite(configuredTimeout) && configuredTimeout >= 10_000 && configuredTimeout <= 120_000
+    ? configuredTimeout : 60_000;
+  let remainingRateLimitRetries = 4;
   const adapters = key ? models.map((model) => new OpenRouterEngineAdapter({
           apiKey: key, model,
-          maxRetries: 0,
-          timeoutMs: 25_000,
+          maxRetries: 2,
+          retryPermit: () => { if (remainingRateLimitRetries <= 0) return false; remainingRateLimitRetries--; return true; },
+          timeoutMs: searchTimeoutMs,
           ...(mockAi ? { fetchImpl: fetch, testMode: "mock" as const } : {}),
         })) : [];
   const adapter = adapters[0] || null;

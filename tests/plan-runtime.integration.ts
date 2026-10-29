@@ -6,6 +6,7 @@ import { createFixture, state, userA } from "./target-runtime-fixture";
 import { getReportForUser } from "../db/product";
 import type { StoredScan } from "../db/product";
 import { triggerMonitoring } from "../workers/monitor-trigger";
+import { OpenRouterEngineAdapter } from "../lib/ai-engines/openrouter-engine-adapter";
 
 type Db = ReturnType<typeof createFixture>;
 type Payload = { scan: StoredScan; cached?: boolean; code?: string; scanId?: string };
@@ -25,7 +26,7 @@ function reply(body: ProviderRequest, options: { search?: boolean; cost?: number
     usage: { prompt_tokens: 10, completion_tokens: 10, total_tokens: 20, ...(options.cost === null ? {} : { cost: options.cost ?? 0.001 }), ...(search ? { server_tool_use: { web_search_requests: 1 } } : {}) },
   });
 }
-async function setup(plan: "free" | "essential" | "growth" | "pro", action: (db: Db, requests: ProviderRequest[]) => Promise<void>, handler: (body: ProviderRequest) => Response = reply) {
+async function setup(plan: "free" | "essential" | "growth" | "pro", action: (db: Db, requests: ProviderRequest[]) => Promise<void>, handler: (body: ProviderRequest) => Response | Promise<Response> = reply) {
   const db = createFixture(false, plan !== "free"), original = globalThis.fetch;
   if (plan !== "free") db.prepare("UPDATE subscriptions SET plan=?").run(plan);
   const requests: ProviderRequest[] = [];
@@ -128,6 +129,133 @@ test("Growth rolling monthly allowance is enforced independently of daily allowa
     const rejected = await POST(request({ input: "Retail analytics", kind: "topic", context: "extra sample" }));
     assert.equal(rejected.status, 429); assert.equal(requests.length, 288);
   });
+});
+
+test("Growth runs at most two outbound observations and one per model", async () => {
+  let active = 0, peak = 0;
+  const perModel = new Map<string, number>();
+  await setup("growth", async (_db, requests) => {
+    const response = await POST(request(person));
+    assert.equal(response.status, 201);
+    assert.equal(requests.length, 37);
+    assert.equal(peak, 2);
+  }, async (body) => {
+    active++;
+    peak = Math.max(peak, active);
+    const modelActive = (perModel.get(body.model) || 0) + 1;
+    perModel.set(body.model, modelActive);
+    assert.equal(modelActive, 1, `concurrent requests for ${body.model}`);
+    await new Promise((resolve) => setTimeout(resolve, 3));
+    perModel.set(body.model, modelActive - 1);
+    active--;
+    return reply(body);
+  });
+});
+
+test("Growth recovers from one 429, retains billed attempt costs, and records retry latency", async () => {
+  let limited = false;
+  await setup("growth", async (db, requests) => {
+    const response = await POST(request(person));
+    assert.equal(response.status, 201);
+    const body = await read(response);
+    assert.equal(body.scan.actualVisibilityStatus, "measured");
+    assert.equal(requests.length, 38);
+    const recovered = body.scan.engineRuns.find((run) => run.model === "test/second" && run.retryCount === 1)!;
+    assert.equal(recovered.error, null);
+    assert.equal(recovered.estimatedCostMicros, 3_000);
+    const ledger = db.prepare("SELECT metadata_json AS metadata FROM cost_ledger WHERE id=?").get(`engine_${recovered.id}`) as { metadata: string };
+    assert.equal(JSON.parse(ledger.metadata).retryCount, 1);
+    assert.equal(typeof JSON.parse(ledger.metadata).latencyMs, "number");
+  }, (body) => {
+    if (body.model === "test/second" && !limited) {
+      limited = true;
+      return Response.json({ error: { code: "rate_limit", message: "Slow down" }, usage: { cost: 0.002 } }, { status: 429 });
+    }
+    return reply(body);
+  });
+});
+
+test("repeated 429s open only the failing model circuit and preserve other results", async () => {
+  await setup("growth", async (_db, requests) => {
+    const response = await POST(request(person));
+    assert.equal(response.status, 201);
+    const body = await read(response);
+    assert.equal(body.scan.actualVisibilityStatus, "partial");
+    assert.equal(requests.length, 31); // discovery + 24 successes + 2 questions x 3 attempts
+    const failed = body.scan.engineRuns.filter((run) => run.model === "test/second");
+    assert.equal(failed.length, 12);
+    assert.equal(failed.filter((run) => run.error?.code === "rate_limit" && run.retryCount === 2).length, 2);
+    assert.equal(failed.filter((run) => run.error?.code === "model_rate_limited").length, 10);
+    assert.equal(body.scan.insights!.byEngine.find((row) => row.model === "test/second")?.mentionRate, null);
+  }, (body) => body.model === "test/second" && !body.messages[1].content.includes("INPUT_DATA:")
+    ? Response.json({ error: { code: "rate_limit", message: "Slow down" } }, { status: 429 }) : reply(body));
+});
+
+test("Growth shares a four-retry ceiling across all observations", async () => {
+  const attempts = new Map<string, number>();
+  await setup("growth", async (_db, requests) => {
+    const response = await POST(request(person));
+    assert.equal(response.status, 201);
+    const body = await read(response);
+    assert.equal(body.scan.actualVisibilityStatus, "partial");
+    assert.equal(body.scan.engineRuns.filter((run) => run.retryCount === 1).length, 4);
+    assert.equal(requests.length, 35); // discovery + 24 other models + 6 attempted questions + 4 retries
+  }, (body) => {
+    if (body.model !== "test/second" || body.messages[1].content.includes("INPUT_DATA:")) return reply(body);
+    const key = body.messages[1].content;
+    const attempt = (attempts.get(key) || 0) + 1;
+    attempts.set(key, attempt);
+    return attempt === 1 ? Response.json({ error: { code: "rate_limit", message: "Slow down" } }, { status: 429 }) : reply(body);
+  });
+});
+
+test("timeout, empty paid response, and deterministic 4xx do not trigger extra calls", async () => {
+  const run = { prompt: "Find evidence", language: "en", country: "Global", useSearch: true };
+  let timeoutCalls = 0;
+  const timeoutFetch: typeof fetch = async (_url, init) => {
+    timeoutCalls++;
+    return new Promise<Response>((_resolve, reject) => init?.signal?.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")), { once: true }));
+  };
+  const timedOut = await new OpenRouterEngineAdapter({ apiKey: "mock", model: "test/model", fetchImpl: timeoutFetch, timeoutMs: 1, maxRetries: 1 }).run(run);
+  assert.equal(timedOut.error?.code, "timeout");
+  assert.equal(timedOut.retryCount, 0);
+  assert.equal(timeoutCalls, 1);
+  let emptyCalls = 0;
+  const empty = await new OpenRouterEngineAdapter({ apiKey: "mock", model: "test/model", fetchImpl: async () => {
+    emptyCalls++;
+    return Response.json({ id: "charged-empty", choices: [{ message: { content: "" } }], usage: { cost: 0.007 } });
+  }, maxRetries: 1 }).run(run);
+  assert.equal(empty.error?.code, "empty_response");
+  assert.equal(empty.estimatedCostMicros, 7_000);
+  assert.equal(empty.retryCount, 0);
+  assert.equal(emptyCalls, 1);
+  let invalidCalls = 0;
+  const invalid = await new OpenRouterEngineAdapter({ apiKey: "mock", model: "test/model", fetchImpl: async () => {
+    invalidCalls++;
+    return Response.json({ error: { code: "invalid_model", message: "Invalid model" } }, { status: 400 });
+  }, maxRetries: 1 }).run(run);
+  assert.equal(invalid.error?.code, "invalid_model");
+  assert.equal(invalid.retryCount, 0);
+  assert.equal(invalidCalls, 1);
+  let serverCalls = 0;
+  const server = await new OpenRouterEngineAdapter({ apiKey: "mock", model: "test/model", fetchImpl: async () => {
+    serverCalls++;
+    return Response.json({ error: { code: "server_error", message: "Unavailable" } }, { status: 503 });
+  }, maxRetries: 1 }).run(run);
+  assert.equal(server.error?.code, "server_error");
+  assert.equal(server.retryCount, 0);
+  assert.equal(serverCalls, 1);
+});
+
+test("a single 429 observation stops after two backoff retries", async () => {
+  let calls = 0;
+  const result = await new OpenRouterEngineAdapter({ apiKey: "mock", model: "test/model", backoffBaseMs: 0, fetchImpl: async () => {
+    calls++;
+    return Response.json({ error: { code: "rate_limit", message: "Slow down" } }, { status: 429 });
+  } }).run({ prompt: "Find evidence", language: "en", country: "Global", useSearch: true });
+  assert.equal(calls, 3);
+  assert.equal(result.retryCount, 2);
+  assert.equal(result.error?.status, 429);
 });
 
 test("failed search coverage remains partial and does not become a zero visibility observation", async () => {

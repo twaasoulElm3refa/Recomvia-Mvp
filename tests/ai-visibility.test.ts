@@ -312,7 +312,7 @@ test("isolates an unexpected adapter exception so the remaining prompts are stil
   assert.equal(measurement.engineRuns[1].providerRunId, "response_ok");
 });
 
-test("OpenRouter adapter retries bounded provider errors and records returned sources, citations, usage, actual cost, and run ID", async () => {
+test("OpenRouter adapter retries a 429 and records returned sources, citations, usage, actual cost, and run ID", async () => {
   let requests = 0;
   const fetchImpl: typeof fetch = async (_input, init) => {
     requests += 1;
@@ -321,7 +321,7 @@ test("OpenRouter adapter retries bounded provider errors and records returned so
     assert.equal(request.model, OPENROUTER_TEST_MODEL);
     assert.deepEqual(request.usage, { include: true });
     assert.equal(request.tools[0].type, "openrouter:web_search");
-    if (requests === 1) return new Response(JSON.stringify({ error: { code: "server_error", message: "Try again" } }), { status: 500, headers: { "content-type": "application/json" } });
+    if (requests === 1) return new Response(JSON.stringify({ error: { code: "rate_limit", message: "Try again" } }), { status: 429, headers: { "content-type": "application/json" } });
     return new Response(JSON.stringify({
       id: "generation_real_shape", model: OPENROUTER_TEST_MODEL,
       choices: [{ message: {
@@ -331,7 +331,7 @@ test("OpenRouter adapter retries bounded provider errors and records returned so
       usage: { prompt_tokens: 100, completion_tokens: 20, total_tokens: 120, prompt_tokens_details: { cached_tokens: 20 }, server_tool_use: { web_search_requests: 1 }, cost: 0.010152 },
     }), { status: 200, headers: { "content-type": "application/json" } });
   };
-  const adapter = new OpenRouterEngineAdapter({ apiKey: "test-only-key", model: OPENROUTER_TEST_MODEL, fetchImpl, maxRetries: 1 });
+  const adapter = new OpenRouterEngineAdapter({ apiKey: "test-only-key", model: OPENROUTER_TEST_MODEL, fetchImpl, maxRetries: 1, backoffBaseMs: 0 });
   const response = await adapter.run({ prompt: "Which options?", language: "en", country: "UK", useSearch: true });
   assert.equal(response.provider, "OpenRouter");
   assert.equal(response.model, OPENROUTER_TEST_MODEL);

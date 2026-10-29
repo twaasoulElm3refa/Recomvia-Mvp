@@ -9,6 +9,7 @@ declare namespace Cloudflare {
     OPENROUTER_API_KEY?: string;
     OPENROUTER_MODEL?: string;
     OPENROUTER_MODELS_JSON?: string;
+    OPENROUTER_SEARCH_TIMEOUT_MS?: string;
     MONITORING_SECRET?: string;
     AI_TEST_MODE?: string;
     PAYPAL_ENV?: string;

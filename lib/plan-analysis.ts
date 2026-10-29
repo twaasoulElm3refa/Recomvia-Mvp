@@ -25,6 +25,10 @@ function stopped(adapter: EngineAdapter): EngineResponse {
   return { provider: adapter.provider, model: adapter.model, surfaceType: "api_without_search", responseText: null, sources: [], citations: [], usage: { inputTokens: null, cachedInputTokens: null, outputTokens: null, totalTokens: null }, estimatedCostMicros: null, durationMs: 0, retryCount: 0, providerRunId: null, timestamp: new Date().toISOString(), error: { code: "budget_exhausted", message: "Analysis spending guard reached; this observation was not executed.", status: null, retryable: false } };
 }
 
+function unavailable(adapter: EngineAdapter, rateLimited: boolean): EngineResponse {
+  return { ...stopped(adapter), error: { code: rateLimited ? "model_rate_limited" : "model_unavailable", message: "Remaining observations for this model were skipped after repeated provider failures.", status: rateLimited ? 429 : null, retryable: false } };
+}
+
 export async function runPlanVisibility(input: {
   adapters: EngineAdapter[]; context: DiscoveredSiteContext; target: AnalysisTarget;
   prompts: IntentPrompt[]; policy: AnalysisPolicy; initialCostMicros?: number;
@@ -33,29 +37,53 @@ export async function runPlanVisibility(input: {
   if (!input.adapters.length) return { status: "not_configured", score: null, confidence: 0, engineRuns: [], prompts: input.prompts };
   const jobs = input.adapters.flatMap((adapter) => input.prompts.map((prompt) => ({ adapter, prompt })));
   const runs = new Array<VisibilityEngineRun>(jobs.length);
-  let next = 0, spent = input.initialCostMicros || 0, reserved = 0;
-  async function worker() {
-    while (next < jobs.length) {
-      const index = next++, { adapter, prompt } = jobs[index];
+  let spent = input.initialCostMicros || 0, reserved = 0, active = 0, stop = false;
+  const waiting: Array<() => void> = [];
+  async function acquire() {
+    if (active < 2) { active++; return; }
+    await new Promise<void>((resolve) => waiting.push(resolve));
+  }
+  function release() {
+    const next = waiting.shift();
+    if (next) next(); else active--;
+  }
+  async function worker(adapter: EngineAdapter, modelIndex: number) {
+    let consecutiveFailures = 0;
+    let rateLimited = false;
+    for (let promptIndex = 0; promptIndex < input.prompts.length && !stop; promptIndex++) {
+      const index = modelIndex * input.prompts.length + promptIndex;
+      const prompt = input.prompts[promptIndex];
+      const circuitOpen = consecutiveFailures >= 2;
+      if (!circuitOpen) await acquire();
+      if (stop) { if (!circuitOpen) release(); break; }
       const wrapped: EngineAdapter = { provider: adapter.provider, model: adapter.model, async run(request) {
+        if (circuitOpen) return unavailable(adapter, rateLimited);
         const allowance = input.policy.unknownCallReserveMicros;
         if (spent + reserved + allowance > input.policy.budgetMicros) return stopped(adapter);
         reserved += allowance;
         try {
           const result = await adapter.run({ ...request, maxOutputTokens: input.policy.maxOutputTokens, searchResults: input.policy.searchResults, searchUses: input.policy.searchUses });
-          spent += result.estimatedCostMicros ?? allowance;
+          spent += result.estimatedCostMicros ?? allowance * (result.retryCount + 1);
           return result;
         } catch (error) { spent += allowance; throw error; }
         finally { reserved -= allowance; }
       } };
-      const measurement = await runActualVisibility({ adapter: wrapped, context: input.context, prompts: [prompt], aliases: input.target.aliases, useDomainAlias: input.target.kind === "website" });
-      runs[index] = measurement.engineRuns[0];
-      try { await input.onRun?.(runs[index]); }
-      catch (error) { next = jobs.length; throw error; }
+      try {
+        const measurement = await runActualVisibility({ adapter: wrapped, context: input.context, prompts: [prompt], aliases: input.target.aliases, useDomainAlias: input.target.kind === "website" });
+        runs[index] = measurement.engineRuns[0];
+        const error = runs[index].error;
+        if (!error) consecutiveFailures = 0;
+        else if (error.status === 429 || ["timeout", "network_error", "empty_response"].includes(error.code)) {
+          consecutiveFailures++;
+          rateLimited = error.status === 429;
+        } else consecutiveFailures = 0;
+        await input.onRun?.(runs[index]);
+      } catch (error) { stop = true; throw error; }
+      finally { if (!circuitOpen) release(); }
     }
   }
-  // Bound total concurrent provider calls across all models, not per model.
-  const workers = await Promise.allSettled(Array.from({ length: Math.min(3, jobs.length) }, () => worker()));
+  // One sequential worker per model; at most two provider requests overall.
+  const workers = await Promise.allSettled(input.adapters.map((adapter, index) => worker(adapter, index)));
   const failed = workers.find((result): result is PromiseRejectedResult => result.status === "rejected");
   if (failed) throw failed.reason;
   const aggregate = aggregateActualVisibility(runs, jobs.length);

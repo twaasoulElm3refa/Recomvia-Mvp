@@ -129,10 +129,6 @@ function surfaceTypeFrom(
     : ("api_without_search" as const);
 }
 
-function retryableStatus(status: number) {
-  return status === 408 || status === 409 || status === 429 || status >= 500;
-}
-
 function safeError(
   status: number | null,
   body: OpenRouterResponse | null,
@@ -148,7 +144,7 @@ function safeError(
           : fallbackCode,
     message: (body?.error?.message || fallback).slice(0, 500),
     status,
-    retryable: status === null || retryableStatus(status),
+    retryable: status === 429,
   };
 }
 
@@ -168,6 +164,8 @@ export class OpenRouterEngineAdapter implements EngineAdapter {
   private readonly endpoint: string;
   private readonly timeoutMs: number;
   private readonly maxRetries: number;
+  private readonly backoffBaseMs: number;
+  private readonly retryPermit: () => boolean;
   private readonly fetchImpl: FetchLike;
 
   constructor(input: {
@@ -176,6 +174,8 @@ export class OpenRouterEngineAdapter implements EngineAdapter {
     endpoint?: string;
     timeoutMs?: number;
     maxRetries?: number;
+    backoffBaseMs?: number;
+    retryPermit?: () => boolean;
     fetchImpl?: FetchLike;
     testMode?: "mock";
   }) {
@@ -198,8 +198,10 @@ export class OpenRouterEngineAdapter implements EngineAdapter {
     this.model = input.model.trim();
     this.endpoint =
       input.endpoint || "https://openrouter.ai/api/v1/chat/completions";
-    this.timeoutMs = input.timeoutMs ?? 30_000;
+    this.timeoutMs = input.timeoutMs ?? 60_000;
     this.maxRetries = Math.max(0, Math.min(2, input.maxRetries ?? 2));
+    this.backoffBaseMs = Math.max(0, Math.min(2_000, input.backoffBaseMs ?? 800));
+    this.retryPermit = input.retryPermit ?? (() => true);
     this.fetchImpl = input.fetchImpl || fetch;
   }
 
@@ -209,6 +211,8 @@ export class OpenRouterEngineAdapter implements EngineAdapter {
     let retries = 0;
     let lastError: EngineProviderError | null = null;
     let lastBody: OpenRouterResponse | null = null;
+    let chargedCostMicros = 0;
+    let costKnown = false;
 
     while (retries <= this.maxRetries) {
       const controller = new AbortController();
@@ -258,13 +262,15 @@ export class OpenRouterEngineAdapter implements EngineAdapter {
           .json()
           .catch(() => null)) as OpenRouterResponse | null;
         lastBody = body;
+        const attemptCost = actualProviderCostMicros(body?.usage?.cost);
+        if (attemptCost !== null) { chargedCostMicros += attemptCost; costKnown = true; }
         if (!response.ok || !body) {
           lastError = safeError(
             response.status,
             body,
             "OpenRouter returned an invalid response.",
           );
-          if (!lastError.retryable || retries >= this.maxRetries) break;
+          if (response.status !== 429 || retries >= this.maxRetries || !this.retryPermit()) break;
         } else {
           const text = outputText(body);
           if (!text) {
@@ -274,7 +280,7 @@ export class OpenRouterEngineAdapter implements EngineAdapter {
               "OpenRouter returned no answer text.",
               "empty_response",
             );
-            if (retries >= this.maxRetries) break;
+            break;
           } else {
             const citations = citationsFrom(body);
             return {
@@ -285,7 +291,7 @@ export class OpenRouterEngineAdapter implements EngineAdapter {
               sources: sourcesFrom(citations),
               citations,
               usage: usageFrom(body),
-              estimatedCostMicros: actualProviderCostMicros(body.usage?.cost),
+              estimatedCostMicros: costKnown ? chargedCostMicros : null,
               durationMs: Date.now() - started,
               retryCount: retries,
               providerRunId: body.id || null,
@@ -295,7 +301,7 @@ export class OpenRouterEngineAdapter implements EngineAdapter {
           }
         }
       } catch (error) {
-        const aborted = error instanceof Error && error.name === "AbortError";
+        const aborted = controller.signal.aborted || (error instanceof Error && error.name === "AbortError");
         lastError = safeError(
           null,
           null,
@@ -304,14 +310,13 @@ export class OpenRouterEngineAdapter implements EngineAdapter {
             : "OpenRouter network request failed.",
           aborted ? "timeout" : "network_error",
         );
-        if (retries >= this.maxRetries) break;
+        break;
       } finally {
         clearTimeout(timer);
       }
       retries += 1;
-      await new Promise((resolve) =>
-        setTimeout(resolve, Math.min(1_500, 250 * 2 ** retries)),
-      );
+      const delayMs = Math.min(4_000, this.backoffBaseMs * 2 ** (retries - 1)) * (0.75 + Math.random() * 0.5);
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
     }
 
     return {
@@ -322,7 +327,7 @@ export class OpenRouterEngineAdapter implements EngineAdapter {
       sources: [],
       citations: [],
       usage: lastBody ? usageFrom(lastBody) : emptyUsage(),
-      estimatedCostMicros: actualProviderCostMicros(lastBody?.usage?.cost),
+      estimatedCostMicros: costKnown ? chargedCostMicros : null,
       durationMs: Date.now() - started,
       retryCount: retries,
       providerRunId: lastBody?.id || null,
