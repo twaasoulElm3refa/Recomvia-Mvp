@@ -1,5 +1,6 @@
 export * from "./types";
 export * from "./config";
+export * from "./availability";
 export * from "./client";
 export * from "./status-mapping";
 export * from "./orders";

@@ -1,6 +1,7 @@
 import { getAuthenticatedUser } from "@/app/auth";
 import { activePaidSubscriptions, claimSubscriptionCheckout, ensureWorkspace, releaseSubscriptionCheckout, upsertPayPalSubscription } from "@/db/product";
 import { revisePayPalSubscription, verifyAndMapSubscription } from "@/lib/paypal";
+import { isPayPalPaymentsEnabled, paymentNotConfiguredResponse } from "@/lib/paypal/availability";
 
 export const runtime = "edge";
 const headers = { "Cache-Control": "no-store" };
@@ -9,10 +10,12 @@ const json = (body: unknown, status = 200) => Response.json(body, { status, head
 export async function POST(request: Request) {
   const user = await getAuthenticatedUser();
   if (!user) return json({ error: "Authentication required", code: "unauthorized" }, 401);
+  if (!isPayPalPaymentsEnabled()) return paymentNotConfiguredResponse();
   let body: { plan?: unknown };
   try { body = await request.json(); } catch { return json({ error: "Invalid JSON body", code: "invalid_request" }, 400); }
   const plan = typeof body.plan === "string" ? body.plan.toLowerCase().trim() : null;
   if (plan !== "essential" && plan !== "growth" && plan !== "pro") return json({ error: "Invalid paid plan.", code: "invalid_plan" }, 400);
+  if (!isPayPalPaymentsEnabled(plan)) return paymentNotConfiguredResponse();
 
   const workspace = await ensureWorkspace(user);
   const active = await activePaidSubscriptions(workspace.organizationId);

@@ -13,6 +13,7 @@ declare namespace Cloudflare {
     MONITORING_SECRET?: string;
     AI_TEST_MODE?: string;
     PAYPAL_ENV?: string;
+    PAYPAL_ENABLED?: string;
     PAYPAL_CLIENT_ID?: string;
     PAYPAL_CLIENT_SECRET?: string;
     PAYPAL_WEBHOOK_ID?: string;

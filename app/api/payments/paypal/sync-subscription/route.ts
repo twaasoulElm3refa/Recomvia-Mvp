@@ -1,6 +1,7 @@
 import { getAuthenticatedUser } from "@/app/auth";
 import { ensureWorkspace, paypalSubscriptionOwner, releaseSubscriptionCheckout, upsertPayPalSubscription } from "@/db/product";
 import { cancelConflictingPayPalSubscription, verifyAndMapSubscription } from "@/lib/paypal";
+import { isPayPalPaymentsEnabled, paymentNotConfiguredResponse } from "@/lib/paypal/availability";
 
 export const runtime = "edge";
 const headers = { "Cache-Control": "no-store" };
@@ -11,6 +12,7 @@ export async function POST(request: Request) {
   if (!user) {
     return json({ error: "Authentication required", code: "unauthorized" }, 401);
   }
+  if (!isPayPalPaymentsEnabled()) return paymentNotConfiguredResponse();
 
   let body: { subscriptionId?: string; plan?: "essential" | "growth" | "pro" };
   try {
@@ -28,6 +30,8 @@ export async function POST(request: Request) {
   const owner = await paypalSubscriptionOwner(subscriptionId);
   if (!owner || owner.organizationId !== workspace.organizationId)
     return json({ error: "Subscription does not belong to this organization.", code: "subscription_not_found" }, 404);
+  if (!isPayPalPaymentsEnabled(owner.plan as "essential" | "growth" | "pro") ||
+      (body.plan && !isPayPalPaymentsEnabled(body.plan))) return paymentNotConfiguredResponse();
 
   try {
     const verified = await verifyAndMapSubscription(subscriptionId, {

@@ -21,27 +21,20 @@ export function getPayPalEnv(): Record<string, string | undefined> {
   };
 }
 
-/**
- * Resolves the PayPal API base URL.
- * Strictly guards against PayPal Live in this task/environment.
- */
+/** Resolves only the explicit PayPal environments supported by checkout. */
 export function getPayPalBaseUrl(paypalEnv?: string): string {
   const rawEnv = (paypalEnv || getPayPalEnv().PAYPAL_ENV || "sandbox")
     .toLowerCase()
     .trim();
 
-  if (rawEnv === "live" || rawEnv === "production") {
-    throw new Error(
-      "PayPal Live mode is disabled in this environment. Only PayPal Sandbox is permitted.",
-    );
-  }
+  if (rawEnv === "live" || rawEnv === "production") return LIVE_API_BASE;
 
   if (rawEnv === "sandbox") {
     return SANDBOX_API_BASE;
   }
 
   throw new Error(
-    `Unsupported PAYPAL_ENV: "${rawEnv}". Expected "sandbox".`,
+    `Unsupported PAYPAL_ENV: "${rawEnv}". Expected "sandbox" or "live".`,
   );
 }
 
@@ -50,6 +43,7 @@ export function getPayPalConfig(overrides?: Partial<PayPalConfig>): PayPalConfig
 
   const config: PayPalConfig = {
     PAYPAL_ENV: overrides?.PAYPAL_ENV || env.PAYPAL_ENV || "sandbox",
+    PAYPAL_ENABLED: (overrides?.PAYPAL_ENABLED ?? env.PAYPAL_ENABLED ?? "").trim(),
     PAYPAL_CLIENT_ID: (overrides?.PAYPAL_CLIENT_ID || env.PAYPAL_CLIENT_ID || "").trim(),
     PAYPAL_CLIENT_SECRET: (overrides?.PAYPAL_CLIENT_SECRET || env.PAYPAL_CLIENT_SECRET || "").trim(),
     PAYPAL_WEBHOOK_ID: (overrides?.PAYPAL_WEBHOOK_ID || env.PAYPAL_WEBHOOK_ID || "").trim(),
@@ -65,7 +59,7 @@ export function getPayPalConfig(overrides?: Partial<PayPalConfig>): PayPalConfig
     ).trim() || undefined,
   };
 
-  // Enforce sandbox-only guard
+  // Reject mistyped environments before any provider request.
   getPayPalBaseUrl(config.PAYPAL_ENV);
 
   return config;

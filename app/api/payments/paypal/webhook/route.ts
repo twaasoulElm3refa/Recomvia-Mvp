@@ -5,12 +5,14 @@ import {
   verifyWebhookSignature,
   type PayPalWebhookEvent,
 } from "@/lib/paypal";
+import { isPayPalPaymentsEnabled, paymentNotConfiguredResponse } from "@/lib/paypal/availability";
 
 export const runtime = "edge";
 const headers = { "Cache-Control": "no-store" };
 const json = (body: unknown, status = 200) => Response.json(body, { status, headers });
 
 export async function POST(request: Request) {
+  if (!isPayPalPaymentsEnabled("webhook")) return paymentNotConfiguredResponse();
   let webhookBody: PayPalWebhookEvent;
   try {
     webhookBody = await request.json();

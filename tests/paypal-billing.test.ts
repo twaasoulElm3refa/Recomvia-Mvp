@@ -26,9 +26,12 @@ import { POST as syncSubscriptionRoute } from "../app/api/payments/paypal/sync-s
 import { POST as reviseSubscriptionRoute } from "../app/api/payments/paypal/revise-subscription/route";
 import { GET as currentSubscriptionRoute } from "../app/api/payments/paypal/current-subscription/route";
 import { POST as webhookRoute } from "../app/api/payments/paypal/webhook/route";
+import { isPayPalPaymentsEnabled } from "../lib/paypal/availability";
+import { canStartPaidCheckout, isPlanActionDisabled } from "../lib/payment-checkout-ui";
 
 const TEST_CONFIG = {
   PAYPAL_ENV: "sandbox",
+  PAYPAL_ENABLED: "true",
   PAYPAL_CLIENT_ID: "test-client-id",
   PAYPAL_CLIENT_SECRET: "test-client-secret",
   PAYPAL_WEBHOOK_ID: "test-webhook-id",
@@ -36,6 +39,72 @@ const TEST_CONFIG = {
   PAYPAL_GROWTH_PLAN_ID: "P-GROWTH-456",
   PAYPAL_PRO_PLAN_ID: "P-PRO-789",
 };
+
+test("explicit flag and required credentials control checkout without inferring Sandbox readiness", () => {
+  assert.equal(isPayPalPaymentsEnabled("starter", { ...TEST_CONFIG, PAYPAL_ENABLED: undefined }), false);
+  assert.equal(isPayPalPaymentsEnabled("starter", { ...TEST_CONFIG, PAYPAL_ENABLED: "false" }), false);
+  assert.equal(isPayPalPaymentsEnabled("starter", { ...TEST_CONFIG, PAYPAL_CLIENT_SECRET: "" }), false);
+  assert.equal(isPayPalPaymentsEnabled("starter", TEST_CONFIG), true);
+  assert.equal(isPayPalPaymentsEnabled("growth", TEST_CONFIG), true);
+  assert.equal(isPayPalPaymentsEnabled("growth", { ...TEST_CONFIG, PAYPAL_GROWTH_PLAN_ID: "" }), false);
+  assert.equal(isPayPalPaymentsEnabled("webhook", { ...TEST_CONFIG, PAYPAL_WEBHOOK_ID: "" }), false);
+  assert.equal(canStartPaidCheckout(false, "ready"), false);
+  assert.equal(canStartPaidCheckout(null, "loading"), false);
+  assert.equal(canStartPaidCheckout(true, "ready"), true);
+  assert.equal(canStartPaidCheckout(true, "ready", true), false);
+  const available = { starter: true, essential: true, growth: true, pro: true };
+  assert.equal(isPlanActionDisabled("starter", available, false, "ready"), true);
+  for (const plan of ["essential", "growth", "pro"] as const) assert.equal(isPlanActionDisabled(plan, available, false, "ready"), true);
+  assert.equal(isPlanActionDisabled("free", available, false, "ready"), false);
+  assert.equal(isPlanActionDisabled("growth", { ...available, growth: false }, true, "ready"), true);
+  assert.equal(isPlanActionDisabled("growth", available, true, "ready"), false);
+  assert.equal(getPayPalBaseUrl("sandbox"), "https://api-m.sandbox.paypal.com");
+  assert.equal(getPayPalBaseUrl("live"), "https://api-m.paypal.com");
+});
+
+test("disabled checkout routes return 503 before PayPal calls or local checkout claims while current plan stays readable", async () => {
+  const sqlite = createFixture(false, false);
+  seedScan(sqlite);
+  seedPaidSubscription(sqlite, "I-LOCAL", "essential");
+  Object.assign(state.env, TEST_CONFIG, { PAYPAL_ENABLED: "false" });
+  state.user = userA;
+  let providerCalls = 0;
+  setPayPalTransport(async () => { providerCalls++; throw new Error("PayPal transport must not run"); });
+  const checks = [
+    createOrderRoute(new Request("https://recomvia.test/api/payments/paypal/create-order", { method: "POST", body: JSON.stringify({ scanId: "scan-a" }) })),
+    captureOrderRoute(new Request("https://recomvia.test/api/payments/paypal/capture-order", { method: "POST", body: JSON.stringify({ orderId: "ORDER-1", scanId: "scan-a" }) })),
+    createSubscriptionRoute(subscriptionRequest("create-subscription", "growth")),
+    reviseSubscriptionRoute(subscriptionRequest("revise-subscription", "growth")),
+    syncSubscriptionRoute(new Request("https://recomvia.test/api/payments/paypal/sync-subscription", { method: "POST", body: JSON.stringify({ subscriptionId: "I-LOCAL" }) })),
+  ];
+  for (const response of await Promise.all(checks)) {
+    assert.equal(response.status, 503);
+    assert.deepEqual(await response.json(), { error: "Payments are not available yet.", code: "payment_not_configured" });
+  }
+  assert.equal(providerCalls, 0);
+  assert.equal((sqlite.prepare("SELECT COUNT(*) AS n FROM subscription_checkout_claims").get() as any).n, 0);
+  assert.equal((sqlite.prepare("SELECT COUNT(*) AS n FROM report_purchases").get() as any).n, 0);
+  const current = await currentSubscriptionRoute();
+  assert.equal(current.status, 200);
+  const body = await current.json() as any;
+  assert.equal(body.currentPlan, "essential");
+  assert.equal(body.paymentsEnabled, false);
+  assert.deepEqual(body.checkoutAvailability, { starter: false, essential: false, growth: false, pro: false });
+  assert.equal(providerCalls, 0);
+  Object.assign(state.env, TEST_CONFIG, { PAYPAL_GROWTH_PLAN_ID: "", PAYPAL_WEBHOOK_ID: "" });
+  const missingPlan = await createSubscriptionRoute(subscriptionRequest("create-subscription", "growth"));
+  assert.equal(missingPlan.status, 503);
+  assert.equal((await missingPlan.json() as any).code, "payment_not_configured");
+  const availability = await currentSubscriptionRoute();
+  const partial = await availability.json() as any;
+  assert.equal(partial.paymentsEnabled, true);
+  assert.equal(partial.checkoutAvailability.growth, false);
+  const missingWebhook = await webhookRoute(new Request("https://recomvia.test/api/payments/paypal/webhook", { method: "POST", body: "{}" }));
+  assert.equal(missingWebhook.status, 503);
+  assert.equal(providerCalls, 0);
+  assert.equal((sqlite.prepare("SELECT COUNT(*) AS n FROM subscription_checkout_claims").get() as any).n, 0);
+  sqlite.close();
+});
 
 function seedUserAndOrg(sqlite: any) {
   sqlite.exec(`
@@ -91,10 +160,10 @@ function subscriptionRequest(route: string, plan: string) {
   });
 }
 
-test("Sandbox-only guard strictly rejects live mode and accepts sandbox", () => {
+test("PayPal URL selection keeps Sandbox and requires an explicit Live environment", () => {
   assert.equal(getPayPalBaseUrl("sandbox"), "https://api-m.sandbox.paypal.com");
-  assert.throws(() => getPayPalBaseUrl("live"), /Only PayPal Sandbox is permitted/);
-  assert.throws(() => getPayPalBaseUrl("production"), /Only PayPal Sandbox is permitted/);
+  assert.equal(getPayPalBaseUrl("live"), "https://api-m.paypal.com");
+  assert.equal(getPayPalBaseUrl("production"), "https://api-m.paypal.com");
   assert.throws(() => getPayPalBaseUrl("unknown"), /Unsupported PAYPAL_ENV/);
 });
 

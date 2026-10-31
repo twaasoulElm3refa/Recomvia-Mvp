@@ -1,6 +1,7 @@
 import { getAuthenticatedUser } from "@/app/auth";
 import { activePaidSubscriptions, attachSubscriptionCheckout, claimSubscriptionCheckout, ensureWorkspace, releaseSubscriptionCheckout, upsertPayPalSubscription } from "@/db/product";
 import { createPayPalSubscription } from "@/lib/paypal";
+import { isPayPalPaymentsEnabled, paymentNotConfiguredResponse } from "@/lib/paypal/availability";
 
 export const runtime = "edge";
 const headers = { "Cache-Control": "no-store" };
@@ -11,6 +12,7 @@ export async function POST(request: Request) {
   if (!user) {
     return json({ error: "Authentication required", code: "unauthorized" }, 401);
   }
+  if (!isPayPalPaymentsEnabled()) return paymentNotConfiguredResponse();
 
   let body: { plan?: string };
   try {
@@ -29,6 +31,7 @@ export async function POST(request: Request) {
       400,
     );
   }
+  if (!isPayPalPaymentsEnabled(rawPlan)) return paymentNotConfiguredResponse();
 
   const workspace = await ensureWorkspace(user);
   const active = await activePaidSubscriptions(workspace.organizationId);

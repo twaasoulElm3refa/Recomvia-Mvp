@@ -1,5 +1,6 @@
 export type PayPalConfig = {
   PAYPAL_ENV: "sandbox" | string;
+  PAYPAL_ENABLED: string;
   PAYPAL_CLIENT_ID: string;
   PAYPAL_CLIENT_SECRET: string;
   PAYPAL_WEBHOOK_ID: string;

@@ -17,6 +17,10 @@ import { NavigationLink as Link } from "@/app/components/navigation-link";
 import { PublicShell, type LocalizedMetadata } from "@/app/components/public-shell";
 import { Button } from "@/components/ui/button";
 import { PLAN_CATALOG } from "@/lib/plans";
+import { canStartPaidCheckout, isPlanActionDisabled } from "@/lib/payment-checkout-ui";
+
+type CheckoutAvailability = { starter: boolean; essential: boolean; growth: boolean; pro: boolean };
+type CurrentSubscriptionResponse = { currentPlan: string | null; billingConflict: boolean; billingReview: boolean; paymentsEnabled: boolean; checkoutAvailability: CheckoutAvailability };
 
 const pageMetadata: LocalizedMetadata = {
   en: {
@@ -51,6 +55,7 @@ const copy = {
     billingConflict: "More than one active subscription needs billing review. Contact support before changing plans.",
     billingReview: "An existing PayPal agreement needs billing review before another checkout. Contact support.",
     planStatusUnavailable: "Could not verify your current plan. Refresh this page before checkout.",
+    paymentsUnavailable: "Online payments are temporarily unavailable.",
     processingCheckout: "Connecting to PayPal...",
     compare: "Compare the plans",
     feature: "Included scope",
@@ -118,6 +123,7 @@ const copy = {
     billingConflict: "توجد اشتراكات نشطة متعددة تتطلب مراجعة الفوترة. تواصل مع الدعم قبل تغيير الباقة.",
     billingReview: "يوجد اشتراك PayPal سابق يحتاج إلى مراجعة الفوترة قبل بدء دفع جديد. تواصل مع الدعم.",
     planStatusUnavailable: "تعذر التحقق من باقتك الحالية. حدّث الصفحة قبل الدفع.",
+    paymentsUnavailable: "الدفع الإلكتروني غير متاح مؤقتًا.",
     processingCheckout: "جارٍ الاتصال بـ PayPal...",
     compare: "قارن الباقات",
     feature: "نطاق الباقة",
@@ -179,6 +185,8 @@ export function SubscriptionsContent() {
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [activePlan, setActivePlan] = useState<"essential" | "growth" | "pro" | null>(null);
   const [planStatus, setPlanStatus] = useState<"loading" | "ready" | "error">("loading");
+  const [paymentsEnabled, setPaymentsEnabled] = useState<boolean | null>(null);
+  const [checkoutAvailability, setCheckoutAvailability] = useState<CheckoutAvailability>({ starter: false, essential: false, growth: false, pro: false });
   const [billingConflict, setBillingConflict] = useState(false);
   const [billingReview, setBillingReview] = useState(false);
   const [targetScanId, setTargetScanId] = useState<string | null>(null);
@@ -188,15 +196,20 @@ export function SubscriptionsContent() {
     let mounted = true;
     fetch("/api/payments/paypal/current-subscription", { cache: "no-store" })
       .then(async (response) => {
-        if (response.status === 401) return { currentPlan: null, billingConflict: false, billingReview: false };
+        if (response.status === 401) {
+          const availability = await response.json() as CurrentSubscriptionResponse;
+          return { ...availability, currentPlan: null, billingConflict: false, billingReview: false };
+        }
         if (!response.ok) throw new Error("Current plan unavailable");
-        return response.json() as Promise<{ currentPlan: string | null; billingConflict: boolean; billingReview: boolean }>;
+        return response.json() as Promise<CurrentSubscriptionResponse>;
       })
       .then((data) => {
         if (!mounted) return;
         setActivePlan(data.currentPlan === "essential" || data.currentPlan === "growth" || data.currentPlan === "pro" ? data.currentPlan : null);
         setBillingConflict(data.billingConflict);
         setBillingReview(data.billingReview);
+        setPaymentsEnabled(data.paymentsEnabled === true);
+        setCheckoutAvailability({ starter: data.checkoutAvailability?.starter === true, essential: data.checkoutAvailability?.essential === true, growth: data.checkoutAvailability?.growth === true, pro: data.checkoutAvailability?.pro === true });
         setPlanStatus("ready");
       })
       .catch(() => { if (mounted) setPlanStatus("error"); });
@@ -224,6 +237,8 @@ export function SubscriptionsContent() {
       setPaymentStatus("cancelled");
       return;
     }
+
+    if (planStatus !== "ready" || !paymentsEnabled) return;
 
     if (flow === "starter" && token) {
       setPaymentStatus("processing");
@@ -288,9 +303,10 @@ export function SubscriptionsContent() {
         });
       return;
     }
-  }, [searchParams]);
+  }, [searchParams, planStatus, paymentsEnabled]);
 
   const handleStarterCheckout = async (scanId: string) => {
+    if (!canStartPaidCheckout(paymentsEnabled, planStatus) || !checkoutAvailability.starter) return;
     try {
       setLoadingPlan("starter");
       const res = await fetch("/api/payments/paypal/create-order", {
@@ -317,6 +333,7 @@ export function SubscriptionsContent() {
   };
 
   const handleSubscriptionCheckout = async (plan: "essential" | "growth" | "pro") => {
+    if (!canStartPaidCheckout(paymentsEnabled, planStatus, billingConflict, billingReview) || !checkoutAvailability[plan]) return;
     try {
       setLoadingPlan(plan);
       const res = await fetch(activePlan ? "/api/payments/paypal/revise-subscription" : "/api/payments/paypal/create-subscription", {
@@ -445,6 +462,7 @@ export function SubscriptionsContent() {
               {billingConflict && <p role="alert" className="mb-6 rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm font-semibold text-amber-950">{t.billingConflict}</p>}
               {billingReview && !billingConflict && <p role="alert" className="mb-6 rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm font-semibold text-amber-950">{t.billingReview}</p>}
               {planStatus === "error" && <p role="alert" className="mb-6 rounded-xl border border-rose-300 bg-rose-50 p-4 text-sm font-semibold text-rose-950">{t.planStatusUnavailable}</p>}
+              {paymentsEnabled === false && <p role="status" className="mb-6 rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm font-medium text-slate-700">{t.paymentsUnavailable}</p>}
               <div className="grid items-stretch gap-5 sm:grid-cols-2 xl:grid-cols-5">
                 {PLAN_CATALOG.map((plan) => {
                    const highlighted = plan.id === "growth";
@@ -533,10 +551,12 @@ export function SubscriptionsContent() {
 
                       {plan.id === "starter" && (
                         <>
-                          {targetScanId ? (
+                          {paymentsEnabled === false ? (
+                            <Button type="button" disabled className="h-auto min-h-11 w-full rounded-xl px-3 py-3 font-bold">{t.buyStarter}</Button>
+                          ) : targetScanId ? (
                             <Button
                               type="button"
-                              disabled={isLoading}
+                              disabled={isLoading || isPlanActionDisabled("starter", checkoutAvailability, paymentsEnabled, planStatus)}
                               onClick={() => handleStarterCheckout(targetScanId)}
                               className="h-auto min-h-11 w-full rounded-xl bg-blue-600 px-3 py-3 font-bold text-white hover:bg-blue-700"
                             >
@@ -574,7 +594,7 @@ export function SubscriptionsContent() {
                         ) : (
                           <Button
                             type="button"
-                            disabled={isLoading || planStatus !== "ready" || billingConflict || billingReview}
+                            disabled={isLoading || isPlanActionDisabled(paidPlan, checkoutAvailability, paymentsEnabled, planStatus, billingConflict, billingReview)}
                             onClick={() => handleSubscriptionCheckout(paidPlan)}
                             className={`h-auto min-h-11 w-full rounded-xl px-3 py-3 font-bold ${highlighted ? "bg-white text-[#07111f] hover:bg-slate-100" : "bg-blue-600 text-white hover:bg-blue-700"}`}
                           >

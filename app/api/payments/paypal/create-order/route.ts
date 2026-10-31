@@ -1,6 +1,7 @@
 import { getAuthenticatedUser } from "@/app/auth";
 import { ensureWorkspace, getScanForUser, recordStarterPurchase } from "@/db/product";
 import { createStarterOrder, STARTER_AMOUNT_CENTS } from "@/lib/paypal";
+import { isPayPalPaymentsEnabled, paymentNotConfiguredResponse } from "@/lib/paypal/availability";
 
 export const runtime = "edge";
 const headers = { "Cache-Control": "no-store" };
@@ -11,6 +12,7 @@ export async function POST(request: Request) {
   if (!user) {
     return json({ error: "Authentication required", code: "unauthorized" }, 401);
   }
+  if (!isPayPalPaymentsEnabled()) return paymentNotConfiguredResponse();
 
   let body: { scanId?: string };
   try {
