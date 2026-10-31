@@ -1,0 +1,75 @@
+.print-page { min-height: 100vh; background: #e9eef5; padding: 24px; color: var(--foreground); font-family: var(--font-sans); }
+.print-controls { max-width: 210mm; margin: 0 auto 16px; display: flex; justify-content: space-between; align-items: center; gap: 16px; font-size: 14px; font-weight: 700; }
+.print-controls a { color: #2563eb; text-decoration: underline; }
+.print-controls button { border: 0; border-radius: var(--radius); padding: 10px 16px; background: #2563eb; color: #fff; cursor: pointer; font: inherit; }
+.print-report { max-width: 210mm; margin: auto; padding: 18mm 16mm; background: #fff; box-shadow: 0 14px 45px #07111f20; font-size: 11pt; line-height: 1.55; }
+.print-report * { box-sizing: border-box; }
+.print-report h1, .print-report h2, .print-report h3, .print-report p, .print-report dl, .print-report ol { margin-block: 0; }
+.print-report h1, .print-report h2, .print-report h3 { color: #07111f; line-height: 1.25; }
+.print-report h1 { font-size: 25pt; font-weight: 800; letter-spacing: -.03em; }
+.print-report h2 { font-size: 16pt; font-weight: 800; margin-bottom: 9pt; }
+.print-report h3 { font-size: 11.5pt; font-weight: 700; margin: 11pt 0 5pt; }
+.print-report p { margin-bottom: 7pt; }
+.print-report a { color: #1d4ed8; text-decoration: underline; text-underline-offset: 2px; }
+.print-report [dir="ltr"], .print-report bdi, .print-model { unicode-bidi: isolate; }
+.print-report [dir="auto"] { unicode-bidi: plaintext; }
+.print-cover { border-bottom: 2px solid #2563eb; padding-bottom: 16pt; }
+.print-brand { display: flex; align-items: center; gap: 9px; margin-bottom: 20pt; font-size: 18pt; font-weight: 800; letter-spacing: -.04em; color: #07111f; }
+.print-brand img { width: 38px; height: 38px; flex: none; }
+.print-eyebrow { color: #2563eb; text-transform: uppercase; letter-spacing: .08em; font-size: 8.5pt; font-weight: 800; }
+.print-target { font-size: 17pt; font-weight: 700; margin-top: 8pt; overflow-wrap: anywhere; }
+.print-target-url { margin-top: 3pt; }
+.print-cover-meta { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12pt 20pt; margin-top: 18pt !important; font-size: 9.5pt; }
+.print-cover-meta div { min-width: 0; }
+.print-cover-meta dt { color: #64748b; font-size: 8.5pt; font-weight: 700; margin-bottom: 2pt; }
+.print-cover-meta dd { margin: 0; font-weight: 600; overflow-wrap: anywhere; }
+.print-section { margin-top: 20pt; }
+.print-note { color: #64748b; font-size: 9pt; }
+.print-metrics { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 7pt; margin: 13pt 0; }
+.print-metric { min-width: 0; border: 1px solid #dce4ef; border-radius: var(--radius-sm); background: #f8fafc; padding: 9pt; }
+.print-metric span { display: block; min-height: 2.3em; color: #64748b; font-size: 8pt; line-height: 1.15; font-weight: 700; }
+.print-metric strong { display: block; margin-top: 5pt; color: #07111f; font-size: 16pt; font-weight: 800; }
+.print-list, .print-action-list { padding-inline-start: 18pt; }
+.print-list li { margin-bottom: 5pt; }
+.print-identity-name { font-weight: 700; font-size: 13pt; }
+.print-model-list, .print-badges { display: flex; flex-wrap: wrap; gap: 5pt; margin: 7pt 0; }
+.print-badge { display: inline-block; max-width: 100%; padding: 3pt 7pt; border: 1px solid #dce4ef; border-radius: 999px; background: #f1f5f9; color: #334155; font-size: 8pt; font-weight: 700; line-height: 1.3; overflow-wrap: anywhere; }
+.print-model { direction: ltr; text-align: left; }
+.print-observation { border-top: 1px solid #dce4ef; margin-top: 15pt; padding-top: 12pt; }
+.print-observation-head { break-inside: avoid; page-break-inside: avoid; }
+.print-observation-head h3 { margin: 7pt 0 10pt; overflow-wrap: anywhere; }
+.print-answer { border-inline-start: 3px solid #2563eb; background: #f8fafc; padding: 9pt 11pt; border-radius: var(--radius-sm); overflow-wrap: anywhere; }
+.print-answer > strong, .print-sources > strong { display: block; color: #07111f; font-size: 9pt; margin-bottom: 5pt; }
+.print-answer p:last-child, .print-sources p:last-child { margin-bottom: 0; }
+.print-answer div { white-space: normal; }
+.print-answer code { white-space: normal; overflow-wrap: anywhere; }
+.print-measurement { margin-top: 8pt; font-size: 9pt; color: #475569; }
+.print-sources { margin-top: 7pt; font-size: 9pt; }
+.print-sources ol { padding-inline-start: 18pt; }
+.print-sources li { margin-bottom: 3pt; }
+.print-source { overflow-wrap: anywhere; word-break: break-word; }
+.print-engine-summary { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7pt; margin: 12pt 0; }
+.print-engine-summary > div { min-width: 0; border: 1px solid #dce4ef; border-radius: var(--radius-sm); padding: 8pt; }
+.print-engine-summary strong, .print-engine-summary span { display: block; overflow-wrap: anywhere; }
+.print-engine-summary strong { font-size: 9pt; }
+.print-engine-summary span { font-size: 8.5pt; color: #475569; }
+.print-action-list li { margin-bottom: 12pt; }
+.print-action-list h3 { margin: 0 0 3pt; }
+.print-action-sources { display: flex; flex-wrap: wrap; gap: 8pt; font-size: 8.5pt; }
+.print-finding { border-top: 1px solid #dce4ef; padding: 9pt 0; }
+.print-finding h3 { margin-top: 0; }
+.print-disclaimer { border-top: 2px solid #2563eb; margin-top: 20pt; padding-top: 12pt; font-size: 9pt; color: #475569; }
+.print-disclaimer h2 { font-size: 12pt; }
+@media (max-width: 700px) { .print-page { padding: 10px; } .print-report { padding: 20px; } .print-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); } .print-cover-meta, .print-engine-summary { grid-template-columns: 1fr; } }
+@page { size: A4 portrait; margin: 14mm 14mm 16mm; }
+@media print {
+  html, body { width: auto; min-width: 0; margin: 0; padding: 0; background: #fff !important; }
+  .print-page { min-height: 0; padding: 0; background: #fff; }
+  .print-controls { display: none !important; }
+  .print-report { width: auto; max-width: none; margin: 0; padding: 0; box-shadow: none; font-size: 10pt; print-color-adjust: exact; -webkit-print-color-adjust: exact; }
+  .print-cover, .print-metric, .print-engine-summary > div, .print-finding, .print-disclaimer { break-inside: avoid; page-break-inside: avoid; }
+  .print-observation { break-inside: auto; page-break-inside: auto; }
+  .print-observation-head, .print-answer > strong, .print-report h2, .print-report h3 { break-after: avoid; page-break-after: avoid; }
+  .print-answer { break-inside: auto; page-break-inside: auto; }
+  .print-report p, .print-report li { orphans: 3; widows: 3; }
+}

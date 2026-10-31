@@ -370,7 +370,7 @@ export async function runScanForUser(user: AuthUser, payload: Record<string, unk
       language: input.language,
       country: "Global",
       useSearch: true,
-      maxOutputTokens: 2_400,
+      maxOutputTokens: 600,
       expectedFormat: "discovery_json",
       searchResults: policy.searchResults, searchUses: policy.searchUses,
     });

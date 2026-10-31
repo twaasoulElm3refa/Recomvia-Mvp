@@ -11,13 +11,11 @@ export type AnalysisPolicy = {
 };
 // Conservative operating defaults for validation. These are not published sales quotas.
 export function analysisPolicy(plan: PlanId | null): AnalysisPolicy {
-  // Visibility answers are short prose/list responses; 1,200 output tokens is
-  // ample for a cited final answer with reasoning disabled. Identity discovery
-  // uses a separate 2,400-token cap for up to four structured candidates.
-  const common = { version: ANALYSIS_POLICY_VERSION, unknownCallReserveMicros: 40_000, maxOutputTokens: 1_200, searchResults: 3, searchUses: 1 };
+  // Keep visibility observations brief; identity discovery has its own cap.
+  const common = { version: ANALYSIS_POLICY_VERSION, unknownCallReserveMicros: 40_000, maxOutputTokens: 280, searchResults: 1, searchUses: 1 };
   if (plan === "essential") return { ...common, plan, promptLimit: 6, modelCount: 2, pageLimit: 3, competitorLimit: 3, measurementsPer30Days: 4, monitoringDays: 8, budgetMicros: 1_000_000 };
   if (plan === "growth" || plan === "pro") return { ...common, plan, promptLimit: 12, modelCount: 3, pageLimit: 8, competitorLimit: 8, measurementsPer30Days: 8, monitoringDays: 4, budgetMicros: 3_000_000 };
-  return { ...common, plan: "free", promptLimit: 3, modelCount: 1, pageLimit: 1, competitorLimit: 1, measurementsPer30Days: 1, monitoringDays: null, budgetMicros: 200_000, maxOutputTokens: 900 };
+  return { ...common, plan: "free", promptLimit: 3, modelCount: 1, pageLimit: 1, competitorLimit: 1, measurementsPer30Days: 1, monitoringDays: null, budgetMicros: 200_000, maxOutputTokens: 180 };
 }
 
 export function configuredModels(policy: AnalysisPolicy, env: { OPENROUTER_MODEL?: string; OPENROUTER_MODELS_JSON?: string; OPENROUTER_API_KEY?: string }): string[] {

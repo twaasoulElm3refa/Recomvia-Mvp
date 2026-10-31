@@ -42,10 +42,15 @@ try {
     writeFileSync(
       mock,
       `const Module = require('node:module'); const path = require('node:path'); const original = Module._load;
+      require.extensions['.css'] = () => {};
       Module._load = function(id, parent, main) {
+        if (id.endsWith('.css')) return {};
         if (id === 'cloudflare:workers') return { env: require('./tests/target-runtime-fixture.js').state.env };
-        if (id === '@/app/auth') return { getAuthenticatedUser: async () => require('./tests/target-runtime-fixture.js').state.user };
+        if (id === '@/app/auth') return { getAuthenticatedUser: async () => require('./tests/target-runtime-fixture.js').state.user,
+          requireAuthenticatedUser: async () => { const user = require('./tests/target-runtime-fixture.js').state.user; if (!user) throw new Error('AUTH_REQUIRED'); return user; } };
         if (id.startsWith('@/')) return original.call(this, path.join(__dirname, id.slice(2)), parent, main);
+        if (id === 'react' || id.startsWith('react/') || id.startsWith('react-dom/') || id === 'next/navigation')
+          return original.call(this, require.resolve(id, { paths: [process.cwd()] }), parent, main);
         return original.call(this, id, parent, main);
       };`,
     );

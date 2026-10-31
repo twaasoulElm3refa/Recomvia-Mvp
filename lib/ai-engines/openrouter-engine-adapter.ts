@@ -142,7 +142,7 @@ function citationsFrom(response: OpenRouterResponse): EngineCitation[] {
   }
   return [
     ...new Map(citations.map((citation) => [citation.url, citation])).values(),
-  ];
+  ].slice(0, 2);
 }
 
 function sourcesFrom(citations: EngineCitation[]): EngineSource[] {
@@ -272,20 +272,21 @@ export class OpenRouterEngineAdapter implements EngineAdapter {
             messages: [
               {
                 role: "system",
-                content:
-                  "Return only the requested final answer or JSON result. Never output reasoning, analysis, a thinking process, internal steps, or <think> tags. Answer independently using the supplied web evidence and cite sources when appropriate. Name concrete options, preserve uncertainty, and do not assume any brand must appear.",
+                content: request.expectedFormat === "discovery_json"
+                  ? "Return concise valid JSON only, following the requested schema. No reasoning, hidden analysis, or extra text. Use at most 2 cited sources. Preserve uncertainty and do not invent identity details."
+                  : `Answer the question directly in ${request.language.toLowerCase().startsWith("ar") ? "Arabic" : "English"}. No introduction, repeated question, chain-of-thought, or long background explanation. Use at most 2 short paragraphs or 4 short bullets. Mention only the most relevant entities; include a measured entity only if it appears naturally. Give the direct answer or recommendation and brief context for any entity mention. Cite at most 2 supporting sources. Use at most one short uncertainty or limitation sentence. Avoid generic explanation unless the question requires it. No essays, market analysis, strategic recommendations, multiple sections, company histories, or repeated summaries. Focus only on evidence needed for visibility measurement.`,
               },
               { role: "user", content: request.prompt },
             ],
-            max_tokens: Math.max(
-              200,
-              Math.min(request.maxOutputTokens || 1_200, 2_400),
+            max_tokens: Math.min(
+              request.maxOutputTokens ?? (request.expectedFormat === "discovery_json" ? 600 : 280),
+              request.expectedFormat === "discovery_json" ? 600 : 280,
             ),
             usage: { include: true },
             // A comparative measurement needs one search before every answer.
             // The deprecated web plugin is intentional until methodology changes;
             // the server tool lets each model choose zero or multiple searches.
-            plugins: request.useSearch ? [{ id: "web", max_results: request.searchResults ?? 3 }] : undefined,
+            plugins: request.useSearch ? [{ id: "web", max_results: 1 }] : undefined,
           }),
         });
         const body = (await response
@@ -311,7 +312,7 @@ export class OpenRouterEngineAdapter implements EngineAdapter {
               rawOutputText(body) ? "reasoning_only_response" : "empty_final_response",
             );
             break;
-          } else if (request.expectedFormat === "discovery_json" && !validDiscoveryJson(text)) {
+          } else if (request.expectedFormat === "discovery_json" && (finishReasonFrom(body) === "length" || !validDiscoveryJson(text))) {
             lastError = safeError(response.status, body, "OpenRouter returned an invalid discovery JSON result.", "invalid_final_response");
             break;
           } else {

@@ -321,7 +321,7 @@ test("OpenRouter adapter retries a 429 and records returned sources, citations, 
     assert.equal(request.model, OPENROUTER_TEST_MODEL);
     assert.deepEqual(request.usage, { include: true });
     assert.deepEqual(request.reasoning, { enabled: false });
-    assert.deepEqual(request.plugins, [{ id: "web", max_results: 3 }]);
+    assert.deepEqual(request.plugins, [{ id: "web", max_results: 1 }]);
     assert.equal(request.tools, undefined);
     if (requests === 1) return new Response(JSON.stringify({ error: { code: "rate_limit", message: "Try again" } }), { status: 429, headers: { "content-type": "application/json" } });
     return new Response(JSON.stringify({
@@ -349,7 +349,7 @@ test("OpenRouter adapter retries a 429 and records returned sources, citations, 
 test("OpenRouter adapter keeps absent citations and provider cost empty without fabrication", async () => {
   const fetchImpl: typeof fetch = async (_input, init) => {
     const request = JSON.parse(String(init?.body));
-    assert.deepEqual(request.plugins, [{ id: "web", max_results: 3 }]);
+    assert.deepEqual(request.plugins, [{ id: "web", max_results: 1 }]);
     return new Response(JSON.stringify({
       id: "generation_without_search", model: OPENROUTER_TEST_MODEL,
       choices: [{ message: { content: [{ type: "text", text: "A plain answer." }] } }],
@@ -362,6 +362,33 @@ test("OpenRouter adapter keeps absent citations and provider cost empty without 
   assert.deepEqual(response.sources, []);
   assert.deepEqual(response.citations, []);
   assert.equal(response.estimatedCostMicros, null);
+});
+
+test("short visibility answers are final without continuation or summarization and keep at most two sources", async () => {
+  let calls = 0;
+  const fetchImpl: typeof fetch = async (_input, init) => {
+    calls++;
+    const request = JSON.parse(String(init?.body));
+    assert.equal(request.max_tokens, 180);
+    assert.deepEqual(request.reasoning, { enabled: false });
+    assert.deepEqual(request.plugins, [{ id: "web", max_results: 1 }]);
+    assert.match(request.messages[0].content, /No introduction, repeated question, chain-of-thought/);
+    assert.match(request.messages[0].content, /at most 2 short paragraphs or 4 short bullets/);
+    assert.match(request.messages[0].content, /at most 2 supporting sources/);
+    assert.match(request.messages[0].content, /in Arabic/);
+    return Response.json({ id: "short-answer", choices: [{ finish_reason: "stop", message: {
+      content: "خيار مناسب.",
+      annotations: ["a", "b", "c"].map((id) => ({ type: "url_citation", url_citation: { url: `https://source.example/${id}`, title: id } })),
+    } }], usage: { prompt_tokens: 12, completion_tokens: 4, total_tokens: 16, cost: 0.0007 } });
+  };
+  const result = await new OpenRouterEngineAdapter({ apiKey: "test-only-key", model: OPENROUTER_TEST_MODEL, fetchImpl })
+    .run({ prompt: "ما الخيار المناسب؟", language: "ar", country: "Egypt", useSearch: true, maxOutputTokens: 180 });
+  assert.equal(calls, 1);
+  assert.equal(result.error, null);
+  assert.equal(result.responseText, "خيار مناسب.");
+  assert.equal(result.sources.length, 2);
+  assert.equal(result.citations.length, 2);
+  assert.equal(result.estimatedCostMicros, 700);
 });
 
 test("Qwen reasoning is removed before storage while citations and the final answer remain", async () => {
@@ -455,6 +482,23 @@ test("discovery JSON must parse before the adapter reports success", async () =>
   const parsed = await adapter.run(request);
   assert.equal(parsed.error, null);
   assert.equal(parseTargetDiscovery(parsed, input).status, "resolved");
+});
+
+test("truncated structured discovery fails once with the same token cap and provider cost", async () => {
+  let calls = 0;
+  const adapter = new OpenRouterEngineAdapter({ apiKey: "test-only-key", model: OPENROUTER_TEST_MODEL, fetchImpl: async (_input, init) => {
+    calls++;
+    const request = JSON.parse(String(init?.body));
+    assert.equal(request.max_tokens, 600);
+    assert.deepEqual(request.reasoning, { enabled: false });
+    assert.deepEqual(request.plugins, [{ id: "web", max_results: 1 }]);
+    return Response.json({ id: "truncated-discovery", choices: [{ finish_reason: "length", message: { content: '{"status":"unresolved","candidates":[]}' } }], usage: { cost: 0.003 } });
+  } });
+  const result = await adapter.run({ prompt: "Resolve identity", language: "en", country: "Global", useSearch: true, expectedFormat: "discovery_json" });
+  assert.equal(calls, 1);
+  assert.equal(result.error?.code, "invalid_final_response");
+  assert.equal(result.responseText, null);
+  assert.equal(result.estimatedCostMicros, 3_000);
 });
 
 test("a billed empty final answer is excluded from visibility scoring", async () => {

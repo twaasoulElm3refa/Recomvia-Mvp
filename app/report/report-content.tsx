@@ -9,8 +9,8 @@ import { useSiteLocale } from "@/hooks/use-site-locale";
 import { safeSourceUrl } from "@/lib/analysis-target";
 import { normalizeDisplayText } from "@/lib/answer-text";
 import { REPORT_PAYWALL_COPY } from "@/lib/report-copy";
+import { printReportHref } from "@/lib/report-print";
 import type { ReportView } from "@/db/product";
-import { PrintableReport } from "./printable-report";
 import { LockKeyhole, Printer } from "lucide-react";
 
 function Panel({
@@ -188,7 +188,7 @@ export function ReportContent({
       ) : (
         <div className="report-screen space-y-5">
           {isStarter && <Panel><h2 className="font-extrabold">{t("Starter · one initial report", "Starter · تقرير أولي واحد")}</h2><p className="mt-3 text-sm leading-7 text-slate-600">{t("This report shows a limited initial sample and priority findings from your saved analysis. It does not include a fresh deep scan, ongoing monitoring or Fix Center access.", "يعرض هذا التقرير عينة أولية محدودة وأبرز الملاحظات من التحليل المحفوظ. لا يشمل فحصًا عميقًا جديدًا أو متابعة دورية أو استخدام مركز الإصلاح.")}</p><Link href="/pricing#essential" className="mt-4 inline-block text-sm font-bold text-blue-700 underline">{t("Explore deeper analysis and monitoring", "استعرض التحليل الأعمق والمتابعة")}</Link></Panel>}
-          {canViewReport && <Button type="button" variant="outline" className="rounded-xl print:hidden" onClick={() => window.print()}><Printer className="size-4" />{t("Print / save PDF", "طباعة / حفظ PDF")}</Button>}
+          {canViewReport && <Button asChild variant="outline" className="rounded-xl print:hidden"><Link href={printReportHref(scan.id, locale)} target="_blank" rel="noopener noreferrer"><Printer className="size-4" />{t("Print / save PDF", "طباعة / حفظ PDF")}</Link></Button>}
           <div className="flex flex-wrap gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-xs text-slate-600">
             <strong>{scan.target?.name || scan.displayName}</strong>
             <span>
@@ -636,7 +636,6 @@ export function ReportContent({
           </div>
         </div>
       )}
-      {fullScan && <PrintableReport scan={fullScan} starter={isStarter} ar={ar} suggestions={isStarter ? suggestions.slice(0, 3) : suggestions} />}
     </AppShell>
   );
 }

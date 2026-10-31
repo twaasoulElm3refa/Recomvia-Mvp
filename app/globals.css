@@ -30,24 +30,3 @@
 @media(prefers-reduced-motion:reduce){*,*:before,*:after{scroll-behavior:auto!important;animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important}}
 
 
-@media print {
-  body:has(.report-export) { background: white; color: black; }
-  body:has(.report-export) header,
-  body:has(.report-export) aside,
-  body:has(.report-export) nav,
-  body:has(.report-export) button,
-  body:has(.report-export) [data-slot="sheet-content"],
-  body:has(.report-export) [data-slot="sheet-overlay"],
-  body:has(.report-export) [data-slot="dialog-overlay"],
-  body:has(.report-export) [data-slot="dialog-content"],
-  body:has(.report-export) .report-screen { display: none !important; }
-  body:has(.report-export) main > div > div:first-child { display: none !important; }
-  body:has(.report-export) main { margin: 0 !important; padding: 0 !important; }
-  body:has(.report-export) .lg\:ps-\[250px\] { padding-inline-start: 0 !important; }
-  .report-export { display: block !important; font-size: 11pt; line-height: 1.7; }
-  .report-export h1 { font-size: 22pt; font-weight: 800; margin-bottom: 12pt; }
-  .report-export h2 { font-size: 16pt; font-weight: 700; margin: 16pt 0 8pt; break-after: avoid; }
-  .report-export h3 { font-weight: 700; margin: 12pt 0 6pt; break-after: avoid; }
-  .report-export p, .report-export li { overflow-wrap: anywhere; margin-bottom: 6pt; }
-  .report-export ol, .report-export ul { padding-inline-start: 20pt; }
-}

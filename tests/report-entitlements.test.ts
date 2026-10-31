@@ -11,6 +11,10 @@ import {
   resolveReportEntitlement,
 } from "../lib/report-entitlements";
 import { parseTargetInput } from "../lib/analysis-target";
+import { printReportHref } from "../lib/report-print";
+import PrintReportPage from "../app/report/print/page";
+import { renderToStaticMarkup } from "react-dom/server";
+import { readFileSync, writeFileSync } from "node:fs";
 import { createFixture, state, userA, userB } from "./target-runtime-fixture";
 
 type FixtureDb = ReturnType<typeof createFixture>;
@@ -206,6 +210,59 @@ test("a subscribed user in another organization cannot access the report", async
   `);
   addSubscription(db, { organizationId: "org-b" });
   assert.equal(await getReportForUser(userB.userId, "scan-a"), null);
+  db.close();
+});
+
+test("print route requires authentication, scan ownership, and report entitlement", async () => {
+  const db = createFixture(false, false);
+  seedReport(db);
+  state.user = null;
+  await assert.rejects(() => PrintReportPage({ searchParams: Promise.resolve({ scan: "scan-a" }) }), /AUTH_REQUIRED/);
+  state.user = userB;
+  await assert.rejects(() => PrintReportPage({ searchParams: Promise.resolve({ scan: "scan-a" }) }), /NEXT_HTTP_ERROR_FALLBACK|404/);
+  state.user = userA;
+  await assert.rejects(() => PrintReportPage({ searchParams: Promise.resolve({ scan: "scan-a" }) }), /NEXT_HTTP_ERROR_FALLBACK|404/);
+  addSubscription(db);
+  const markup = renderToStaticMarkup(await PrintReportPage({ searchParams: Promise.resolve({ scan: "scan-a", lang: "en" }) }));
+  assert.match(markup, /Secret AI answer/);
+  assert.match(markup, /Secret finding/);
+  assert.equal(printReportHref("scan-a", "en"), "/report/print?scan=scan-a&lang=en");
+  assert.equal(printReportHref("scan-a & b", "ar"), "/report/print?scan=scan-a%20%26%20b&lang=ar");
+  db.close();
+});
+
+test("print report includes every entitled observation once with Arabic, models, sources, and safe failure labels", async () => {
+  const db = createFixture(false, false);
+  seedReport(db);
+  addSubscription(db);
+  const models = ["qwen/qwen3.5-flash-02-23", "google/gemini-3.1-flash-lite", "z-ai/glm-4.7-flash"];
+  const insert = db.prepare(`INSERT INTO engine_runs
+    (id,scan_id,provider,model,surface_type,prompt_id,intent,prompt,language,country,response_text,
+     citations_json,brand_entity,brand_visible,mention_count,recommendation_status,competitors_json,
+     error_code,error_message,provider_run_id,estimated_cost_micros,run_timestamp)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP)`);
+  for (let index = 1; index < 36; index++) {
+    const failed = index === 35;
+    const answer = index === 1 ? "إجابة عربية واضحة عن الشركة" : index === 2 ? "## Heading\n**Complete** answer " + "detail ".repeat(90) : `Unique answer ${index}`;
+    insert.run(`run-${index}`, "scan-a", "Test", models[index % 3], "api_with_search", `prompt-${index}`, index === 3 ? "identity" : "discovery", `Question ${index}`, index === 1 ? "ar" : "en", "Global", failed ? null : answer,
+      JSON.stringify([{ url: `https://sources.example/${index}`, title: `Source ${index}` }]), "Example", 0, 0, "absent", "[]",
+      failed ? "network_error" : null, failed ? "PRIVATE_PROVIDER_ERROR" : null, "SYSTEM_INTERNAL_PROMPT", 12345);
+  }
+  state.user = userA;
+  const markup = renderToStaticMarkup(await PrintReportPage({ searchParams: Promise.resolve({ scan: "scan-a", lang: "ar" }) }));
+  if (process.env.PRINT_QA_HTML) writeFileSync(process.env.PRINT_QA_HTML,
+    `<meta charset="utf-8"><style>${readFileSync("app/report/print/print.css", "utf8")}</style><style>:root{--radius:.875rem;--radius-sm:.625rem;--font-sans:Inter,"Noto Sans Arabic",system-ui,"Segoe UI",Arial,sans-serif}</style>${markup.replace('src="/favicon.svg"', 'src="file:///C:/xampp/htdocs/Recomvia-Mvp/public/favicon.svg"')}`);
+  assert.match(markup, /dir="rtl"/);
+  assert.match(markup, /إجابة عربية واضحة عن الشركة/);
+  assert.match(markup, /Complete/);
+  assert.doesNotMatch(markup, /\*\*Complete\*\*|## Heading/);
+  assert.match(markup, /https:\/\/sources\.example\/1/);
+  assert.match(markup, /Observation unavailable|الملاحظة غير متاحة/);
+  assert.match(markup, /Excluded from visibility score|مستبعد من درجة الظهور/);
+  for (const model of models) assert.match(markup, new RegExp(model.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  for (let index = 3; index < 35; index++) assert.equal((markup.match(new RegExp(`Unique answer ${index}(?!\\d)`, "g")) || []).length, 1);
+  assert.equal((markup.match(/class="print-observation"/g) || []).length, 36);
+  for (const secret of ["PRIVATE_PROVIDER_ERROR", "SYSTEM_INTERNAL_PROMPT", "12345", "Print / save PDF", "Workspace", "Sidebar"]) assert.equal(markup.includes(secret), false, secret);
   db.close();
 });
 

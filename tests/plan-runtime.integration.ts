@@ -34,7 +34,7 @@ async function setup(plan: "free" | "essential" | "growth" | "pro", action: (db:
     assert.ok(String(url).startsWith("https://openrouter.ai/"), `Unexpected network destination: ${url}`);
     const body = JSON.parse(String(init?.body)) as ProviderRequest;
     assert.deepEqual(body.reasoning, { enabled: false });
-    assert.deepEqual(body.plugins, [{ id: "web", max_results: 3 }]);
+    assert.deepEqual(body.plugins, [{ id: "web", max_results: 1 }]);
     assert.equal(body.tools, undefined);
     requests.push(body); return handler(body);
   };
@@ -53,8 +53,9 @@ for (const [plan, models, questions, depth] of [
     assert.equal(count(db, "engine_runs"), models * questions);
     assert.equal(requests.length, models * questions + 1); // Identity discovery is a separate recorded request.
     const measurementRequests = requests.filter((item) => !item.messages[1].content.includes("INPUT_DATA:"));
-    assert.equal(requests.find((item) => item.messages[1].content.includes("INPUT_DATA:"))?.max_tokens, 2_400);
-    assert.ok(measurementRequests.every((item) => item.max_tokens === (plan === "free" ? 900 : 1_200)));
+    assert.equal(requests.find((item) => item.messages[1].content.includes("INPUT_DATA:"))?.max_tokens, 600);
+    assert.ok(measurementRequests.every((item) => item.max_tokens === (plan === "free" ? 180 : 280)));
+    assert.ok(measurementRequests.every((item) => /Answer the question directly/.test(item.messages[0].content) && /at most 2 supporting sources/.test(item.messages[0].content)));
     assert.equal(new Set(measurementRequests.map((item) => item.model)).size, models);
     const perModel = [...new Set(measurementRequests.map((item) => item.model))].map((model) => measurementRequests.filter((item) => item.model === model).map((item) => item.messages[1].content).sort());
     for (const questionsForModel of perModel) assert.deepEqual(questionsForModel, perModel[0]);
