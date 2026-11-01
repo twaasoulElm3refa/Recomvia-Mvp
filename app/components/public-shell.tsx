@@ -8,6 +8,7 @@ import { KnowledgeAssistant } from "@/app/components/knowledge-assistant";
 import { MobileSiteMenu, type SiteNavItem } from "@/app/components/mobile-site-menu";
 import { Button } from "@/components/ui/button";
 import { readStoredSiteLocale, SITE_LOCALE_EVENT, storeSiteLocale, type SiteLocale } from "@/lib/site-locale";
+import { useAccountEntry } from "@/hooks/use-account-entry";
 
 const copy = {
   en: {
@@ -17,7 +18,7 @@ const copy = {
     intro: "Recomvia measures how AI systems find, understand, cite, and recommend brands, then turns evidence into prioritized improvements.",
     platform: "Platform",
     overview: "Overview",
-    report: "Sample report",
+    report: "My reports",
     fixes: "Fix Center",
     resources: "Resources",
     faq: "FAQ & help",
@@ -34,7 +35,7 @@ const copy = {
     intro: "تقيس Recomvia كيف تكتشف أنظمة الذكاء الاصطناعي العلامة وتفهمها وتستشهد بها وتوصي بها، ثم تحوّل الأدلة إلى تحسينات مرتبة حسب الأولوية.",
     platform: "المنصة",
     overview: "نظرة عامة",
-    report: "نموذج التقرير",
+    report: "تقاريري",
     fixes: "مركز الإصلاح",
     resources: "المصادر",
     faq: "الأسئلة الشائعة والمساعدة",
@@ -52,6 +53,7 @@ export type LocalizedMetadata = Record<SiteLocale, { title: string; description:
 
 export function PublicShell({ children, pageMetadata }: { children: ReactNode | ((locale: SiteLocale) => ReactNode); pageMetadata?: LocalizedMetadata }) {
   const [locale, setLocale] = useState<SiteLocale>("en");
+  const signedIn = useAccountEntry();
 
   useEffect(() => {
     const syncLocale = () => setLocale(readStoredSiteLocale("en"));
@@ -85,6 +87,8 @@ export function PublicShell({ children, pageMetadata }: { children: ReactNode | 
 
   const t = copy[locale];
   const rtl = locale === "ar";
+  const accountLabel = signedIn ? (rtl ? "لوحة التحكم" : "Dashboard") : (rtl ? "تسجيل الدخول" : "Sign in");
+  const accountHref = signedIn ? "/dashboard" : "/auth/google";
   const navigation: SiteNavItem[] = navigationHrefs.map((href, index) => ({ href, label: t.navigation[index] }));
 
   function toggleLocale() {
@@ -103,8 +107,9 @@ export function PublicShell({ children, pageMetadata }: { children: ReactNode | 
           </nav>
           <div className="flex items-center gap-2">
             <Button type="button" variant="ghost" size="sm" className="rounded-xl" onClick={toggleLocale}><Globe2 className="size-4" />{rtl ? "EN" : "العربية"}</Button>
+            <Link href={accountHref} className="hidden text-sm font-bold text-slate-700 lg:inline-flex">{accountLabel}</Link>
             <Button asChild className="hidden rounded-xl bg-[#07111f] font-bold sm:inline-flex"><Link href="/">{t.score}</Link></Button>
-            <MobileSiteMenu items={navigation} menuLabel={t.menu} ctaLabel={t.score} direction={rtl ? "rtl" : "ltr"} />
+            <MobileSiteMenu items={navigation} menuLabel={t.menu} ctaLabel={accountLabel} ctaHref={accountHref} direction={rtl ? "rtl" : "ltr"} />
           </div>
         </div>
       </header>
@@ -112,7 +117,7 @@ export function PublicShell({ children, pageMetadata }: { children: ReactNode | 
       <footer lang={locale} dir={rtl ? "rtl" : "ltr"} className="border-t border-slate-200 bg-white">
         <div className="mx-auto grid max-w-[1240px] gap-10 px-5 py-12 sm:px-8 md:grid-cols-[1.4fr_repeat(3,.65fr)]">
           <div><BrandMark /><p className="mt-4 max-w-md text-sm leading-6 text-slate-500">{t.intro}</p></div>
-          <div><p className="text-sm font-extrabold text-slate-900">{t.platform}</p><nav className="mt-4 flex flex-col gap-3 text-sm font-semibold text-slate-500"><Link href="/dashboard">{t.overview}</Link><Link href="/report">{t.report}</Link><Link href="/fix-center">{t.fixes}</Link></nav></div>
+          <div><p className="text-sm font-extrabold text-slate-900">{t.platform}</p><nav className="mt-4 flex flex-col gap-3 text-sm font-semibold text-slate-500"><Link href="/dashboard">{t.overview}</Link>{signedIn && <Link href="/report">{t.report}</Link>}<Link href="/fix-center">{t.fixes}</Link></nav></div>
           <div><p className="text-sm font-extrabold text-slate-900">{t.resources}</p><nav className="mt-4 flex flex-col gap-3 text-sm font-semibold text-slate-500"><Link href="/blog">{t.navigation[2]}</Link><Link href="/methodology">{t.navigation[3]}</Link><Link href="/faq">{t.faq}</Link></nav></div>
           <div><p className="text-sm font-extrabold text-slate-900">{t.company}</p><nav className="mt-4 flex flex-col gap-3 text-sm font-semibold text-slate-500"><Link href="/pricing">{t.navigation[1]}</Link><Link href="/contact">{t.navigation[5]}</Link><Link href="/privacy">{t.privacy}</Link><Link href="/terms">{t.terms}</Link><Link href="/billing-policy">{t.billing}</Link></nav></div>
         </div>

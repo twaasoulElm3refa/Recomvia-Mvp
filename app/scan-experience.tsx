@@ -39,6 +39,7 @@ import type {
 import { PLAN_CATALOG } from "@/lib/plans";
 import { faqEntries } from "@/lib/knowledge-base";
 import { normalizeDisplayText } from "@/lib/answer-text";
+import { useAccountEntry } from "@/hooks/use-account-entry";
 
 type Locale = "en" | "ar";
 type ModelContext = {
@@ -140,7 +141,7 @@ const text = {
       "Measure how AI systems find, understand, cite, and recommend your brand, then turn evidence into prioritized improvements.",
     platformGroup: "Platform",
     overview: "Overview",
-    sampleReport: "Sample report",
+    sampleReport: "My reports",
     fixCenter: "Fix Center",
     resourcesGroup: "Resources",
     companyGroup: "Company",
@@ -226,7 +227,7 @@ const text = {
       "قِس كيف تكتشف أنظمة الذكاء الاصطناعي علامتك وتفهمها وتستشهد بها وتوصي بها، ثم حوّل الأدلة إلى تحسينات ذات أولوية.",
     platformGroup: "المنصة",
     overview: "نظرة عامة",
-    sampleReport: "نموذج التقرير",
+    sampleReport: "تقاريري",
     fixCenter: "مركز الإصلاح",
     resourcesGroup: "المصادر",
     companyGroup: "الشركة",
@@ -303,7 +304,8 @@ export function BrandMark({ compact = false }: { compact?: boolean }) {
   );
 }
 
-export function ScanExperience() {
+export function ScanExperience({ paymentsEnabled }: { paymentsEnabled: boolean }) {
+  const signedIn = useAccountEntry();
   const [locale, setLocale] = useState<Locale>("en");
   const [url, setUrl] = useState("");
   const [status, setStatus] = useState<"idle" | "scanning" | "done">("idle");
@@ -681,16 +683,16 @@ export function ScanExperience() {
               {rtl ? "EN" : "العربية"}
             </Button>
             <a
-              href="/auth/google"
-              className="hidden text-sm font-bold text-slate-700 xl:block"
+              href={signedIn ? "/dashboard" : "/auth/google"}
+              className="hidden text-sm font-bold text-slate-700 lg:block"
             >
-              {t.signin}
+              {signedIn ? (rtl ? "لوحة التحكم" : "Dashboard") : t.signin}
             </a>
             <MobileSiteMenu
               items={navigation}
               menuLabel={t.menu}
-              ctaLabel={t.signin}
-              ctaHref="/auth/google"
+              ctaLabel={signedIn ? (rtl ? "لوحة التحكم" : "Dashboard") : t.signin}
+              ctaHref={signedIn ? "/dashboard" : "/auth/google"}
               direction={rtl ? "rtl" : "ltr"}
             />
           </div>
@@ -755,7 +757,7 @@ export function ScanExperience() {
                         />
                       )}
                     </Button>
-                    <PlansPreviewDialog locale={locale} />
+                    <PlansPreviewDialog locale={locale} paymentsEnabled={paymentsEnabled} />
                   </div>
                 </div>
                 <p className="px-3 pb-1 pt-3 text-center text-xs font-semibold text-slate-500">
@@ -1288,7 +1290,7 @@ export function ScanExperience() {
             </p>
             <nav className="mt-4 flex flex-col gap-3 text-sm font-semibold text-slate-500">
               <Link href="/dashboard">{t.overview}</Link>
-              <Link href="/report">{t.sampleReport}</Link>
+              {signedIn && <Link href="/report">{t.sampleReport}</Link>}
               <Link href="/fix-center">{t.fixCenter}</Link>
             </nav>
           </div>

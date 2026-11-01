@@ -64,9 +64,9 @@ const nav = [
     icon: CircleHelp,
   },
   {
-    href: "/pricing",
-    label: "Subscriptions & credits",
-    labelAr: "الاشتراكات والنقاط",
+    href: "/subscriptions",
+    label: "Subscriptions & billing",
+    labelAr: "الاشتراكات والفوترة",
     icon: CreditCard,
   },
   {
@@ -111,12 +111,12 @@ function Sidebar() {
       <div className="mt-auto rounded-2xl border border-white/10 bg-white/[.045] p-4">
         <p className="flex items-center gap-2 text-xs font-bold text-cyan-300">
           <Sparkles className="size-3.5" />
-          {ar ? "نسخة تجريبية خاصة" : "Private beta"}
+          {ar ? "تحليل ظهور مدعوم بالأدلة" : "Evidence-based AI visibility analysis"}
         </p>
         <p className="mt-2 text-xs leading-5 text-slate-400">
           {ar
-            ? "النتائج مبنية على الفحوص المكتملة. تحليل الأسماء والموضوعات يتطلب تفعيل المحرك."
-            : "Results reflect completed tests. Name and topic analysis requires engine activation."}
+            ? "تعرض النتائج الأدلة والقياسات المحفوظة من الفحوص المكتملة."
+            : "Results show stored evidence and measurements from completed tests."}
         </p>
       </div>
     </div>
@@ -128,7 +128,7 @@ export function AppShell({
   description,
   action,
   children,
-  workspaceLabel = "Private beta workspace",
+  workspaceLabel = "AI visibility workspace",
   siteLabel = "Run a live scan to create evidence",
   userInitial = "R",
 }: {

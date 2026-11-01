@@ -43,7 +43,7 @@ const copy = {
   },
 } as const;
 
-export function PricingContent() {
+export function PricingContent({ paymentsEnabled }: { paymentsEnabled: boolean }) {
   return <PublicShell pageMetadata={pageMetadata}>{(locale) => {
     const t = copy[locale];
     return <main>
@@ -57,6 +57,7 @@ export function PricingContent() {
         </div>
       </section>
       <section className="mx-auto max-w-[1400px] px-5 py-12 sm:px-8 sm:py-16">
+        {!paymentsEnabled && <p role="status" className="mb-6 rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm font-medium text-slate-700">{locale === "ar" ? "الدفع الإلكتروني غير متاح مؤقتًا." : "Online payments are temporarily unavailable."}</p>}
         <div className="grid items-stretch gap-5 sm:grid-cols-2 xl:grid-cols-5">
           {PLAN_CATALOG.map((plan) => {
             const highlighted = plan.id === "growth";
@@ -70,7 +71,7 @@ export function PricingContent() {
               <div className="mt-5"><strong className="inline-block text-4xl font-extrabold tracking-tight" dir="ltr">{plan.price.amount}</strong><p className={`mt-2 text-xs ${highlighted ? "text-slate-400" : "text-slate-500"}`}>{plan.price.cadence[locale]}</p></div>
               <p className={`mt-5 min-h-16 text-sm leading-7 ${highlighted ? "text-slate-300" : "text-slate-600"}`}>{plan.description[locale]}</p>
               <ul className="my-6 flex-1 space-y-4">{plan.features.map((feature) => <li key={feature.en} className="flex gap-2 text-sm leading-6"><Check className={`mt-1 size-4 shrink-0 ${highlighted ? "text-cyan-300" : "text-blue-600"}`} aria-hidden="true" /><span>{feature[locale]}</span></li>)}</ul>
-              <Button asChild className={`h-auto min-h-11 w-full whitespace-normal rounded-xl px-3 py-3 font-bold ${highlighted ? "bg-white text-[#07111f] hover:bg-slate-100" : "bg-blue-600 text-white hover:bg-blue-700"}`}><Link href={action.href}>{action.label}<ArrowRight className="size-4 shrink-0 rtl:rotate-180" /></Link></Button>
+              {plan.id !== "free" && !paymentsEnabled ? <Button disabled className="h-auto min-h-11 w-full rounded-xl px-3 py-3 font-bold">{locale === "ar" ? "الدفع غير متاح مؤقتًا" : "Payments temporarily unavailable"}</Button> : <Button asChild className={`h-auto min-h-11 w-full whitespace-normal rounded-xl px-3 py-3 font-bold ${highlighted ? "bg-white text-[#07111f] hover:bg-slate-100" : "bg-blue-600 text-white hover:bg-blue-700"}`}><Link href={action.href}>{action.label}<ArrowRight className="size-4 shrink-0 rtl:rotate-180" /></Link></Button>}
             </article>;
           })}
         </div>

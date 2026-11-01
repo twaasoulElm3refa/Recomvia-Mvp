@@ -52,9 +52,11 @@ const copy = {
 export function PlansPreviewDialog({
   locale,
   scanId,
+  paymentsEnabled,
 }: {
   locale: SiteLocale;
   scanId?: string;
+  paymentsEnabled: boolean;
 }) {
   const t = copy[locale];
   const billingLabel = {
@@ -93,6 +95,7 @@ export function PlansPreviewDialog({
             {t.description}
           </DialogDescription>
         </DialogHeader>
+        {!paymentsEnabled && <p role="status" className="rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm font-medium text-slate-700">{locale === "ar" ? "الدفع الإلكتروني غير متاح مؤقتًا." : "Online payments are temporarily unavailable."}</p>}
         <Tabs defaultValue="free" className="mt-2 gap-5">
           <TabsList className="h-auto w-full justify-start gap-1 overflow-x-auto rounded-xl bg-slate-100 p-1">
             {PLAN_CATALOG.map((plan) => (
@@ -172,7 +175,7 @@ export function PlansPreviewDialog({
                     </ul>
                   </div>
                 </div>
-                <Button
+                {plan.id !== "free" && !paymentsEnabled ? <Button disabled className="mt-5 h-12 w-full rounded-xl font-bold">{locale === "ar" ? "الدفع غير متاح مؤقتًا" : "Payments temporarily unavailable"}</Button> : <Button
                   asChild
                   className="mt-5 h-12 w-full rounded-xl bg-blue-600 font-bold hover:bg-blue-700"
                 >
@@ -183,7 +186,7 @@ export function PlansPreviewDialog({
                       aria-hidden="true"
                     />
                   </Link>
-                </Button>
+                </Button>}
               </TabsContent>
             );
           })}

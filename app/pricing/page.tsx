@@ -1,6 +1,9 @@
 import type { Metadata } from "next";
 import { SITE_URL } from "@/lib/articles";
 import { PricingContent } from "./pricing-content";
+import { isPayPalPaymentsEnabled } from "@/lib/paypal/availability";
+
+export const dynamic = "force-dynamic";
 
 export const metadata: Metadata = {
   title: { absolute: "Recomvia Pricing — Reports, Monitoring & Fix Credits" },
@@ -10,5 +13,5 @@ export const metadata: Metadata = {
 };
 
 export default function Pricing() {
-  return <PricingContent />;
+  return <PricingContent paymentsEnabled={isPayPalPaymentsEnabled()} />;
 }
