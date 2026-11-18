@@ -2,9 +2,9 @@ import type { Metadata } from "next";
 import { PolicyPage, type PolicyCopy } from "@/app/components/policy-page";
 import { SITE_URL } from "@/lib/articles";
 
-export const metadata: Metadata = { title: { absolute: "Recomvia Private Beta Terms" }, description: "Terms governing the Recomvia private beta.", alternates: { canonical: `${SITE_URL}/terms` } };
+export const metadata: Metadata = { title: { absolute: "Recomvia Private Beta Terms" }, description: "Terms governing the Recomvia private beta.", alternates: { canonical: `${SITE_URL}/terms`, languages: { "en": `${SITE_URL}/terms`, "ar": `${SITE_URL}/ar/terms` } } };
 
-const copy: Record<"en" | "ar", PolicyCopy> = {
+export const termsPolicyCopy: Record<"en" | "ar", PolicyCopy> = {
   en: {
     metadata: { title: "Recomvia Private Beta Terms", description: "Terms governing the Recomvia private beta." }, eyebrow: "Private beta", title: "Terms of Use", intro: "These terms govern the current evaluation release. The beta is not yet a paid production service.", effective: "Effective 21 September 2026 · Private beta",
     sections: [
@@ -29,4 +29,4 @@ const copy: Record<"en" | "ar", PolicyCopy> = {
   },
 };
 
-export default function TermsPage() { return <PolicyPage copy={copy} />; }
+export default function TermsPage() { return <PolicyPage copy={termsPolicyCopy} />; }
