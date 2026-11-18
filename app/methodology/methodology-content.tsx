@@ -50,8 +50,8 @@ const copy = {
   },
 } as const;
 
-export function MethodologyContent() {
-  return <PublicShell pageMetadata={pageMetadata}>{locale => {
+export function MethodologyContent({ initialLocale = "en" }: { initialLocale?: "en" | "ar" }) {
+  return <PublicShell pageMetadata={pageMetadata} initialLocale={initialLocale}>{locale => {
     const t = copy[locale];
     return <main>
       <section className="relative overflow-hidden border-b border-slate-200 bg-[#07111f] text-white"><div className="signal-grid absolute inset-0 opacity-20" /><div className="relative mx-auto max-w-[1000px] px-5 py-20 sm:px-8 sm:py-28"><p className="text-sm font-bold uppercase tracking-[.16em] text-cyan-300">{t.eyebrow}</p><h1 className="mt-4 max-w-4xl text-4xl font-extrabold tracking-[-.05em] sm:text-6xl">{t.title}</h1><p className="mt-6 max-w-3xl text-lg leading-8 text-slate-300">{t.intro}</p><div className="mt-8 flex flex-wrap gap-3"><Button asChild className="h-11 rounded-xl bg-white font-bold text-[#07111f]"><Link href="/">{t.run}<ArrowRight className="size-4 rtl:rotate-180" /></Link></Button><Button asChild variant="outline" className="h-11 rounded-xl border-white/20 bg-transparent text-white hover:bg-white/10 hover:text-white"><Link href="/report">{t.sample}</Link></Button></div></div></section>
