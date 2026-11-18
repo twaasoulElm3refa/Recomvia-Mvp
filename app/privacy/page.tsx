@@ -5,10 +5,10 @@ import { SITE_URL } from "@/lib/articles";
 export const metadata: Metadata = {
   title: { absolute: "Recomvia Privacy & Beta Data Notice" },
   description: "What Recomvia collects and why during the private beta.",
-  alternates: { canonical: `${SITE_URL}/privacy` },
+  alternates: { canonical: `${SITE_URL}/privacy`, languages: { "en": `${SITE_URL}/privacy`, "ar": `${SITE_URL}/ar/privacy` } },
 };
 
-const copy: Record<"en" | "ar", PolicyCopy> = {
+export const privacyPolicyCopy: Record<"en" | "ar", PolicyCopy> = {
   en: {
     metadata: {
       title: "Recomvia Privacy & Beta Data Notice",
@@ -135,5 +135,5 @@ const copy: Record<"en" | "ar", PolicyCopy> = {
 };
 
 export default function PrivacyPage() {
-  return <PolicyPage copy={copy} />;
+  return <PolicyPage copy={privacyPolicyCopy} />;
 }
