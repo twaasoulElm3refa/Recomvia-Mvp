@@ -76,4 +76,7 @@ test("Fix Center shows report-owned evidence, not fabricated brands or credit pr
   assert.match(ui, /selected.evidence/);
   assert.match(ui, /applicationEnabled: false/);
   assert.doesNotMatch(ui, /Acme|provisional credits|Illustrative confidence|const issues:/);
+  const report = source("app/report/report-content.tsx");
+  assert.match(report, /canUseFixCredits && fullScan\?\.readinessScore/);
+  assert.match(report, /\/fix-center\?scan=/);
 });

@@ -59,7 +59,8 @@ Working now:
 - Explainable findings and evidence report
 - User-owned dashboard and scan history
 - Product database foundation for subscriptions, fixes, credits, costs, audits, and support
-- Grounded FAQ/blog assistant with human ticket escalation
+- Read-only Fix Center review of real account-owned website findings, with evidence and source links; no execution or credits charged
+- Grounded FAQ/blog assistant with human ticket escalation and a database-enforced hourly ticket cap per email
 - Blog, FAQ, methodology, pricing, contact, privacy, terms, and billing-policy pages with Arabic counterparts, reciprocal language metadata, and a bilingual sitemap
 
 Not yet connected:
