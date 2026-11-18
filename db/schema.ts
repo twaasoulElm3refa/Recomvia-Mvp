@@ -437,6 +437,28 @@ export const fixes = sqliteTable(
   ],
 );
 
+
+/** Append-only snapshots. A newer proposal does not overwrite a prior one. */
+export const fixProposalVersions = sqliteTable(
+  "fix_proposal_versions",
+  {
+    id: text("id").primaryKey(),
+    fixId: text("fix_id").notNull().references(() => fixes.id),
+    organizationId: text("organization_id").notNull().references(() => organizations.id),
+    version: integer("version").notNull(),
+    scope: text("scope").notNull(),
+    proposedText: text("proposed_text").notNull(),
+    rationale: text("rationale").notNull(),
+    rollbackPlan: text("rollback_plan").notNull(),
+    authoredByUserId: text("authored_by_user_id").notNull().references(() => users.id),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    uniqueIndex("idx_fix_proposal_versions_fix_version").on(table.fixId, table.version),
+    index("idx_fix_proposal_versions_organization").on(table.organizationId, table.createdAt),
+  ],
+);
+
 export const creditLedger = sqliteTable(
   "credit_ledger",
   {
