@@ -1,4 +1,6 @@
-const DEFAULT_SITE_URL = "https://recomvia.recomvia.workers.dev";
+// Verified public URL of the existing ChatGPT Site. Standalone deployments
+// must override NEXT_PUBLIC_SITE_URL when built for their own host.
+const DEFAULT_SITE_URL = "https://recomvia-ai-visibility.omarghazi85.chatgpt.site";
 
 export function normalizedOrigin(value: string | undefined) {
   if (!value) return DEFAULT_SITE_URL;
