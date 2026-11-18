@@ -322,6 +322,8 @@ export function ScanExperience({ paymentsEnabled, initialLocale = "en" }: { paym
   const t = text[locale];
   const rtl = locale === "ar";
   const blogRoot = rtl ? "/ar/blog" : "/blog";
+  const localizedPages = new Set(["/pricing", "/contact", "/faq", "/methodology", "/privacy", "/terms", "/billing-policy"]);
+  const publicHref = (href: string) => rtl && localizedPages.has(href) ? `/ar${href}` : href;
   const domain = useMemo(
     () =>
       url
@@ -593,11 +595,11 @@ export function ScanExperience({ paymentsEnabled, initialLocale = "en" }: { paym
 
   const navigation: SiteNavItem[] = [
     { href: "/#product", label: t.product },
-    { href: "/pricing", label: t.subscriptions },
+    { href: publicHref("/pricing"), label: t.subscriptions },
     { href: blogRoot, label: t.blog },
-    { href: "/methodology", label: t.methodology },
-    { href: "/faq", label: t.faq },
-    { href: "/contact", label: t.contact },
+    { href: publicHref("/methodology"), label: t.methodology },
+    { href: publicHref("/faq"), label: t.faq },
+    { href: publicHref("/contact"), label: t.contact },
   ];
   const stats = [
     { value: "12", label: t.stats[0], icon: BookOpen },
@@ -1163,13 +1165,13 @@ export function ScanExperience({ paymentsEnabled, initialLocale = "en" }: { paym
                 icon: Globe2,
                 title: t.global,
                 description: t.globalText,
-                href: "/methodology",
+                href: publicHref("/methodology"),
               },
               {
                 icon: Sparkles,
                 title: t.action,
                 description: t.actionText,
-                href: "/pricing",
+                href: publicHref("/pricing"),
               },
             ].map(({ icon: Icon, title, description, href }) => (
               <Link
@@ -1195,7 +1197,7 @@ export function ScanExperience({ paymentsEnabled, initialLocale = "en" }: { paym
           <div className="mx-auto max-w-[1240px] px-5 py-16 sm:px-8">
             <h2 className="text-3xl font-extrabold">{locale === "ar" ? "باقة لكل خطوة في رحلتك" : "A plan for every step"}</h2>
             <p className="mt-4 text-sm leading-7 text-slate-600">{locale === "ar" ? "ابدأ بالفحص المجاني، وافتح التقرير المبدئي، أو اختر باقة مدفوعة لتحليل أعمق ومتابعة دورية." : "Start free, unlock an initial report, or choose a paid plan for deeper analysis and recurring monitoring."}</p>
-            <div className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-5">{PLAN_CATALOG.map((plan) => <Link key={plan.id} href={`/pricing#${plan.id}`} className="rounded-2xl border border-slate-200 bg-white p-5 transition hover:border-blue-500">
+            <div className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-5">{PLAN_CATALOG.map((plan) => <Link key={plan.id} href={`${publicHref("/pricing")}#${plan.id}`} className="rounded-2xl border border-slate-200 bg-white p-5 transition hover:border-blue-500">
               <h3 className="font-extrabold">{plan.name[locale]}</h3>
               <strong className="mt-4 inline-block text-3xl tracking-tight" dir="ltr">{plan.price.amount}</strong>
               <p className="mt-1 text-xs text-slate-500">{plan.price.cadence[locale]}</p>
@@ -1272,7 +1274,7 @@ export function ScanExperience({ paymentsEnabled, initialLocale = "en" }: { paym
               asChild
               className="h-12 shrink-0 rounded-xl bg-white px-6 font-bold text-[#07111f] hover:bg-cyan-50"
             >
-              <Link href="/contact">
+              <Link href={publicHref("/contact")}>
                 {t.contactCta}
                 <ArrowRight className={`size-4 ${rtl ? "rotate-180" : ""}`} />
               </Link>
@@ -1305,8 +1307,8 @@ export function ScanExperience({ paymentsEnabled, initialLocale = "en" }: { paym
             </p>
             <nav className="mt-4 flex flex-col gap-3 text-sm font-semibold text-slate-500">
               <Link href={blogRoot}>{t.blog}</Link>
-              <Link href="/methodology">{t.methodology}</Link>
-              <Link href="/faq">{t.faq}</Link>
+              <Link href={publicHref("/methodology")}>{t.methodology}</Link>
+              <Link href={publicHref("/faq")}>{t.faq}</Link>
             </nav>
           </div>
           <div>
@@ -1314,11 +1316,11 @@ export function ScanExperience({ paymentsEnabled, initialLocale = "en" }: { paym
               {t.companyGroup}
             </p>
             <nav className="mt-4 flex flex-col gap-3 text-sm font-semibold text-slate-500">
-              <Link href="/pricing">{t.subscriptions}</Link>
-              <Link href="/contact">{t.contact}</Link>
-              <Link href="/privacy">{t.privacy}</Link>
-              <Link href="/terms">{t.terms}</Link>
-              <Link href="/billing-policy">{t.billing}</Link>
+              <Link href={publicHref("/pricing")}>{t.subscriptions}</Link>
+              <Link href={publicHref("/contact")}>{t.contact}</Link>
+              <Link href={publicHref("/privacy")}>{t.privacy}</Link>
+              <Link href={publicHref("/terms")}>{t.terms}</Link>
+              <Link href={publicHref("/billing-policy")}>{t.billing}</Link>
             </nav>
           </div>
         </div>
