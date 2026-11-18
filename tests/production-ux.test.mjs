@@ -66,3 +66,14 @@ test("workspace navigation and public report labels are accurate", () => {
     assert.match(text, /\/auth\/start/);
   }
 });
+
+test("Fix Center shows report-owned evidence, not fabricated brands or credit prices", () => {
+  const page = source("app/fix-center/page.tsx");
+  const ui = source("app/fix-center/fix-center-experience.tsx");
+  assert.match(page, /getLatestWebsiteReportForUser/);
+  assert.match(page, /canViewFullReport/);
+  assert.match(page, /finding.status !== "pass"/);
+  assert.match(ui, /selected.evidence/);
+  assert.match(ui, /applicationEnabled: false/);
+  assert.doesNotMatch(ui, /Acme|provisional credits|Illustrative confidence|const issues:/);
+});

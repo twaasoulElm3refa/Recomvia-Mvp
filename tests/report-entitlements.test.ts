@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { GET } from "../app/api/scans/route";
-import { createRunningScan, getReportForUser } from "../db/product";
+import { createRunningScan, getLatestWebsiteReportForUser, getReportForUser } from "../db/product";
 import { OpenRouterEngineAdapter } from "../lib/ai-engines/openrouter-engine-adapter";
 import { PLAN_CATALOG, planById } from "../lib/plans";
 import { REPORT_PAYWALL_COPY } from "../lib/report-copy";
@@ -172,6 +172,24 @@ test("active Essential entitlement opens the full stored report", async () => {
     assert.equal(report.scan.engineRuns[0].analysis.evidence.length, 1);
     assert.equal(report.scan.findings[0].evidence, "secret technical evidence");
   }
+  db.close();
+});
+
+
+test("Fix Center reads only owned, completed website audit findings", async () => {
+  const db = createFixture(false, false);
+  seedReport(db);
+  addSubscription(db);
+  const own = await getLatestWebsiteReportForUser(userA.userId);
+  assert.ok(own && own.entitlement.canViewFullReport);
+  assert.ok(own && "findings" in own.scan);
+  if (own && "findings" in own.scan) {
+    assert.equal(own.scan.id, "scan-a");
+    assert.equal(own.scan.findings[0].evidence, "secret technical evidence");
+  }
+  assert.equal(await getLatestWebsiteReportForUser(userB.userId), null);
+  db.exec("UPDATE scans SET readiness_score = NULL WHERE id = 'scan-a'");
+  assert.equal(await getLatestWebsiteReportForUser(userA.userId), null);
   db.close();
 });
 

@@ -1264,6 +1264,25 @@ export async function getLatestReportForUser(
   return getReportForUser(userId, row.id);
 }
 
+// Reuse an owned, completed website audit for the Fix Center. Topic and
+// identity-only analyses have no technical findings to review here.
+export async function getLatestWebsiteReportForUser(
+  userId: string,
+): Promise<ReportView | null> {
+  const row = await database()
+    .prepare(
+      `${reportSummarySelect()}
+      JOIN organization_members m ON m.organization_id = s.organization_id
+      WHERE m.user_id = ? AND s.status = 'completed'
+        AND s.readiness_score IS NOT NULL
+      ORDER BY s.created_at DESC LIMIT 1
+    `,
+    )
+    .bind(userId)
+    .first<ReportSummaryRow>();
+  return row ? getReportForUser(userId, row.id) : null;
+}
+
 export async function getLatestScanSummaryForUser(userId: string) {
   const row = await database()
     .prepare(
