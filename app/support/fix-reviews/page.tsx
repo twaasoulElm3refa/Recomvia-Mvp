@@ -6,6 +6,7 @@ import { AppShell } from "@/app/components/app-shell";
 import { NavigationLink as Link } from "@/app/components/navigation-link";
 import { listPendingFixReviews } from "@/db/fix-review";
 import { safeSourceUrl } from "@/lib/analysis-target";
+import { FixProposalForm } from "./proposal-form";
 
 export const dynamic = "force-dynamic";
 export const runtime = "edge";
@@ -25,14 +26,14 @@ export default async function FixReviewInboxPage() {
       description="Private staff review of customer-requested findings. No approved change, credit charge or external website modification is available on this screen."
     >
       <div className="mb-6 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm leading-7 text-amber-950">
-        <strong>Read-only · للقراءة فقط.</strong> Review requests contain stored evidence only.
-        An implementation proposal must be separately scoped, previewed, authorized, versioned and reversible before any execution.
+        <strong>Drafting only · إعداد المقترحات فقط.</strong> Staff can save a versioned proposal and rollback plan.
+        No draft authorizes implementation, consumes credits or modifies a customer website.
       </div>
       <Link href="/support/inbox" className="mb-6 inline-flex text-sm font-bold text-blue-700 underline">
         Human Support Inbox · صندوق الدعم
       </Link>
       <h2 className="mb-4 text-xl font-extrabold">
-        {requests.length} pending review request(s) · طلبات قيد المراجعة
+        {requests.length} review request(s) · طلبات المراجعة
       </h2>
       {requests.length === 0 ? (
         <p className="rounded-2xl border border-slate-200 bg-white p-7 text-slate-600">
@@ -61,6 +62,13 @@ export default async function FixReviewInboxPage() {
                     Original source · المصدر الأصلي
                   </a>
                 )}
+                <p className="mt-3 text-xs font-bold text-slate-500">{item.status} · Version {item.proposalVersion ?? 0}</p>
+                {item.proposedText && (
+                  <p className="mt-3 whitespace-pre-wrap rounded-xl border border-blue-100 bg-blue-50 p-4 text-sm leading-7 text-blue-900" dir="auto">
+                    {item.proposedText}
+                  </p>
+                )}
+                <FixProposalForm fixId={item.id} currentVersion={item.proposalVersion} />
               </article>
             );
           })}

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { createFixture, state, userA, userB } from "./target-runtime-fixture";
 import { POST as requestReview } from "../app/api/fix-reviews/route";
+import { POST as saveProposal } from "../app/api/fix-proposals/route";
 import { listFixReviewRequests, listPendingFixReviews } from "../db/fix-review";
 
 type Fixture = ReturnType<typeof createFixture>;
@@ -119,4 +120,94 @@ test("review endpoint rejects cross-origin, malformed or anonymous submissions",
   assert.equal((await requestReview(request(payload))).status, 401);
   assert.equal(db.prepare("SELECT COUNT(*) AS n FROM fixes").get()?.n, 0);
   db.close();
+});
+
+function proposalRequest(body: unknown, origin = "https://recomvia.test") {
+  return new Request("https://recomvia.test/api/fix-proposals", {
+    method: "POST", headers: { "Content-Type": "application/json", Origin: origin },
+    body: JSON.stringify(body),
+  });
+}
+
+test("staff proposal versions are immutable, account-scoped and never apply changes or credits", async () => {
+  const db = createFixture(false, false);
+  seed(db);
+  const reviewResponse = await requestReview(request({
+    scanId: "review-scan-a", findingId: "review-finding-a",
+  }));
+  assert.equal(reviewResponse.status, 201);
+  const staff = {
+    userId: "staff-recomvia-review",
+    email: "staff@example.test", displayName: "Staff", fullName: "Review Staff",
+  };
+  state.env.RECOMVIA_ADMIN_USER_ID = staff.userId;
+  state.user = staff;
+  try {
+    const firstDraft = {
+      fixId: "review_review-finding-a",
+      scope: "Meta description on the submitted public page",
+      proposedText: "Draft an accurate, concise description for the existing service page.",
+      rationale: "The stored finding indicates the current description lacks useful detail.",
+      rollbackPlan: "Restore the confirmed original metadata from the verified backup.",
+    };
+    const firstResponse = await saveProposal(proposalRequest(firstDraft));
+    assert.equal(firstResponse.status, 201);
+    const firstBody = await firstResponse.json() as { proposal: { id: string; version: number }; applied: boolean; approved: boolean; creditsCharged: number };
+    assert.deepEqual([firstBody.proposal.version, firstBody.applied, firstBody.approved, firstBody.creditsCharged], [1, false, false, 0]);
+
+    const secondResponse = await saveProposal(proposalRequest({
+      ...firstDraft, proposedText: "Revised draft that remains only a suggestion until reviewed.",
+    }));
+    assert.equal(secondResponse.status, 201);
+    const secondBody = await secondResponse.json() as { proposal: { version: number } };
+    assert.equal(secondBody.proposal.version, 2);
+
+    state.user = userA;
+    const visible = await listFixReviewRequests(userA.userId, "review-scan-a");
+    assert.equal(visible.length, 1);
+    assert.equal(visible[0].proposalVersion, 2);
+    assert.match(visible[0].proposedText || "", /Revised draft/);
+    assert.match(visible[0].rollbackPlan || "", /Restore the confirmed original/);
+    const otherUser = await listFixReviewRequests(userB.userId, "review-scan-a");
+    assert.equal(otherUser.length, 0);
+
+    const versions = db.prepare(
+      "SELECT version, proposed_text FROM fix_proposal_versions ORDER BY version"
+    ).all() as Array<{ version: number; proposed_text: string }>;
+    assert.deepEqual(versions.map((item) => item.version), [1, 2]);
+    assert.match(versions[0].proposed_text, /accurate, concise/);
+    assert.match(versions[1].proposed_text, /Revised draft/);
+    assert.equal(db.prepare("SELECT status FROM fixes WHERE id = ?").get(firstDraft.fixId)?.status, "proposal_ready");
+    assert.equal(db.prepare("SELECT COUNT(*) AS n FROM credit_ledger").get()?.n, 0);
+    assert.equal(db.prepare("SELECT COUNT(*) AS n FROM audit_logs").get()?.n, 3);
+    assert.equal(db.prepare("SELECT approved_at FROM fixes WHERE id = ?").get(firstDraft.fixId)?.approved_at, null);
+  } finally {
+    delete state.env.RECOMVIA_ADMIN_USER_ID;
+    db.close();
+  }
+});
+
+test("staff proposal endpoint enforces admin identity, same-origin and input bounds", async () => {
+  const db = createFixture(false, false);
+  seed(db);
+  const data = {
+    fixId: "review_review-finding-a",
+    scope: "Meta description on public page",
+    proposedText: "A non-executable draft for improvement.",
+    rationale: "The real finding is incomplete.",
+    rollbackPlan: "Restore the saved original page revision.",
+  };
+  state.env.RECOMVIA_ADMIN_USER_ID = "staff-recomvia-review";
+  try {
+    assert.equal((await saveProposal(proposalRequest(data))).status, 404);
+    state.user = { userId: "staff-recomvia-review", email: "staff@example.test", displayName: "Staff", fullName: "Staff" };
+    assert.equal((await saveProposal(proposalRequest(data, "https://foreign.example"))).status, 403);
+    assert.equal((await saveProposal(proposalRequest({ ...data, rollbackPlan: "no" }))).status, 400);
+    assert.equal((await saveProposal(proposalRequest({ ...data, fixId: "review_does-not-exist" }))).status, 404);
+    assert.equal(db.prepare("SELECT COUNT(*) AS n FROM fix_proposal_versions").get()?.n, 0);
+    assert.equal(db.prepare("SELECT COUNT(*) AS n FROM credit_ledger").get()?.n, 0);
+  } finally {
+    delete state.env.RECOMVIA_ADMIN_USER_ID;
+    db.close();
+  }
 });

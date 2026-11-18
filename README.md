@@ -61,6 +61,7 @@ Working now:
 - Product database foundation for subscriptions, fixes, credits, costs, audits, and support
 - Read-only Fix Center review of real account-owned website findings, with evidence and source links; no execution or credits charged
 - Optional, account-owned requests for **human review** of findings, saved idempotently in existing `fixes` and `audit_logs` tables without consuming credits; admin-only private queue at `/support/fix-reviews`
+- Append-only, staff-authored proposal versions with stated scope, rationale and rollback instructions; customers can preview their latest draft without approval, execution or credit consumption
 - Grounded FAQ/blog assistant with human ticket escalation and a database-enforced hourly ticket cap per email
 - Blog, FAQ, methodology, pricing, contact, privacy, terms, and billing-policy pages with Arabic counterparts, reciprocal language metadata, and a bilingual sitemap
 

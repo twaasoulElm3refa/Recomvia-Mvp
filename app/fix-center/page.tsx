@@ -42,6 +42,14 @@ export default async function FixCenterPage({
 
   return (
     <FixCenterExperience
+      reviewProposals={requestedReviews.filter((item) => item.proposalVersion !== null).map((item) => ({
+        findingId: item.findingId,
+        proposalVersion: item.proposalVersion!,
+        scope: item.scope || "",
+        proposedText: item.proposedText || "",
+        rationale: item.rationale || "",
+        rollbackPlan: item.rollbackPlan || "",
+      }))}
       requestedFindingIds={requestedReviews.map((item) => item.findingId)}
       scanId={scan?.id ?? null}
       targetName={scan?.target?.name || scan?.displayName || null}
