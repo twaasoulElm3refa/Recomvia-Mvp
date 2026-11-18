@@ -58,3 +58,18 @@ test("sitemap includes a matching English and Arabic path for every blog article
   }
   assert.equal(new Set(urls).size, urls.length);
 });
+
+test("every public Arabic page has its own route and reciprocal metadata", () => {
+  const pages = ["", "pricing", "blog", "contact", "faq", "methodology", "privacy", "terms", "billing-policy"];
+  for (const page of pages) {
+    const arabic = source(`app/ar/${page ? page + "/" : ""}page.tsx`);
+    assert.match(arabic, /canonical:/, page);
+    assert.match(arabic, /languages:/, page);
+    assert.match(arabic, /"ar":/, page);
+    assert.match(arabic, /"en":/, page);
+  }
+  const map = source("app/sitemap.ts");
+  for (const page of pages) assert.ok(map.includes(page ? `"/ar/${page}"` : '"/ar"'), page);
+  assert.match(source("app/page.tsx"), /languages:/);
+  assert.match(source("app/faq/page.tsx"), /FaqPageContent/);
+});
