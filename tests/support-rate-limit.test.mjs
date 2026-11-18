@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { test } from "node:test";
+import { after, test } from "node:test";
 import { DatabaseSync } from "node:sqlite";
 import ts from "typescript";
 
@@ -72,4 +72,4 @@ test("older support messages do not permanently consume the hourly quota", async
   await createSupportTicket(input("fresh-after-expiration"));
   assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM support_tickets WHERE requester_email = 'sender@example.org'").get().n, 6);
 });
-sqlite.close();
+after(() => sqlite.close());
