@@ -43,7 +43,11 @@ async function hash(value: string) {
 export async function POST(request: Request) {
   let payload: TicketRequest;
   try {
-    payload = (await request.json()) as TicketRequest;
+    const value: unknown = await request.json();
+    if (value === null || typeof value !== "object" || Array.isArray(value)) {
+      return Response.json({ error: "Invalid request body." }, { status: 400 });
+    }
+    payload = value as TicketRequest;
   } catch {
     return Response.json({ error: "Invalid request body." }, { status: 400 });
   }
