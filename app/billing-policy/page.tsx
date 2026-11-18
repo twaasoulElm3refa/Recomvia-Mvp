@@ -2,9 +2,9 @@ import type { Metadata } from "next";
 import { PolicyPage, type PolicyCopy } from "@/app/components/policy-page";
 import { SITE_URL } from "@/lib/articles";
 
-export const metadata: Metadata = { title: { absolute: "Recomvia Beta Billing Policy" }, description: "Current payment, subscription, cancellation, refund, and Fix Credit status for the Recomvia private beta.", alternates: { canonical: `${SITE_URL}/billing-policy` } };
+export const metadata: Metadata = { title: { absolute: "Recomvia Beta Billing Policy" }, description: "Current payment, subscription, cancellation, refund, and Fix Credit status for the Recomvia private beta.", alternates: { canonical: `${SITE_URL}/billing-policy`, languages: { "en": `${SITE_URL}/billing-policy`, "ar": `${SITE_URL}/ar/billing-policy` } } };
 
-const copy: Record<"en" | "ar", PolicyCopy> = {
+export const billingPolicyCopy: Record<"en" | "ar", PolicyCopy> = {
   en: {
     metadata: { title: "Recomvia Beta Billing Policy", description: "Current payment, subscription, cancellation, refund, and Fix Credit status for the Recomvia private beta." }, eyebrow: "Commercial transparency", title: "Billing, Cancellation & Credits", intro: "Online checkout is disabled until payment configuration and verification are complete. Fix Credits are not yet sold.", effective: "Effective 15 October 2026 · Private beta",
     sections: [
@@ -25,4 +25,4 @@ const copy: Record<"en" | "ar", PolicyCopy> = {
   },
 };
 
-export default function BillingPolicyPage() { return <PolicyPage copy={copy} />; }
+export default function BillingPolicyPage() { return <PolicyPage copy={billingPolicyCopy} />; }
