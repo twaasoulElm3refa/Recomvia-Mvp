@@ -10,10 +10,12 @@ const compiled = ts.transpileModule(source, {
   fileName: "app/api/support/tickets/route.ts",
 }).outputText;
 const created = [];
+class MockSupportRateLimitError extends Error {}
+let simulateRateLimit = false;
 const compiledModule = { exports: {} };
 new Function("require", "module", "exports", compiled)((name) => {
   if (name === "@/app/auth") return { getAuthenticatedUser: async () => null };
-  if (name === "@/db/support") return { createSupportTicket: async (ticket) => { created.push(ticket); } };
+  if (name === "@/db/support") return { SupportRateLimitError: MockSupportRateLimitError, createSupportTicket: async (ticket) => { if (simulateRateLimit) throw new MockSupportRateLimitError(); created.push(ticket); } };
   throw new Error("Unexpected dependency: " + name);
 }, compiledModule, compiledModule.exports);
 const { POST } = compiledModule.exports;
@@ -51,4 +53,21 @@ test("support creates one trackable ticket for a valid request", async () => {
   assert.equal(created[0].requesterEmail, "sender@example.org");
   assert.equal(created[0].accessKeyHash.length, 64);
   assert.equal(created[0].question, valid.question);
+});
+
+test("support responds 429 without exposing database errors when hourly limit is reached", async () => {
+  simulateRateLimit = true;
+  try {
+    const response = await POST(request(JSON.stringify({
+      name: "Test Sender", email: "sender@example.org", question: "Please help with this report",
+    })));
+    assert.equal(response.status, 429);
+    assert.equal(response.headers.get("Retry-After"), "3600");
+    assert.deepEqual(await response.json(), {
+      error: "Too many requests. Please try again later.", code: "rate_limited",
+    });
+    assert.equal(created.length, 1);
+  } finally {
+    simulateRateLimit = false;
+  }
 });
