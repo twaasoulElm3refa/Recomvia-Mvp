@@ -10,13 +10,13 @@ const compiled = ts.transpileModule(source, {
   fileName: "app/api/support/tickets/route.ts",
 }).outputText;
 const created = [];
-const module = { exports: {} };
+const compiledModule = { exports: {} };
 new Function("require", "module", "exports", compiled)((name) => {
   if (name === "@/app/auth") return { getAuthenticatedUser: async () => null };
   if (name === "@/db/support") return { createSupportTicket: async (ticket) => { created.push(ticket); } };
   throw new Error("Unexpected dependency: " + name);
-}, module, module.exports);
-const { POST } = module.exports;
+}, compiledModule, compiledModule.exports);
+const { POST } = compiledModule.exports;
 const request = (body) => new Request("https://recomvia.test/api/support/tickets", {
   method: "POST", headers: { "content-type": "application/json" }, body,
 });
