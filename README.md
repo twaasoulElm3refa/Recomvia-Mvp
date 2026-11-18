@@ -60,6 +60,7 @@ Working now:
 - User-owned dashboard and scan history
 - Product database foundation for subscriptions, fixes, credits, costs, audits, and support
 - Read-only Fix Center review of real account-owned website findings, with evidence and source links; no execution or credits charged
+- Optional, account-owned requests for **human review** of findings, saved idempotently in existing `fixes` and `audit_logs` tables without consuming credits; admin-only private queue at `/support/fix-reviews`
 - Grounded FAQ/blog assistant with human ticket escalation and a database-enforced hourly ticket cap per email
 - Blog, FAQ, methodology, pricing, contact, privacy, terms, and billing-policy pages with Arabic counterparts, reciprocal language metadata, and a bilingual sitemap
 

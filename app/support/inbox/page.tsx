@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { env } from "cloudflare:workers";
 import { notFound } from "next/navigation";
 import { AppShell } from "@/app/components/app-shell";
+import { NavigationLink as Link } from "@/app/components/navigation-link";
 import { requireAuthenticatedUser } from "@/app/auth";
 import { listSupportTickets } from "@/db/support";
 import { SupportInbox } from "./support-inbox";
@@ -18,5 +19,5 @@ export default async function SupportInboxPage() {
   const user = await requireAuthenticatedUser();
   if (!env.RECOMVIA_ADMIN_USER_ID || user.userId !== env.RECOMVIA_ADMIN_USER_ID) notFound();
   const tickets = await listSupportTickets();
-  return <AppShell title="Human support inbox" description="Questions the grounded assistant could not answer. Review the original question and publish a reply that the visitor can retrieve privately."><SupportInbox initialTickets={tickets} /></AppShell>;
+  return <AppShell title="Human support inbox" description="Questions the grounded assistant could not answer. Review the original question and publish a reply that the visitor can retrieve privately."><><Link href="/support/fix-reviews" className="mb-6 inline-block text-sm font-bold text-blue-700 underline">Fix Review Queue · طلبات مراجعة الإصلاح</Link><SupportInbox initialTickets={tickets} /></></AppShell>;
 }

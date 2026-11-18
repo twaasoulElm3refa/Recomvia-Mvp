@@ -15,6 +15,7 @@ export default function robots(): MetadataRoute.Robots {
         "/report",
         "/fix-center",
         "/support/inbox",
+        "/support/fix-reviews",
       ],
     }],
     sitemap: `${SITE_URL}/sitemap.xml`,

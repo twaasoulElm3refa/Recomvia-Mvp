@@ -25,6 +25,7 @@ type Props = {
   targetName: string | null;
   hasWebsiteAudit: boolean;
   findings: Finding[];
+  requestedFindingIds: string[];
 };
 
 const severityOrder: Record<Finding["severity"], number> = {
@@ -43,6 +44,9 @@ const copy = {
     noEvidence: "No evidence excerpt was stored for this finding.", noSource: "No public source URL was recorded.",
     status: "Observation", noCharge: "Pricing not yet available", noChargeNote: "Fix Credit prices and application workflows are not active. The report contains observations, not approved before-and-after edits.",
     contact: "Ask about Fix Credits", notFound: "No matching findings in this category.",
+    reviewRequest: "Request human review", reviewRequested: "Review requested", reviewPending: "Sending request…",
+    reviewError: "Could not save this review request. Please try again.",
+    reviewNote: "A request only records this finding for human review; it does not authorize implementation or charge credits.",
   },
   ar: {
     title: "مركز الإصلاح", description: "راجع الملاحظات الحقيقية من فحص موقعك المحفوظ قبل اقتراح أي تغيير.",
@@ -55,14 +59,20 @@ const copy = {
     noEvidence: "لم يُحفظ مقتطف دليل لهذه الملاحظة.", noSource: "لم يُحفظ رابط مصدر عام لهذه الملاحظة.",
     status: "الملاحظة", noCharge: "الأسعار غير مفعّلة", noChargeNote: "لم تُفتح أسعار نقاط الإصلاح أو آلية التنفيذ بعد. يعرض التقرير ملاحظات مرصودة لا تعديلات قبل وبعد معتمدة.",
     contact: "استفسر عن نقاط الإصلاح", notFound: "لا توجد ملاحظات مطابقة لهذا التصنيف.",
+    reviewRequest: "اطلب مراجعة بشرية", reviewRequested: "طُلِبت المراجعة", reviewPending: "جارٍ إرسال الطلب…",
+    reviewError: "تعذر حفظ طلب المراجعة، حاول مرة أخرى.",
+    reviewNote: "يسجل الطلب الملاحظة للمراجعة البشرية فقط، ولا يسمح بتنفيذ التعديل أو خصم النقاط.",
   },
 } as const;
 
-export function FixCenterExperience({ scanId, targetName, hasWebsiteAudit, findings }: Props) {
+export function FixCenterExperience({ scanId, targetName, hasWebsiteAudit, findings, requestedFindingIds }: Props) {
   const ar = useSiteLocale() === "ar";
   const t = copy[ar ? "ar" : "en"];
   const [filter, setFilter] = useState<Filter>("all");
   const [selected, setSelected] = useState<Finding | null>(null);
+  const [requested, setRequested] = useState<string[]>(requestedFindingIds);
+  const [requesting, setRequesting] = useState(false);
+  const [requestError, setRequestError] = useState("");
   const unresolved = useMemo(
     () => findings.filter((finding) => finding.status !== "pass")
       .sort((a, b) => severityOrder[a.severity] - severityOrder[b.severity]),
@@ -112,6 +122,29 @@ export function FixCenterExperience({ scanId, targetName, hasWebsiteAudit, findi
     Promise.resolve(registration).catch(() => undefined);
     return () => lifecycle.abort();
   }, [openEvidence, unresolved]);
+
+  async function sendReviewRequest() {
+    if (!scanId || !selected || requesting || requested.includes(selected.id)) return;
+    setRequesting(true);
+    setRequestError("");
+    try {
+      const response = await fetch("/api/fix-reviews", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ scanId, findingId: selected.id }),
+      });
+      if (!response.ok) throw new Error("Review request failed");
+      const result: { request?: { findingId?: string }; executionEnabled?: boolean; creditsCharged?: number } =
+        await response.json();
+      if (result.request?.findingId !== selected.id || result.executionEnabled !== false ||
+          result.creditsCharged !== 0) throw new Error("Invalid review confirmation");
+      setRequested((current) => current.includes(selected.id) ? current : [...current, selected.id]);
+    } catch {
+      setRequestError(t.reviewError);
+    } finally {
+      setRequesting(false);
+    }
+  }
 
   const reportHref = scanId ? `/report?scan=${encodeURIComponent(scanId)}` : "/dashboard";
   const source = selected ? safeSourceUrl(selected.sourceUrl) : null;
@@ -177,6 +210,7 @@ export function FixCenterExperience({ scanId, targetName, hasWebsiteAudit, findi
                           <div className="flex flex-wrap items-center gap-2">
                             <h3 className="font-extrabold" dir="auto">{item.title}</h3>
                             <StatusPill tone={tone(item)}>{severity(item)}</StatusPill>
+                            {requested.includes(item.id) && <StatusPill tone="good">{t.reviewRequested}</StatusPill>}
                           </div>
                           <p className="mt-2 line-clamp-2 text-sm leading-6 text-slate-600" dir="auto">{item.explanation}</p>
                           <p className="mt-3 text-xs font-semibold text-slate-500">{item.category}</p>
@@ -221,8 +255,14 @@ export function FixCenterExperience({ scanId, targetName, hasWebsiteAudit, findi
                 <h3 className="text-sm font-extrabold">{t.source}</h3>
                 {source ? <a href={source} target="_blank" rel="noopener noreferrer" className="mt-2 inline-flex max-w-full items-center gap-2 break-all text-sm font-semibold text-blue-700 underline">{source}<ExternalLink className="size-4 shrink-0" /></a> : <p className="mt-2 text-sm text-slate-500">{t.noSource}</p>}
               </section>
+              <p className="text-xs leading-6 text-slate-500">{t.reviewNote}</p>
+              {requestError && <p role="alert" className="text-sm font-semibold text-red-700">{requestError}</p>}
               <DialogFooter>
-                <Button asChild className="rounded-xl bg-blue-600"><Link href={reportHref}>{t.report}<ArrowRight className="size-4" /></Link></Button>
+                <Button type="button" disabled={requesting || requested.includes(selected.id)}
+                  className="rounded-xl bg-blue-600" onClick={() => void sendReviewRequest()}>
+                  {requested.includes(selected.id) ? t.reviewRequested : requesting ? t.reviewPending : t.reviewRequest}
+                </Button>
+                <Button asChild variant="outline" className="rounded-xl"><Link href={reportHref}>{t.report}<ArrowRight className="size-4" /></Link></Button>
               </DialogFooter>
             </>
           )}
