@@ -12,6 +12,8 @@ export type FixReviewRequest = {
   proposedText: string | null;
   rationale: string | null;
   rollbackPlan: string | null;
+  decision: string | null;
+  decisionComment: string | null;
 };
 
 /** Only returns requests for a scan owned by the logged-in account. */
@@ -20,7 +22,8 @@ export async function listFixReviewRequests(userId: string, scanId: string): Pro
     SELECT f.id, f.finding_id AS findingId, f.status, f.created_at AS createdAt,
            proposal.id AS proposalId, proposal.version AS proposalVersion,
            proposal.scope, proposal.proposed_text AS proposedText,
-           proposal.rationale, proposal.rollback_plan AS rollbackPlan
+           proposal.rationale, proposal.rollback_plan AS rollbackPlan,
+           decision.decision, decision.comment AS decisionComment
     FROM fixes f
     JOIN scans s ON s.id = f.scan_id AND s.organization_id = f.organization_id
     JOIN organization_members m ON m.organization_id = s.organization_id
@@ -30,6 +33,7 @@ export async function listFixReviewRequests(userId: string, scanId: string): Pro
         WHERE version.fix_id = f.id AND version.organization_id = f.organization_id
         ORDER BY version.version DESC LIMIT 1
       )
+    LEFT JOIN fix_proposal_decisions decision ON decision.proposal_id = proposal.id
     WHERE s.id = ? AND m.user_id = ? AND f.kind = 'finding_review'
     ORDER BY f.created_at DESC
     LIMIT 100
@@ -131,7 +135,7 @@ export async function listPendingFixReviews(): Promise<Array<{
     JOIN sites site ON site.id = f.site_id AND site.organization_id = f.organization_id
     JOIN scans scan ON scan.id = f.scan_id AND scan.organization_id = f.organization_id
     JOIN scan_findings finding ON finding.id = f.finding_id AND finding.scan_id = scan.id
-    WHERE f.kind = 'finding_review' AND f.status IN ('review_requested', 'proposal_ready')
+    WHERE f.kind = 'finding_review' AND f.status IN ('review_requested', 'proposal_ready', 'proposal_reviewed', 'changes_requested')
     ORDER BY f.created_at DESC
     LIMIT 100
   `).all<{
@@ -185,7 +189,7 @@ export async function createFixProposalVersion(
         ?, ?, ?, ?, ?
       FROM fixes fix
       WHERE fix.id = ? AND fix.kind = 'finding_review'
-        AND fix.status IN ('review_requested','proposal_ready')
+        AND fix.status IN ('review_requested','proposal_ready','proposal_reviewed','changes_requested')
     `).bind(
       id, draft.scope, draft.proposedText, draft.rationale,
       draft.rollbackPlan, authorUserId, fixId,
@@ -224,4 +228,94 @@ export async function createFixProposalVersion(
   }>();
   if (!proposal) throw new FixProposalNotAllowed();
   return proposal;
+}
+
+export type ProposalDecision = "accepted_for_planning" | "changes_requested";
+
+export class FixProposalDecisionConflict extends Error {
+  constructor() { super("This draft is no longer available for a decision."); }
+}
+
+/**
+ * An authenticated member can record one decision per immutable proposal.
+ * Acceptance is for review/planning ONLY, never permission to apply changes.
+ */
+export async function recordFixProposalDecision(
+  userId: string,
+  scanId: string,
+  proposalId: string,
+  decision: ProposalDecision,
+  comment: string,
+) {
+  const report = await getReportForUser(userId, scanId);
+  if (!report || !report.entitlement.canUseFixCredits || !report.entitlement.canViewFullReport ||
+      !("findings" in report.scan) || report.scan.status !== "completed" ||
+      report.scan.readinessScore === null || !report.scan.siteId) {
+    throw new FixReviewNotAllowed();
+  }
+  const id = `decision_${proposalId}`;
+  const newStatus = decision === "accepted_for_planning" ? "proposal_reviewed" : "changes_requested";
+  const db = database();
+  const [insert] = await db.batch([
+    db.prepare(`
+      INSERT INTO fix_proposal_decisions
+        (id, proposal_id, fix_id, organization_id, actor_user_id, decision, comment)
+      SELECT ?, p.id, f.id, f.organization_id, ?, ?, ?
+      FROM fix_proposal_versions p
+      JOIN fixes f ON f.id = p.fix_id AND f.organization_id = p.organization_id
+      JOIN scans scan ON scan.id = f.scan_id AND scan.organization_id = f.organization_id
+      JOIN organization_members m ON m.organization_id = f.organization_id
+      JOIN scan_findings finding ON finding.id = f.finding_id AND finding.scan_id = scan.id
+      WHERE p.id = ? AND scan.id = ? AND m.user_id = ?
+        AND f.kind = 'finding_review' AND f.status = 'proposal_ready'
+        AND finding.status != 'pass'
+        AND p.version = (
+          SELECT MAX(latest.version) FROM fix_proposal_versions latest WHERE latest.fix_id = f.id
+        )
+        AND EXISTS (
+          SELECT 1 FROM subscriptions sub
+          WHERE sub.organization_id = f.organization_id
+            AND sub.plan IN ('essential', 'growth', 'pro')
+            AND sub.status IN ('active', 'trialing')
+            AND (sub.current_period_end IS NULL OR datetime(sub.current_period_end) > datetime('now'))
+        )
+      ON CONFLICT DO NOTHING
+    `).bind(id, userId, decision, comment, proposalId, scanId, userId),
+    db.prepare(`
+      UPDATE fixes SET status = ?, updated_at = CURRENT_TIMESTAMP
+      WHERE id = (SELECT fix_id FROM fix_proposal_decisions WHERE id = ?)
+        AND status = 'proposal_ready' AND kind = 'finding_review'
+    `).bind(newStatus, id),
+    db.prepare(`
+      INSERT INTO audit_logs
+        (id, organization_id, actor_user_id, action, target_type, target_id, metadata_json)
+      SELECT ?, d.organization_id, ?, 'fix_proposal_decision', 'fix', d.fix_id, ?
+      FROM fix_proposal_decisions d WHERE d.id = ?
+      ON CONFLICT(id) DO NOTHING
+    `).bind(
+      `audit_${id}`, userId,
+      JSON.stringify({ proposalId, decision, applied: false, creditsCharged: 0 }),
+      id,
+    ),
+  ]);
+  const record = await db.prepare(`
+    SELECT d.id, d.proposal_id AS proposalId, d.decision, d.comment,
+           d.actor_user_id AS actorUserId, d.created_at AS createdAt
+    FROM fix_proposal_decisions d
+    JOIN fixes f ON f.id = d.fix_id
+    JOIN organization_members m ON m.organization_id = f.organization_id
+    WHERE d.id = ? AND d.proposal_id = ? AND f.scan_id = ?
+      AND m.user_id = ? LIMIT 1
+  `).bind(id, proposalId, scanId, userId).first<{
+    id: string;
+    proposalId: string;
+    decision: ProposalDecision;
+    comment: string;
+    actorUserId: string;
+    createdAt: string;
+  }>();
+  if (!record || record.decision !== decision || record.actorUserId !== userId) {
+    throw new FixProposalDecisionConflict();
+  }
+  return { decision: record, alreadyRecorded: insert.meta.changes === 0 };
 }
