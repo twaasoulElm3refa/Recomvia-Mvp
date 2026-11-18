@@ -2,6 +2,7 @@ import { getAuthenticatedUser } from "@/app/auth";
 import { activePaidSubscriptions, claimSubscriptionCheckout, ensureWorkspace, releaseSubscriptionCheckout, upsertPayPalSubscription } from "@/db/product";
 import { revisePayPalSubscription, verifyAndMapSubscription } from "@/lib/paypal";
 import { isPayPalPaymentsEnabled, paymentNotConfiguredResponse } from "@/lib/paypal/availability";
+import { paymentFailure, paymentString, readPaymentBody } from "@/lib/paypal/http";
 
 export const runtime = "edge";
 const headers = { "Cache-Control": "no-store" };
@@ -11,9 +12,9 @@ export async function POST(request: Request) {
   const user = await getAuthenticatedUser();
   if (!user) return json({ error: "Authentication required", code: "unauthorized" }, 401);
   if (!isPayPalPaymentsEnabled()) return paymentNotConfiguredResponse();
-  let body: { plan?: unknown };
-  try { body = await request.json(); } catch { return json({ error: "Invalid JSON body", code: "invalid_request" }, 400); }
-  const plan = typeof body.plan === "string" ? body.plan.toLowerCase().trim() : null;
+  const body = await readPaymentBody(request);
+  if (!body) return json({ error: "Invalid JSON body", code: "invalid_request" }, 400);
+  const plan = paymentString(body, "plan").toLowerCase();
   if (plan !== "essential" && plan !== "growth" && plan !== "pro") return json({ error: "Invalid paid plan.", code: "invalid_plan" }, 400);
   if (!isPayPalPaymentsEnabled(plan)) return paymentNotConfiguredResponse();
 
@@ -50,7 +51,6 @@ export async function POST(request: Request) {
     return json({ subscriptionId: current.providerSubscriptionId, flow: "plan_change", isActive: true, plan });
   } catch (error) {
     await releaseSubscriptionCheckout(workspace.organizationId, current.providerSubscriptionId);
-    const cause = error as { message?: string; status?: number };
-    return json({ error: cause.message || "Could not change the PayPal plan.", code: "plan_change_failed" }, cause.status || 500);
+    return paymentFailure(error, "Could not change the PayPal plan.", "plan_change_failed");
   }
 }

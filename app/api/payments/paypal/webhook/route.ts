@@ -15,7 +15,10 @@ export async function POST(request: Request) {
   if (!isPayPalPaymentsEnabled("webhook")) return paymentNotConfiguredResponse();
   let webhookBody: PayPalWebhookEvent;
   try {
-    webhookBody = await request.json();
+    const payload: unknown = await request.json();
+    if (!payload || typeof payload !== "object" || Array.isArray(payload))
+      return json({ error: "Invalid JSON body", code: "bad_request" }, 400);
+    webhookBody = payload as PayPalWebhookEvent;
   } catch {
     return json({ error: "Invalid JSON body", code: "bad_request" }, 400);
   }
@@ -33,10 +36,8 @@ export async function POST(request: Request) {
     const db = database();
     const result = await processVerifiedWebhookEvent(db, webhookBody);
     return json({ received: true, ...result });
-  } catch (err: any) {
-    return json(
-      { error: err.message || "Failed to process webhook event", code: "processing_error" },
-      500,
-    );
+  } catch {
+    // Any 5xx triggers PayPal retry; internal errors must never be public.
+    return json({ error: "Failed to process webhook event", code: "processing_error" }, 500);
   }
 }

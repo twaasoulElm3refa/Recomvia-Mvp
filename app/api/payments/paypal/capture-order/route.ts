@@ -2,6 +2,7 @@ import { getAuthenticatedUser } from "@/app/auth";
 import { database, ensureWorkspace, recordStarterPurchase } from "@/db/product";
 import { captureStarterOrder, STARTER_AMOUNT_CENTS, STARTER_CURRENCY } from "@/lib/paypal";
 import { isPayPalPaymentsEnabled, paymentNotConfiguredResponse } from "@/lib/paypal/availability";
+import { paymentFailure, paymentString, readPaymentBody } from "@/lib/paypal/http";
 
 export const runtime = "edge";
 const headers = { "Cache-Control": "no-store" };
@@ -14,14 +15,12 @@ export async function POST(request: Request) {
   }
   if (!isPayPalPaymentsEnabled()) return paymentNotConfiguredResponse();
 
-  let body: { orderId?: string; scanId?: string };
-  try {
-    body = await request.json();
-  } catch {
+  const body = await readPaymentBody(request);
+  if (!body) {
     return json({ error: "Invalid JSON body", code: "invalid_request" }, 400);
   }
 
-  const orderId = body.orderId?.trim();
+  const orderId = paymentString(body, "orderId");
   if (!orderId) {
     return json({ error: "orderId is required", code: "missing_order_id" }, 400);
   }
@@ -59,7 +58,7 @@ export async function POST(request: Request) {
     });
   }
 
-  const scanId = body.scanId?.trim() || existingPurchase?.scanId;
+  const scanId = paymentString(body, "scanId") || existingPurchase?.scanId;
   if (!scanId) {
     return json({ error: "Target scan could not be resolved", code: "missing_scan" }, 400);
   }
@@ -87,10 +86,7 @@ export async function POST(request: Request) {
       captureId: captured.captureId,
       status: "completed",
     });
-  } catch (err: any) {
-    return json(
-      { error: err.message || "Failed to capture PayPal order", code: "capture_failed" },
-      err.status || 400,
-    );
+  } catch (error) {
+    return paymentFailure(error, "Failed to capture PayPal order", "capture_failed");
   }
 }
