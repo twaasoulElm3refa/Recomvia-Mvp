@@ -79,7 +79,12 @@ export function KnowledgeAssistant() {
 
   useEffect(() => {
     const root = document.documentElement;
-    const syncLanguage = () => setPageArabic(readStoredSiteLocale(root.lang.toLowerCase().startsWith("ar") ? "ar" : "en") === "ar");
+    // Canonical /ar routes determine the rendered language. Browser preference
+    // only acts as a fallback when the page itself has no language marker.
+    const syncLanguage = () => setPageArabic(
+      root.lang === "ar" ? true : root.lang === "en" ? false :
+        readStoredSiteLocale("en") === "ar",
+    );
     syncLanguage();
     const observer = new MutationObserver(syncLanguage);
     observer.observe(root, { attributes: true, attributeFilter: ["lang"] });
@@ -192,7 +197,13 @@ export function KnowledgeAssistant() {
         status: data.status || "open",
       };
       setTicket(stored);
-      window.localStorage.setItem(ticketStorageKey, JSON.stringify(stored));
+      // The ticket is already saved on the server. Storage being blocked must
+      // not turn a successful request into a false error or a duplicate.
+      try {
+        window.localStorage.setItem(ticketStorageKey, JSON.stringify(stored));
+      } catch {
+        // Display the reference in the active assistant session.
+      }
       setShowEscalation(false);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "The request could not be sent.");
@@ -215,7 +226,11 @@ export function KnowledgeAssistant() {
       if (!response.ok) throw new Error(data.error || "The ticket could not be checked.");
       const updated = { ...ticket, status: data.status || ticket.status, humanReply: data.humanReply, updatedAt: data.updatedAt };
       setTicket(updated);
-      window.localStorage.setItem(ticketStorageKey, JSON.stringify(updated));
+      try {
+        window.localStorage.setItem(ticketStorageKey, JSON.stringify(updated));
+      } catch {
+        // The latest reply remains available in the active session.
+      }
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "The ticket could not be checked.");
     } finally {
