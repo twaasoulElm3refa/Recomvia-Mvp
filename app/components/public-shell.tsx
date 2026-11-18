@@ -64,7 +64,7 @@ function publicEnglishPath(pathname: string): string | null {
 
 function routeLocale(pathname: string): SiteLocale | null {
   if (pathname.startsWith("/ar/") && publicEnglishPath(pathname)) return "ar";
-  if (pathname.startsWith("/blog/") || pathname === "/blog") return "en";
+  if (publicEnglishPath(pathname)) return "en";
   return null;
 }
 
