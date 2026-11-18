@@ -6,6 +6,7 @@ import {
   getReportForUser,
 } from "@/db/product";
 import { FixAccessGate } from "./fix-access-gate";
+import { listFixReviewRequests } from "@/db/fix-review";
 import { FixCenterExperience } from "./fix-center-experience";
 
 export const dynamic = "force-dynamic";
@@ -37,8 +38,11 @@ export default async function FixCenterPage({
       ? report.scan
       : null;
 
+  const requestedReviews = scan ? await listFixReviewRequests(user.userId, scan.id) : [];
+
   return (
     <FixCenterExperience
+      requestedFindingIds={requestedReviews.map((item) => item.findingId)}
       scanId={scan?.id ?? null}
       targetName={scan?.target?.name || scan?.displayName || null}
       hasWebsiteAudit={Boolean(scan)}
