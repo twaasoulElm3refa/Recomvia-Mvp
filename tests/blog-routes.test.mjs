@@ -28,7 +28,7 @@ test("blog language links follow the requested locale, not just localStorage", (
   const blog = source("app/blog/blog-content.tsx");
   const article = source("app/blog/[slug]/article-content.tsx");
   const home = source("app/scan-experience.tsx");
-  assert.match(shell, /blogRouteLocale\(window.location.pathname\)/);
+  assert.match(shell, /routeLocale\(window.location.pathname\)/);
   assert.match(shell, /initialLocale/);
   assert.match(shell, /window.location.assign/);
   assert.match(blog, /const blogRoot = locale === "ar"/);
