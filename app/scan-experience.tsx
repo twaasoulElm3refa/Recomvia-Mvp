@@ -321,6 +321,7 @@ export function ScanExperience({ paymentsEnabled }: { paymentsEnabled: boolean }
   const [needsSignIn, setNeedsSignIn] = useState(false);
   const t = text[locale];
   const rtl = locale === "ar";
+  const blogRoot = rtl ? "/ar/blog" : "/blog";
   const domain = useMemo(
     () =>
       url
@@ -589,7 +590,7 @@ export function ScanExperience({ paymentsEnabled }: { paymentsEnabled: boolean }
   const navigation: SiteNavItem[] = [
     { href: "/#product", label: t.product },
     { href: "/pricing", label: t.subscriptions },
-    { href: "/blog", label: t.blog },
+    { href: blogRoot, label: t.blog },
     { href: "/methodology", label: t.methodology },
     { href: "/faq", label: t.faq },
     { href: "/contact", label: t.contact },
@@ -1218,7 +1219,7 @@ export function ScanExperience({ paymentsEnabled }: { paymentsEnabled: boolean }
                 </p>
               </div>
               <Link
-                href="/blog"
+                href={blogRoot}
                 className="flex shrink-0 items-center gap-2 text-sm font-bold text-blue-700"
               >
                 {t.viewGuides}
@@ -1229,7 +1230,7 @@ export function ScanExperience({ paymentsEnabled }: { paymentsEnabled: boolean }
               {featuredArticles[locale].map((article) => (
                 <Link
                   key={article.slug}
-                  href={`/blog/${article.slug}`}
+                  href={`${blogRoot}/${article.slug}`}
                   className="group rounded-[22px] border border-slate-200 bg-slate-50 p-6 transition hover:border-blue-300 hover:bg-white hover:shadow-xl"
                 >
                   <span className="text-xs font-bold uppercase tracking-[.12em] text-blue-600">
@@ -1299,7 +1300,7 @@ export function ScanExperience({ paymentsEnabled }: { paymentsEnabled: boolean }
               {t.resourcesGroup}
             </p>
             <nav className="mt-4 flex flex-col gap-3 text-sm font-semibold text-slate-500">
-              <Link href="/blog">{t.blog}</Link>
+              <Link href={blogRoot}>{t.blog}</Link>
               <Link href="/methodology">{t.methodology}</Link>
               <Link href="/faq">{t.faq}</Link>
             </nav>
