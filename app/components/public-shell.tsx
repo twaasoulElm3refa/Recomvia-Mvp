@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, type ReactNode } from "react";
+import { useRouter } from "next/navigation";
 import { Globe2 } from "lucide-react";
 import { NavigationLink as Link } from "@/app/components/navigation-link";
 import { BrandMark } from "@/app/scan-experience";
@@ -74,6 +75,7 @@ export function PublicShell({ children, pageMetadata, initialLocale = "en" }: {
   initialLocale?: SiteLocale;
 }) {
   const [locale, setLocale] = useState<SiteLocale>(initialLocale);
+  const router = useRouter();
   const signedIn = useAccountEntry();
 
   useEffect(() => {
@@ -122,7 +124,7 @@ export function PublicShell({ children, pageMetadata, initialLocale = "en" }: {
     const englishPath = publicEnglishPath(pathname);
     if (englishPath) {
       const nextPath = nextLocale === "ar" ? `/ar${englishPath}` : englishPath;
-      window.location.assign(`${nextPath}${window.location.search}${window.location.hash}`);
+      router.push(`${nextPath}${window.location.search}${window.location.hash}`);
       return;
     }
     setLocale(nextLocale);
