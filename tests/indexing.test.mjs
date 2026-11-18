@@ -25,7 +25,7 @@ test("robots keeps account and authentication routes private but allows public p
   assert.equal(doc.host, "https://recomvia.test");
   assert.equal(doc.sitemap, "https://recomvia.test/sitemap.xml");
   const denied = doc.rules[0].disallow;
-  for (const path of ["/api/", "/auth/", "/signin-with-chatgpt", "/signout-with-chatgpt", "/dashboard", "/report", "/fix-center", "/support/inbox"]) {
+  for (const path of ["/api/", "/auth/", "/signin-with-chatgpt", "/signout-with-chatgpt", "/dashboard", "/report", "/fix-center", "/support/inbox", "/support/fix-reviews"]) {
     assert.ok(denied.includes(path), path);
   }
   assert.ok(!denied.includes("/pricing"));
