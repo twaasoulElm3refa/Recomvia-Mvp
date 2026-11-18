@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import { PolicyPage } from "@/app/components/policy-page";
-import { privacyPolicyCopy } from "@/app/privacy/page";
+import { privacyPolicyCopy } from "@/app/privacy/policy-copy";
 import { SITE_URL } from "@/lib/site-config";
 
 export const metadata: Metadata = {
