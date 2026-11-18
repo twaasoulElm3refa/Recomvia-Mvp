@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { createFixture, state, userA, userB } from "./target-runtime-fixture";
 import { POST as requestReview } from "../app/api/fix-reviews/route";
-import { listFixReviewRequests } from "../db/fix-review";
+import { listFixReviewRequests, listPendingFixReviews } from "../db/fix-review";
 
 type Fixture = ReturnType<typeof createFixture>;
 
@@ -71,6 +71,10 @@ test("paid owner can request review exactly once, retaining zero charges and a s
   const list = await listFixReviewRequests(userA.userId, payload.scanId);
   assert.equal(list.length, 1);
   assert.equal(list[0].findingId, payload.findingId);
+  const staffQueue = await listPendingFixReviews();
+  assert.equal(staffQueue.length, 1);
+  assert.equal(staffQueue[0].findingTitle, "Weak metadata");
+  assert.equal(staffQueue[0].website, "https://example.test");
   db.close();
 });
 
