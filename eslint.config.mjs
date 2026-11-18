@@ -23,6 +23,14 @@ const eslintConfig = defineConfig([
       "react-hooks/set-state-in-effect": "off",
     },
   },
+  {
+    files: ["tests/paypal-billing.test.ts"],
+    rules: {
+      // This fixture intentionally casts synthetic D1/HTTP responses and
+      // exercises malformed webhook payloads outside the production types.
+      "@typescript-eslint/no-explicit-any": "off",
+    },
+  },
 ]);
 
 export default eslintConfig;

@@ -36,12 +36,17 @@ export function ContactForm({ locale }: { locale: SiteLocale }) {
   const [reference, setReference] = useState("");
   const [interest, setInterest] = useState<{ plan: string | null; credits: boolean; scan: string | null } | null>(null);
   useEffect(() => {
-    const query = new URLSearchParams(window.location.search);
-    const plan = planById(query.get("plan"));
-    const scan = query.get("scan");
-    if ((plan && plan.billing !== "free") || query.get("product") === "fix-credits") {
-      setInterest({ plan: plan && plan.billing !== "free" ? plan.id : null, credits: query.get("product") === "fix-credits", scan: scan && /^[a-zA-Z0-9_-]{1,100}$/.test(scan) ? scan : null });
-    }
+    // URL is browser-owned state; read it after hydration without a synchronous
+    // render cascade, and cancel if the page is unmounted immediately.
+    const timer = window.setTimeout(() => {
+      const query = new URLSearchParams(window.location.search);
+      const plan = planById(query.get("plan"));
+      const scan = query.get("scan");
+      if ((plan && plan.billing !== "free") || query.get("product") === "fix-credits") {
+        setInterest({ plan: plan && plan.billing !== "free" ? plan.id : null, credits: query.get("product") === "fix-credits", scan: scan && /^[a-zA-Z0-9_-]{1,100}$/.test(scan) ? scan : null });
+      }
+    }, 0);
+    return () => window.clearTimeout(timer);
   }, []);
   const selectedPlan = planById(interest?.plan);
   const interestText = selectedPlan

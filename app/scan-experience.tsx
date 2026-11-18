@@ -683,7 +683,7 @@ export function ScanExperience({ paymentsEnabled }: { paymentsEnabled: boolean }
               {rtl ? "EN" : "العربية"}
             </Button>
             <a
-              href={signedIn ? "/dashboard" : "/auth/google"}
+              href={signedIn ? "/dashboard" : "/auth/start"}
               className="hidden text-sm font-bold text-slate-700 lg:block"
             >
               {signedIn ? (rtl ? "لوحة التحكم" : "Dashboard") : t.signin}
@@ -692,7 +692,7 @@ export function ScanExperience({ paymentsEnabled }: { paymentsEnabled: boolean }
               items={navigation}
               menuLabel={t.menu}
               ctaLabel={signedIn ? (rtl ? "لوحة التحكم" : "Dashboard") : t.signin}
-              ctaHref={signedIn ? "/dashboard" : "/auth/google"}
+              ctaHref={signedIn ? "/dashboard" : "/auth/start"}
               direction={rtl ? "rtl" : "ltr"}
             />
           </div>
@@ -909,7 +909,7 @@ export function ScanExperience({ paymentsEnabled }: { paymentsEnabled: boolean }
               )}
               {needsSignIn && (
                 <Button asChild className="mt-3 rounded-xl bg-[#07111f]">
-                  <a href="/auth/google">{t.signin}</a>
+                  <a href="/auth/start">{t.signin}</a>
                 </Button>
               )}
               <p className="mt-4 flex items-center gap-2 text-sm text-slate-500">

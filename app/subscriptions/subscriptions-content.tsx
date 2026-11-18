@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { useSearchParams } from "next/navigation";
+import { useEffect, useRef, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import {
   AlertCircle,
   ArrowRight,
@@ -10,7 +10,6 @@ import {
   Coins,
   Layers3,
   Loader2,
-  ShieldCheck,
   XCircle,
 } from "lucide-react";
 import { NavigationLink as Link } from "@/app/components/navigation-link";
@@ -175,13 +174,14 @@ const copy = {
 } as const;
 
 export function SubscriptionsContent() {
+  const router = useRouter();
   const searchParams = useSearchParams();
   const requestedPlan = searchParams?.get("plan");
   const selectedPlan = requestedPlan === "essential" || requestedPlan === "growth" || requestedPlan === "pro" ? requestedPlan : null;
   const returnFlow = searchParams?.get("flow");
   const [paymentStatus, setPaymentStatus] = useState<
     "idle" | "processing" | "active" | "failed" | "cancelled"
-  >("idle");
+  >(returnFlow === "cancelled" ? "cancelled" : "idle");
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [activePlan, setActivePlan] = useState<"essential" | "growth" | "pro" | null>(null);
   const [planStatus, setPlanStatus] = useState<"loading" | "ready" | "error">("loading");
@@ -189,7 +189,9 @@ export function SubscriptionsContent() {
   const [checkoutAvailability, setCheckoutAvailability] = useState<CheckoutAvailability>({ starter: false, essential: false, growth: false, pro: false });
   const [billingConflict, setBillingConflict] = useState(false);
   const [billingReview, setBillingReview] = useState(false);
-  const [targetScanId, setTargetScanId] = useState<string | null>(null);
+  const [confirmedScanId, setTargetScanId] = useState<string | null>(null);
+  const targetScanId = confirmedScanId || searchParams?.get("scan") || null;
+  const handledReturn = useRef<string | null>(null);
   const [loadingPlan, setLoadingPlan] = useState<string | null>(null);
 
   useEffect(() => {
@@ -229,19 +231,16 @@ export function SubscriptionsContent() {
     const token = searchParams.get("token") || searchParams.get("order_id");
     const subscriptionId = searchParams.get("subscription_id");
 
-    if (scan) {
-      setTargetScanId(scan);
-    }
-
-    if (flow === "cancelled") {
-      setPaymentStatus("cancelled");
-      return;
-    }
+    if (flow === "cancelled") return;
 
     if (planStatus !== "ready" || !paymentsEnabled) return;
 
+    const returnKey = `${flow}:${token ?? subscriptionId ?? ""}`;
+    if (handledReturn.current === returnKey) return;
+
     if (flow === "starter" && token) {
-      setPaymentStatus("processing");
+      handledReturn.current = returnKey;
+      queueMicrotask(() => setPaymentStatus("processing"));
       fetch("/api/payments/paypal/capture-order", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -257,19 +256,20 @@ export function SubscriptionsContent() {
           if (target) {
             setTargetScanId(target);
             setTimeout(() => {
-              window.location.href = `/report?scan=${encodeURIComponent(target)}`;
+              router.push(`/report?scan=${encodeURIComponent(target)}`);
             }, 1500);
           }
         })
-        .catch((err: any) => {
+        .catch((err: unknown) => {
           setPaymentStatus("failed");
-          setStatusMessage(err.message);
+          setStatusMessage(err instanceof Error ? err.message : "Payment verification failed");
         });
       return;
     }
 
     if (flow === "subscription" && subscriptionId) {
-      setPaymentStatus("processing");
+      handledReturn.current = returnKey;
+      queueMicrotask(() => setPaymentStatus("processing"));
       fetch("/api/payments/paypal/sync-subscription", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -297,13 +297,13 @@ export function SubscriptionsContent() {
             );
           }
         })
-        .catch((err: any) => {
+        .catch((err: unknown) => {
           setPaymentStatus("failed");
-          setStatusMessage(err.message);
+          setStatusMessage(err instanceof Error ? err.message : "Subscription verification failed");
         });
       return;
     }
-  }, [searchParams, planStatus, paymentsEnabled]);
+  }, [searchParams, planStatus, paymentsEnabled, router]);
 
   const handleStarterCheckout = async (scanId: string) => {
     if (!canStartPaidCheckout(paymentsEnabled, planStatus) || !checkoutAvailability.starter) return;
@@ -316,17 +316,17 @@ export function SubscriptionsContent() {
       });
       const data = (await res.json()) as { error?: string; approveUrl?: string };
       if (res.status === 401) {
-        window.location.href = "/auth/google";
+        router.push("/auth/start");
         return;
       }
       if (!res.ok) {
         throw new Error(data.error || "Failed to start checkout");
       }
       if (data.approveUrl) {
-        window.location.href = data.approveUrl;
+        window.location.assign(data.approveUrl);
       }
-    } catch (err: any) {
-      alert(err.message || "Failed to initiate payment");
+    } catch (err: unknown) {
+      alert(err instanceof Error ? err.message : "Failed to initiate payment");
     } finally {
       setLoadingPlan(null);
     }
@@ -343,20 +343,20 @@ export function SubscriptionsContent() {
       });
       const data = (await res.json()) as { error?: string; approveUrl?: string; isActive?: boolean };
       if (res.status === 401) {
-        window.location.href = "/auth/google";
+        router.push("/auth/start");
         return;
       }
       if (!res.ok) {
         throw new Error(data.error || "Failed to start subscription");
       }
       if (data.approveUrl) {
-        window.location.href = data.approveUrl;
+        window.location.assign(data.approveUrl);
       } else if (data.isActive) {
         setActivePlan(plan);
         setPaymentStatus("active");
       }
-    } catch (err: any) {
-      alert(err.message || "Failed to initiate subscription");
+    } catch (err: unknown) {
+      alert(err instanceof Error ? err.message : "Failed to initiate subscription");
     } finally {
       setLoadingPlan(null);
     }

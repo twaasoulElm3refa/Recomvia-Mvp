@@ -88,7 +88,7 @@ export function PublicShell({ children, pageMetadata }: { children: ReactNode | 
   const t = copy[locale];
   const rtl = locale === "ar";
   const accountLabel = signedIn ? (rtl ? "لوحة التحكم" : "Dashboard") : (rtl ? "تسجيل الدخول" : "Sign in");
-  const accountHref = signedIn ? "/dashboard" : "/auth/google";
+  const accountHref = signedIn ? "/dashboard" : "/auth/start";
   const navigation: SiteNavItem[] = navigationHrefs.map((href, index) => ({ href, label: t.navigation[index] }));
 
   function toggleLocale() {

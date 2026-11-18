@@ -73,17 +73,17 @@ export async function verifyWebhookSignature(
     );
 
     return result.verification_status?.toUpperCase() === "SUCCESS";
-  } catch (err) {
+  } catch {
     return false;
   }
 }
 
 export type DbExecutor = {
   prepare: (query: string) => {
-    bind: (...values: any[]) => {
-      run: () => Promise<any>;
-      first: <T = any>(col?: string) => Promise<T | null>;
-      all: <T = any>() => Promise<{ results: T[] }>;
+    bind: (...values: unknown[]) => {
+      run: () => Promise<{ meta: { changes?: number } }>;
+      first: <T = unknown>(col?: string) => Promise<T | null>;
+      all: <T = unknown>() => Promise<{ results: T[] }>;
     };
   };
 };
@@ -423,8 +423,8 @@ export async function processVerifiedWebhookEvent(
       const amountVal = resource.amount?.value;
       const currency = resource.amount?.currency_code;
 
-      if (customData && amountVal === STARTER_PRICE_AMOUNT && currency === STARTER_CURRENCY) {
-        const paymentId = orderId || captureId;
+      const paymentId = orderId || captureId;
+      if (paymentId && customData && amountVal === STARTER_PRICE_AMOUNT && currency === STARTER_CURRENCY) {
         // Verify target scan belongs to organization
         const scan = await db
           .prepare("SELECT id FROM scans WHERE id = ? AND organization_id = ? LIMIT 1")

@@ -15,7 +15,6 @@ import {
   clearPayPalTokenCache,
   STARTER_PRICE_AMOUNT,
   STARTER_CURRENCY,
-  STARTER_AMOUNT_CENTS,
   processVerifiedWebhookEvent,
 } from "../lib/paypal";
 import { database, getEntitlementForUser, getReportForUser } from "../db/product";
@@ -332,10 +331,10 @@ test("Starter Order Capture: unlocks target report, enforces $4.99 amount, cross
   Object.assign(state.env, TEST_CONFIG);
   clearPayPalTokenCache();
 
-  let captureReturnStatus = "COMPLETED";
+  const captureReturnStatus = "COMPLETED";
   let captureAmountValue = "4.99";
   let captureCurrency = "USD";
-  let captureCustomId = "org-target-test-a:scan-a";
+  const captureCustomId = "org-target-test-a:scan-a";
 
   setPayPalTransport(async (url) => {
     const urlStr = String(url);

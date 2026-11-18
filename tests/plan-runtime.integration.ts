@@ -298,7 +298,7 @@ test("failed billed final answers retain reasoning and finish metadata without r
 });
 
 test("failed search coverage remains partial and does not become a zero visibility observation", async () => {
-  await setup("essential", async (_db, _requests) => {
+  await setup("essential", async () => {
     const body = await read(await POST(request(person)));
     assert.equal(body.scan.actualVisibilityStatus, "partial");
     assert.equal(body.scan.actualVisibilityScore, 100);
@@ -320,7 +320,7 @@ test("all failed observations retain billed costs, fail the scan, and do not con
 });
 
 test("unknown provider costs stay unknown and a costly discovery stops further calls", async () => {
-  await setup("essential", async (_db, _requests) => {
+  await setup("essential", async () => {
     const body = await read(await POST(request(person)));
     assert.equal(body.scan.insights!.scope.missingCostRuns, 12);
     assert.equal(body.scan.insights!.scope.recordedProviderCostMicros, 0);
@@ -407,7 +407,7 @@ test("monitor trigger refuses missing configuration and uses the protected endpo
 });
 
 test("a repeated provider model cannot masquerade as multiple independent models", async () => {
-  await setup("essential", async (_db, _requests) => {
+  await setup("essential", async () => {
     const body = await read(await POST(request(person)));
     assert.equal(body.scan.actualVisibilityStatus, "partial");
     assert.equal(body.scan.insights!.scope.coverageComplete, false);

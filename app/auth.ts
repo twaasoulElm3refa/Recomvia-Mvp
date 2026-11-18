@@ -1,6 +1,7 @@
 import { env } from "cloudflare:workers";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
+import { getChatGPTUser, chatGPTSignInPath, chatGPTSignOutPath } from "@/app/chatgpt-auth";
 
 export type AuthUser = {
   userId: string;
@@ -23,6 +24,20 @@ export const OAUTH_STATE_COOKIE = "__Host-recomvia_oauth_state";
 export const OAUTH_VERIFIER_COOKIE = "__Host-recomvia_oauth_verifier";
 export const SESSION_MAX_AGE = 60 * 60 * 24 * 7;
 
+// The hosted ChatGPT Site and standalone Cloudflare deployment use different
+// trusted identity providers. Never infer this setting from user-supplied headers.
+export function authProvider(): "chatgpt" | "google" {
+  return env.AUTH_PROVIDER === "chatgpt" ? "chatgpt" : "google";
+}
+
+export function signInPath(returnTo = "/dashboard") {
+  return authProvider() === "chatgpt" ? chatGPTSignInPath(returnTo) : "/auth/google";
+}
+
+export function signOutPath(returnTo = "/") {
+  return authProvider() === "chatgpt" ? chatGPTSignOutPath(returnTo) : "/auth/signout";
+}
+
 export function getAppOrigin(request: Request) {
   return new URL(request.url).origin;
 }
@@ -32,6 +47,7 @@ export function getGoogleCallbackUrl(request: Request) {
 }
 
 export async function getAuthenticatedUser(): Promise<AuthUser | null> {
+  if (authProvider() === "chatgpt") return getChatGPTUser();
   const value = (await cookies()).get(SESSION_COOKIE)?.value;
   if (!value) return null;
   const payload = await verifySession(value);
@@ -47,7 +63,7 @@ export async function getAuthenticatedUser(): Promise<AuthUser | null> {
 export async function requireAuthenticatedUser(): Promise<AuthUser> {
   const user = await getAuthenticatedUser();
   if (user) return user;
-  redirect("/auth/google");
+  redirect(signInPath());
 }
 
 export function getGoogleCredentials() {
