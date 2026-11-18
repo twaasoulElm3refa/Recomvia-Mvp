@@ -17,8 +17,10 @@ export async function triggerMonitoring(env: MonitorEnv, transport: typeof fetch
     throw new Error(`Monitoring job did not complete: ${(result.status || "unknown").replace(/[^a-z_]/g, "").slice(0, 80)}`);
 }
 
-export default {
+const scheduledWorker = {
   async scheduled(_controller: ScheduledController, env: MonitorEnv) {
     await triggerMonitoring(env);
   },
 };
+
+export default scheduledWorker;

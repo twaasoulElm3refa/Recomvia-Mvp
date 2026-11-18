@@ -43,8 +43,8 @@ const copy = {
   },
 } as const;
 
-export function PricingContent({ paymentsEnabled }: { paymentsEnabled: boolean }) {
-  return <PublicShell pageMetadata={pageMetadata}>{(locale) => {
+export function PricingContent({ paymentsEnabled, initialLocale = "en" }: { paymentsEnabled: boolean; initialLocale?: "en" | "ar" }) {
+  return <PublicShell pageMetadata={pageMetadata} initialLocale={initialLocale}>{(locale) => {
     const t = copy[locale];
     return <main>
       <section className="relative overflow-hidden border-b border-slate-200">

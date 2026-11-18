@@ -51,12 +51,35 @@ const navigationHrefs = ["/#product", "/pricing", "/blog", "/methodology", "/faq
 
 export type LocalizedMetadata = Record<SiteLocale, { title: string; description: string }>;
 
-export function PublicShell({ children, pageMetadata }: { children: ReactNode | ((locale: SiteLocale) => ReactNode); pageMetadata?: LocalizedMetadata }) {
-  const [locale, setLocale] = useState<SiteLocale>("en");
+const localizedPublicPages = new Set([
+  "/blog", "/pricing", "/methodology", "/faq", "/contact",
+  "/privacy", "/terms", "/billing-policy",
+]);
+
+function publicEnglishPath(pathname: string): string | null {
+  const path = pathname.startsWith("/ar/") ? pathname.slice(3) : pathname;
+  const [root] = path.match(/^\/[^/]+/) ?? [];
+  return root && localizedPublicPages.has(root) ? path : null;
+}
+
+function routeLocale(pathname: string): SiteLocale | null {
+  if (pathname.startsWith("/ar/") && publicEnglishPath(pathname)) return "ar";
+  if (publicEnglishPath(pathname)) return "en";
+  return null;
+}
+
+export function PublicShell({ children, pageMetadata, initialLocale = "en" }: {
+  children: ReactNode | ((locale: SiteLocale) => ReactNode);
+  pageMetadata?: LocalizedMetadata;
+  initialLocale?: SiteLocale;
+}) {
+  const [locale, setLocale] = useState<SiteLocale>(initialLocale);
   const signedIn = useAccountEntry();
 
   useEffect(() => {
-    const syncLocale = () => setLocale(readStoredSiteLocale("en"));
+    // Blog languages have distinct canonical paths. Never let stored browser
+    // preferences override the URL's server-rendered language.
+    const syncLocale = () => setLocale(routeLocale(window.location.pathname) ?? readStoredSiteLocale("en"));
     const timer = window.setTimeout(syncLocale, 0);
     window.addEventListener(SITE_LOCALE_EVENT, syncLocale);
     window.addEventListener("storage", syncLocale);
@@ -88,17 +111,25 @@ export function PublicShell({ children, pageMetadata }: { children: ReactNode | 
   const t = copy[locale];
   const rtl = locale === "ar";
   const accountLabel = signedIn ? (rtl ? "لوحة التحكم" : "Dashboard") : (rtl ? "تسجيل الدخول" : "Sign in");
-  const accountHref = signedIn ? "/dashboard" : "/auth/google";
-  const navigation: SiteNavItem[] = navigationHrefs.map((href, index) => ({ href, label: t.navigation[index] }));
+  const accountHref = signedIn ? "/dashboard" : "/auth/start";
+  const localizedHref = (href: string) => locale === "ar" && localizedPublicPages.has(href) ? `/ar${href}` : href;
+  const navigation: SiteNavItem[] = navigationHrefs.map((href, index) => ({ href: localizedHref(href), label: t.navigation[index] }));
 
   function toggleLocale() {
     const nextLocale = rtl ? "en" : "ar";
-    setLocale(nextLocale);
     storeSiteLocale(nextLocale);
+    const pathname = window.location.pathname;
+    const englishPath = publicEnglishPath(pathname);
+    if (englishPath) {
+      const nextPath = nextLocale === "ar" ? `/ar${englishPath}` : englishPath;
+      window.location.assign(`${nextPath}${window.location.search}${window.location.hash}`);
+      return;
+    }
+    setLocale(nextLocale);
   }
 
   return (
-    <div className="min-h-screen bg-[#f8fafc] text-[#07111f]">
+    <div lang={locale} dir={rtl ? "rtl" : "ltr"} className="min-h-screen bg-[#f8fafc] text-[#07111f]">
       <header lang={locale} dir={rtl ? "rtl" : "ltr"} className="sticky top-0 z-40 border-b border-slate-200/80 bg-white/90 backdrop-blur-xl">
         <div className="mx-auto flex h-[72px] max-w-[1240px] items-center justify-between gap-4 px-5 sm:px-8">
           <Link href="/" className="shrink-0"><BrandMark /></Link>
@@ -118,8 +149,8 @@ export function PublicShell({ children, pageMetadata }: { children: ReactNode | 
         <div className="mx-auto grid max-w-[1240px] gap-10 px-5 py-12 sm:px-8 md:grid-cols-[1.4fr_repeat(3,.65fr)]">
           <div><BrandMark /><p className="mt-4 max-w-md text-sm leading-6 text-slate-500">{t.intro}</p></div>
           <div><p className="text-sm font-extrabold text-slate-900">{t.platform}</p><nav className="mt-4 flex flex-col gap-3 text-sm font-semibold text-slate-500"><Link href="/dashboard">{t.overview}</Link>{signedIn && <Link href="/report">{t.report}</Link>}<Link href="/fix-center">{t.fixes}</Link></nav></div>
-          <div><p className="text-sm font-extrabold text-slate-900">{t.resources}</p><nav className="mt-4 flex flex-col gap-3 text-sm font-semibold text-slate-500"><Link href="/blog">{t.navigation[2]}</Link><Link href="/methodology">{t.navigation[3]}</Link><Link href="/faq">{t.faq}</Link></nav></div>
-          <div><p className="text-sm font-extrabold text-slate-900">{t.company}</p><nav className="mt-4 flex flex-col gap-3 text-sm font-semibold text-slate-500"><Link href="/pricing">{t.navigation[1]}</Link><Link href="/contact">{t.navigation[5]}</Link><Link href="/privacy">{t.privacy}</Link><Link href="/terms">{t.terms}</Link><Link href="/billing-policy">{t.billing}</Link></nav></div>
+          <div><p className="text-sm font-extrabold text-slate-900">{t.resources}</p><nav className="mt-4 flex flex-col gap-3 text-sm font-semibold text-slate-500"><Link href={localizedHref("/blog")}>{t.navigation[2]}</Link><Link href={localizedHref("/methodology")}>{t.navigation[3]}</Link><Link href={localizedHref("/faq")}>{t.faq}</Link></nav></div>
+          <div><p className="text-sm font-extrabold text-slate-900">{t.company}</p><nav className="mt-4 flex flex-col gap-3 text-sm font-semibold text-slate-500"><Link href={localizedHref("/pricing")}>{t.navigation[1]}</Link><Link href={localizedHref("/contact")}>{t.navigation[5]}</Link><Link href={localizedHref("/privacy")}>{t.privacy}</Link><Link href={localizedHref("/terms")}>{t.terms}</Link><Link href={localizedHref("/billing-policy")}>{t.billing}</Link></nav></div>
         </div>
         <div className="border-t border-slate-100"><div className="mx-auto max-w-[1240px] px-5 py-5 text-xs text-slate-400 sm:px-8">{t.copyright}</div></div>
       </footer>

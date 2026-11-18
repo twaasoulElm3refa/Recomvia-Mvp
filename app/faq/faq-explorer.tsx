@@ -26,14 +26,17 @@ const categoryLabels: Record<string, string> = {
   Trust: "الثقة",
 };
 
-export function FaqExplorer({ entries }: { entries: PublicFaq[] }) {
-  const [language, setLanguage] = useState<SiteLocale>("en");
+export function FaqExplorer({ entries, initialLocale = "en" }: { entries: PublicFaq[]; initialLocale?: SiteLocale }) {
+  const [language, setLanguage] = useState<SiteLocale>(initialLocale);
   const [category, setCategory] = useState("All");
   const [query, setQuery] = useState("");
   const categories = ["All", ...Array.from(new Set(entries.map((entry) => entry.category)))];
 
   useEffect(() => {
-    const syncLocale = () => setLanguage(readStoredSiteLocale("en"));
+    const syncLocale = () => {
+      const pathname = window.location.pathname;
+      setLanguage(pathname === "/ar/faq" ? "ar" : pathname === "/faq" ? "en" : readStoredSiteLocale("en"));
+    };
     const timer = window.setTimeout(syncLocale, 0);
     window.addEventListener(SITE_LOCALE_EVENT, syncLocale);
     window.addEventListener("storage", syncLocale);
@@ -45,8 +48,8 @@ export function FaqExplorer({ entries }: { entries: PublicFaq[] }) {
   }, []);
 
   function chooseLanguage(locale: SiteLocale) {
-    setLanguage(locale);
     storeSiteLocale(locale);
+    window.location.assign(locale === "ar" ? "/ar/faq" : "/faq");
   }
 
   const filtered = useMemo(() => {

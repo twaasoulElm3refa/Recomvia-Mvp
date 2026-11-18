@@ -2,6 +2,7 @@ import { getAuthenticatedUser } from "@/app/auth";
 import { ensureWorkspace, paypalSubscriptionOwner, releaseSubscriptionCheckout, upsertPayPalSubscription } from "@/db/product";
 import { cancelConflictingPayPalSubscription, verifyAndMapSubscription } from "@/lib/paypal";
 import { isPayPalPaymentsEnabled, paymentNotConfiguredResponse } from "@/lib/paypal/availability";
+import { paymentFailure, paymentString, readPaymentBody } from "@/lib/paypal/http";
 
 export const runtime = "edge";
 const headers = { "Cache-Control": "no-store" };
@@ -14,29 +15,31 @@ export async function POST(request: Request) {
   }
   if (!isPayPalPaymentsEnabled()) return paymentNotConfiguredResponse();
 
-  let body: { subscriptionId?: string; plan?: "essential" | "growth" | "pro" };
-  try {
-    body = await request.json();
-  } catch {
+  const body = await readPaymentBody(request);
+  if (!body) {
     return json({ error: "Invalid JSON body", code: "invalid_request" }, 400);
   }
 
-  const subscriptionId = body.subscriptionId?.trim();
+  const subscriptionId = paymentString(body, "subscriptionId");
   if (!subscriptionId) {
     return json({ error: "subscriptionId is required", code: "missing_subscription_id" }, 400);
   }
+  const rawPlan = paymentString(body, "plan").toLowerCase();
+  if (body.plan !== undefined && rawPlan !== "essential" && rawPlan !== "growth" && rawPlan !== "pro")
+    return json({ error: "Invalid paid plan", code: "invalid_plan" }, 400);
+  const plan = rawPlan === "essential" || rawPlan === "growth" || rawPlan === "pro" ? rawPlan : undefined;
 
   const workspace = await ensureWorkspace(user);
   const owner = await paypalSubscriptionOwner(subscriptionId);
   if (!owner || owner.organizationId !== workspace.organizationId)
     return json({ error: "Subscription does not belong to this organization.", code: "subscription_not_found" }, 404);
   if (!isPayPalPaymentsEnabled(owner.plan as "essential" | "growth" | "pro") ||
-      (body.plan && !isPayPalPaymentsEnabled(body.plan))) return paymentNotConfiguredResponse();
+      (plan && !isPayPalPaymentsEnabled(plan))) return paymentNotConfiguredResponse();
 
   try {
     const verified = await verifyAndMapSubscription(subscriptionId, {
       organizationId: workspace.organizationId,
-      plan: body.plan,
+      plan,
     });
 
     if (owner.status === "active" && verified.mappedState.internalStatus === "inactive") {
@@ -71,10 +74,7 @@ export async function POST(request: Request) {
       currentPeriodEnd: verified.nextBillingTime,
       isActive: verified.mappedState.isActive,
     });
-  } catch (err: any) {
-    return json(
-      { error: err.message || "Failed to verify subscription with PayPal", code: "verification_failed" },
-      err.status || 400,
-    );
+  } catch (error) {
+    return paymentFailure(error, "Failed to verify subscription with PayPal", "verification_failed");
   }
 }

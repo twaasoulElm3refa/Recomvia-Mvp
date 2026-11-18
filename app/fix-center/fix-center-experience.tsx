@@ -1,46 +1,233 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { NavigationLink as Link } from "@/app/components/navigation-link";
-import { ArrowRight, Bot, ChevronRight, Eye, LockKeyhole, RotateCcw, ShieldCheck, UserRoundCheck, WandSparkles } from "lucide-react";
-import { useSiteLocale } from "@/hooks/use-site-locale";
+import { ArrowRight, CheckCircle2, ExternalLink, Eye, FileSearch, LockKeyhole, ShieldCheck } from "lucide-react";
 import { AppShell, StatusPill } from "@/app/components/app-shell";
+import { NavigationLink as Link } from "@/app/components/navigation-link";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { useSiteLocale } from "@/hooks/use-site-locale";
+import { safeSourceUrl } from "@/lib/analysis-target";
+import type { StoredFinding } from "@/db/product";
 
-type Kind="Auto"|"Approval"|"Expert";
-type Issue={id:string;title:string;area:string;impact:"High"|"Medium";kind:Kind;credits:number;why:string;before:string;after:string;confidence:number};
-type ModelContext={registerTool:(tool:Record<string,unknown>,options?:{signal?:AbortSignal})=>void|Promise<void>};
+type Finding = Pick<
+  StoredFinding,
+  "id" | "code" | "title" | "category" | "severity" | "status" |
+  "explanation" | "evidence" | "sourceUrl"
+>;
+type Filter = "all" | "critical" | "high" | "other";
+type ModelContext = {
+  registerTool: (tool: Record<string, unknown>, options?: { signal?: AbortSignal }) => void | Promise<void>;
+};
+type Props = {
+  scanId: string | null;
+  targetName: string | null;
+  hasWebsiteAudit: boolean;
+  findings: Finding[];
+};
 
-const issues:Issue[]=[
-  {id:"answer-block",title:"Add an extractable answer block",area:"Content",impact:"High",kind:"Auto",credits:10,why:"AI systems can identify concise, direct answers more reliably when the page exposes a self-contained response.",before:"Our platform gives teams powerful workflow capabilities across many use cases.",after:"Acme is a workflow automation platform for small teams. It connects recurring tasks, approvals, and handoffs in one workspace.",confidence:91},
-  {id:"org-schema",title:"Complete Organization schema",area:"Technical",impact:"High",kind:"Auto",credits:10,why:"Incomplete entity identifiers make it harder to connect the website with the same brand across trusted sources.",before:'{ "@type": "Organization", "name": "Acme" }',after:'{ "@type": "Organization", "name": "Acme", "url": "https://acme.example", "sameAs": ["verified profiles"] }',confidence:94},
-  {id:"entity-description",title:"Clarify the primary brand description",area:"Entity",impact:"High",kind:"Approval",credits:15,why:"The current wording shifts between three categories, creating ambiguity about what the company actually provides.",before:"Acme helps organizations do more with technology and collaboration.",after:"Acme provides workflow automation software for small distributed teams managing approvals, handoffs, and recurring operations.",confidence:86},
-  {id:"faq-structure",title:"Restructure high-intent FAQs",area:"Content",impact:"Medium",kind:"Approval",credits:10,why:"Questions exist, but answers mix multiple intents and do not resolve the commercial query directly.",before:"How does it work? Acme has many tools and features for modern businesses...",after:"What does Acme automate? Acme automates recurring approvals, task handoffs, and status updates for small teams.",confidence:82},
-  {id:"internal-links",title:"Connect service pages to proof assets",area:"Architecture",impact:"Medium",kind:"Auto",credits:15,why:"Relevant case evidence is isolated from the pages expected to support recommendation decisions.",before:"Service page → no evidence link",after:"Service page → relevant case study → methodology",confidence:88},
-  {id:"authority",title:"Build third-party authority signals",area:"Authority",impact:"High",kind:"Expert",credits:0,why:"External mentions and credible citations require editorial strategy and outreach, not an automated promise.",before:"Limited independent brand references",after:"Expert scope: evidence asset, source map, outreach plan, and measurable coverage",confidence:79},
-];
+const severityOrder: Record<Finding["severity"], number> = {
+  critical: 0, high: 1, medium: 2, low: 3,
+};
+const severityAr = { critical: "حرج", high: "مرتفع", medium: "متوسط", low: "منخفض" };
+const copy = {
+  en: {
+    title: "Fix Center", description: "Review actual findings from your saved website audit before proposing any change.",
+    locked: "Execution locked", beta: "Evidence review only", notice: "No website is modified, no credit balance is charged, and no change is automatically approved.",
+    scope: "Saved website analysis", missing: "No completed website audit yet", missingText: "Analyze a website to see real technical and content findings. A person or topic analysis does not create a website audit.",
+    clear: "No unresolved findings in this audit", clearText: "This does not guarantee visibility or recommend any website change.",
+    start: "Analyze a website", report: "Open original report", issues: "Findings for review",
+    all: "All", critical: "Critical", high: "High", other: "Other",
+    view: "Inspect evidence", evidence: "Recorded evidence", explanation: "Why it matters", source: "Original source",
+    noEvidence: "No evidence excerpt was stored for this finding.", noSource: "No public source URL was recorded.",
+    status: "Observation", noCharge: "Pricing not yet available", noChargeNote: "Fix Credit prices and application workflows are not active. The report contains observations, not approved before-and-after edits.",
+    contact: "Ask about Fix Credits", notFound: "No matching findings in this category.",
+  },
+  ar: {
+    title: "مركز الإصلاح", description: "راجع الملاحظات الحقيقية من فحص موقعك المحفوظ قبل اقتراح أي تغيير.",
+    locked: "التنفيذ مغلق", beta: "مراجعة الأدلة فقط", notice: "لن يُعدَّل أي موقع، ولن تُخصم نقاط، ولن تتم الموافقة تلقائيًا على أي تغيير.",
+    scope: "فحص موقع محفوظ", missing: "لا يوجد فحص موقع مكتمل بعد", missingText: "ابدأ فحص موقع لعرض ملاحظاته التقنية والتحريرية الفعلية. تحليل الأشخاص والموضوعات لا ينشئ فحصًا تقنيًا للموقع.",
+    clear: "لا توجد ملاحظات معلقة في هذا الفحص", clearText: "هذه النتيجة ليست ضمانًا للظهور ولا تفويضًا بإجراء تغييرات على الموقع.",
+    start: "ابدأ فحص موقع", report: "افتح التقرير الأصلي", issues: "الملاحظات التي تحتاج مراجعة",
+    all: "الكل", critical: "حرجة", high: "مرتفعة", other: "أخرى",
+    view: "راجع الدليل", evidence: "الدليل المحفوظ", explanation: "أهمية الملاحظة", source: "المصدر الأصلي",
+    noEvidence: "لم يُحفظ مقتطف دليل لهذه الملاحظة.", noSource: "لم يُحفظ رابط مصدر عام لهذه الملاحظة.",
+    status: "الملاحظة", noCharge: "الأسعار غير مفعّلة", noChargeNote: "لم تُفتح أسعار نقاط الإصلاح أو آلية التنفيذ بعد. يعرض التقرير ملاحظات مرصودة لا تعديلات قبل وبعد معتمدة.",
+    contact: "استفسر عن نقاط الإصلاح", notFound: "لا توجد ملاحظات مطابقة لهذا التصنيف.",
+  },
+} as const;
 
-export function FixCenterExperience(){
-  const ar=useSiteLocale()==="ar";
-  const [selected,setSelected]=useState<Issue|null>(null);
-  const auto=useMemo(()=>issues.filter(x=>x.kind==="Auto"),[]); const approval=useMemo(()=>issues.filter(x=>x.kind==="Approval"),[]); const expert=useMemo(()=>issues.filter(x=>x.kind==="Expert"),[]);
-  const stage=useCallback((id:string)=>{const found=issues.find(x=>x.id===id);if(!found)throw new Error("Unknown issue id.");setSelected(found);return {issueId:found.id,title:found.title,executionType:found.kind,credits:found.credits,status:"preview_opened",applicationEnabled:false};},[]);
-  useEffect(()=>{const context=(document as Document&{modelContext?:ModelContext}).modelContext;if(!context?.registerTool)return;const lifecycle=new AbortController();const registration=context.registerTool({name:"stage_fix_preview",title:"Preview a Recomvia fix",description:"Open the same before/after preview used in Recomvia Fix Center for one detected issue. This stages a preview and does not modify a live website.",inputSchema:{type:"object",properties:{issueId:{type:"string",enum:issues.map(x=>x.id)}},required:["issueId"],additionalProperties:false},annotations:{readOnlyHint:false,untrustedContentHint:false},execute:(input:unknown)=>{if(!input||typeof input!=="object"||typeof (input as {issueId?:unknown}).issueId!=="string")throw new Error("issueId is required.");return stage((input as {issueId:string}).issueId)}},{signal:lifecycle.signal});Promise.resolve(registration).catch(()=>undefined);return()=>lifecycle.abort()},[stage]);
+export function FixCenterExperience({ scanId, targetName, hasWebsiteAudit, findings }: Props) {
+  const ar = useSiteLocale() === "ar";
+  const t = copy[ar ? "ar" : "en"];
+  const [filter, setFilter] = useState<Filter>("all");
+  const [selected, setSelected] = useState<Finding | null>(null);
+  const unresolved = useMemo(
+    () => findings.filter((finding) => finding.status !== "pass")
+      .sort((a, b) => severityOrder[a.severity] - severityOrder[b.severity]),
+    [findings],
+  );
+  const groups = useMemo(() => ({
+    all: unresolved,
+    critical: unresolved.filter((item) => item.severity === "critical"),
+    high: unresolved.filter((item) => item.severity === "high"),
+    other: unresolved.filter((item) => item.severity === "medium" || item.severity === "low"),
+  }), [unresolved]);
+  const openEvidence = useCallback((issueId: string) => {
+    const finding = unresolved.find((item) => item.id === issueId);
+    if (!finding) throw new Error("Finding not present in this account's report.");
+    setSelected(finding);
+    return {
+      issueId: finding.id,
+      scanId,
+      title: finding.title,
+      status: "evidence_opened",
+      applicationEnabled: false,
+      creditsCharged: 0,
+    };
+  }, [unresolved, scanId]);
 
-  function list(rows:Issue[]){return <div className="space-y-3">{rows.map(issue=><Card key={issue.id} className="rounded-[20px] border-slate-200 bg-white py-0 shadow-none"><CardContent className="flex flex-col gap-5 p-5 lg:flex-row lg:items-center"><span className={`grid size-11 shrink-0 place-items-center rounded-2xl ${issue.kind==="Auto"?"bg-blue-50 text-blue-600":issue.kind==="Approval"?"bg-violet-50 text-violet-600":"bg-amber-50 text-amber-700"}`}>{issue.kind==="Auto"?<Bot className="size-5"/>:issue.kind==="Approval"?<Eye className="size-5"/>:<UserRoundCheck className="size-5"/>}</span><div className="min-w-0 flex-1"><div className="flex flex-wrap items-center gap-2"><h3 className="font-extrabold">{issue.title}</h3><StatusPill tone="warn">Catalog preview</StatusPill></div><p className="mt-2 line-clamp-2 text-sm leading-6 text-slate-500">{issue.why}</p><div className="mt-3 flex flex-wrap gap-2"><StatusPill tone={issue.impact==="High"?"bad":"warn"}>{issue.impact} impact</StatusPill><StatusPill tone="info">{issue.area}</StatusPill><span className="text-xs font-bold text-slate-400">Illustrative confidence {issue.confidence}%</span></div></div><div className="flex items-center justify-between gap-4 border-t border-slate-100 pt-4 lg:min-w-[220px] lg:border-l lg:border-t-0 lg:pl-5 lg:pt-0"><div>{issue.kind==="Expert"?<span className="text-sm font-bold text-slate-600">Scoped quote</span>:<><p className="text-xl font-extrabold">{issue.credits}</p><p className="text-[11px] text-slate-500">provisional credits</p></>}</div><Button variant={issue.kind==="Expert"?"outline":"default"} className="rounded-xl" onClick={()=>stage(issue.id)}>{issue.kind==="Expert"?"Preview expert route":"Preview example"}<ChevronRight className="size-4"/></Button></div></CardContent></Card>)}</div>}
+  useEffect(() => {
+    if (!unresolved.length) return;
+    const context = (document as Document & { modelContext?: ModelContext }).modelContext;
+    if (!context?.registerTool) return;
+    const lifecycle = new AbortController();
+    const registration = context.registerTool({
+      name: "stage_fix_preview",
+      title: "Review evidence for a real Recomvia finding",
+      description: "Show saved evidence for an existing website finding; do not generate, approve or apply a change, and do not charge Fix Credits.",
+      inputSchema: {
+        type: "object",
+        properties: { issueId: { type: "string", enum: unresolved.map((item) => item.id) } },
+        required: ["issueId"], additionalProperties: false,
+      },
+      annotations: { readOnlyHint: true, untrustedContentHint: true },
+      execute: (input: unknown) => {
+        if (!input || typeof input !== "object" || typeof (input as { issueId?: unknown }).issueId !== "string")
+          throw new Error("issueId is required.");
+        return openEvidence((input as { issueId: string }).issueId);
+      },
+    }, { signal: lifecycle.signal });
+    Promise.resolve(registration).catch(() => undefined);
+    return () => lifecycle.abort();
+  }, [openEvidence, unresolved]);
 
-  return <AppShell title="Fix catalog preview" description="Preview the planned execution routes. Credits cannot be purchased or consumed until billing, versioning, and rollback are connected." action={<div className="flex items-center gap-3 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-2.5"><LockKeyhole className="size-5 text-amber-700"/><div><p className="text-xs text-amber-700">Private beta</p><p className="font-extrabold text-amber-950">Application locked</p></div></div>}>
-    <div className="mb-5 rounded-2xl border border-blue-200 bg-blue-50/70 px-4 py-3 text-sm text-blue-900"><strong>Preview only:</strong> no website change is applied and no Fix Credits are charged from this screen.</div>
-    <div className="mb-6 grid gap-4 sm:grid-cols-3">{[
-      {value:String(auto.length),label:"Auto-fix examples",Icon:Bot,color:"bg-blue-50 text-blue-600"},
-      {value:String(approval.length),label:"Approval examples",Icon:Eye,color:"bg-violet-50 text-violet-600"},
-      {value:String(expert.length),label:"Expert examples",Icon:UserRoundCheck,color:"bg-amber-50 text-amber-700"}
-    ].map(({value,label,Icon,color})=><Card key={label} className="rounded-[20px] border-slate-200 py-0 shadow-none"><CardContent className="flex items-center gap-4 p-5"><span className={`grid size-11 place-items-center rounded-2xl ${color}`}><Icon className="size-5"/></span><div><p className="text-2xl font-extrabold">{value}</p><p className="text-sm text-slate-500">{label}</p></div></CardContent></Card>)}</div>
-    <Tabs defaultValue="all" className="gap-5"><div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center"><TabsList className="h-auto flex-wrap rounded-xl bg-slate-200/60 p-1"><TabsTrigger value="all" className="px-4 py-2.5">All issues</TabsTrigger><TabsTrigger value="auto" className="px-4 py-2.5">Auto-fix</TabsTrigger><TabsTrigger value="approval" className="px-4 py-2.5">Needs approval</TabsTrigger><TabsTrigger value="expert" className="px-4 py-2.5">Expert</TabsTrigger></TabsList><Button variant="outline" className="rounded-xl" onClick={()=>stage("answer-block")}><WandSparkles className="size-4"/>Preview first safe fix</Button></div><TabsContent value="all">{list(issues)}</TabsContent><TabsContent value="auto">{list(auto)}</TabsContent><TabsContent value="approval">{list(approval)}</TabsContent><TabsContent value="expert">{list(expert)}</TabsContent></Tabs>
-    <Dialog open={Boolean(selected)} onOpenChange={open=>!open&&setSelected(null)}><DialogContent className="max-h-[90vh] overflow-y-auto rounded-[24px] sm:max-w-2xl">{selected&&<><DialogHeader><div className="mb-2 flex items-center gap-2"><StatusPill tone={selected.kind==="Expert"?"warn":"info"}>{selected.kind} fix</StatusPill><StatusPill tone="warn">Preview only</StatusPill></div><DialogTitle className="text-2xl font-extrabold">{selected.title}</DialogTitle><DialogDescription className="leading-6">{selected.why}</DialogDescription></DialogHeader><div className="grid gap-4 md:grid-cols-2"><div className="rounded-2xl border border-red-100 bg-red-50/50 p-4"><p className="mb-3 text-xs font-bold uppercase tracking-wider text-red-600">Example current version</p><pre className="whitespace-pre-wrap font-sans text-sm leading-6 text-slate-700">{selected.before}</pre></div><div className="rounded-2xl border border-emerald-100 bg-emerald-50/50 p-4"><p className="mb-3 text-xs font-bold uppercase tracking-wider text-emerald-600">Example recommended version</p><pre className="whitespace-pre-wrap font-sans text-sm leading-6 text-slate-700">{selected.after}</pre></div></div><div className="flex items-start gap-3 rounded-2xl bg-slate-50 p-4 text-sm text-slate-600"><ShieldCheck className="mt-0.5 size-5 shrink-0 text-blue-600"/><p><strong className="text-[#07111f]">Application remains locked:</strong> production changes require a finding from a live scan, explicit approval, a version record, audit log, and rollback point.</p></div><DialogFooter className="items-center sm:justify-between"><div className="text-start">{selected.kind==="Expert"?<p className="text-sm font-bold">Expert scope · no credits charged</p>:<p><strong className="text-xl">{selected.credits}</strong> <span className="text-sm text-slate-500">provisional credits</span></p>}</div><Button asChild className="rounded-xl bg-[#07111f]"><Link href="/contact">Join the fix beta <ArrowRight className="size-4"/></Link></Button></DialogFooter></>}</DialogContent></Dialog>
-    <div className="mt-6 flex flex-col gap-4 rounded-[22px] border border-slate-200 bg-[#07111f] p-6 text-white sm:flex-row sm:items-center"><RotateCcw className="size-6 text-cyan-300"/><div className="flex-1"><p className="font-bold">{ar ? "نقاط الإصلاح — Fix Credits" : "Fix Credits"}</p><p className="mt-1 text-sm text-slate-400">{ar ? "اشتراكك الشهري يؤهلك لشراء النقاط منفصلة عند فتح البيع. يظهر نطاق الإصلاح وتكلفته قبل الموافقة؛ الخدمات البشرية تُسعّر منفصلة." : "Your monthly subscription makes you eligible to purchase credits separately when sales open. Each fix shows scope and cost before approval; human services are separately priced."}</p></div><Button asChild className="rounded-xl bg-white text-[#07111f]"><Link href="/contact?product=fix-credits">{ar ? "الاستفسار عن النقاط" : "Ask about credits"}</Link></Button></div>
-  </AppShell>
+  const reportHref = scanId ? `/report?scan=${encodeURIComponent(scanId)}` : "/dashboard";
+  const source = selected ? safeSourceUrl(selected.sourceUrl) : null;
+  const severity = (item: Finding) => ar ? severityAr[item.severity] : item.severity;
+  const tone = (item: Finding) => item.severity === "critical" || item.severity === "high" ? "bad" as const : "warn" as const;
+
+  return (
+    <AppShell
+      title={t.title}
+      description={t.description}
+      siteLabel={targetName || t.scope}
+      action={<span className="inline-flex items-center gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-semibold text-amber-900"><LockKeyhole className="size-4" />{t.locked}</span>}
+    >
+      <div className="mb-6 flex items-start gap-3 rounded-2xl border border-blue-200 bg-blue-50 p-4 text-sm leading-6 text-blue-950">
+        <ShieldCheck className="mt-1 size-5 shrink-0 text-blue-600" />
+        <p><strong>{t.beta}.</strong> {t.notice}</p>
+      </div>
+      {!hasWebsiteAudit ? (
+        <Card className="rounded-3xl border-slate-200 bg-white">
+          <CardContent className="p-8 text-center">
+            <FileSearch className="mx-auto size-10 text-blue-600" />
+            <h2 className="mt-5 text-xl font-extrabold">{t.missing}</h2>
+            <p className="mx-auto mt-3 max-w-xl text-sm leading-7 text-slate-600">{t.missingText}</p>
+            <Button asChild className="mt-6 rounded-xl bg-blue-600"><Link href="/">{t.start}<ArrowRight className="size-4" /></Link></Button>
+          </CardContent>
+        </Card>
+      ) : (
+        <>
+          <div className="mb-6 flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-slate-200 bg-white p-5">
+            <div>
+              <p className="text-xs font-bold uppercase tracking-wider text-slate-500">{t.scope}</p>
+              <h2 className="mt-1 text-lg font-extrabold" dir="auto">{targetName || t.scope}</h2>
+            </div>
+            <Button asChild variant="outline" className="rounded-xl"><Link href={reportHref}>{t.report}<ArrowRight className="size-4" /></Link></Button>
+          </div>
+          {unresolved.length === 0 ? (
+            <Card className="rounded-3xl border-slate-200 bg-white">
+              <CardContent className="p-8 text-center">
+                <CheckCircle2 className="mx-auto size-10 text-emerald-600" />
+                <h2 className="mt-4 text-xl font-extrabold">{t.clear}</h2>
+                <p className="mt-3 text-sm text-slate-500">{t.clearText}</p>
+              </CardContent>
+            </Card>
+          ) : (
+            <>
+              <h2 className="text-xl font-extrabold">{t.issues} ({unresolved.length})</h2>
+              <div className="my-5 flex flex-wrap gap-2" role="group" aria-label={t.issues}>
+                {(["all", "critical", "high", "other"] as const).map((key) => (
+                  <Button key={key} type="button" variant={filter === key ? "default" : "outline"}
+                    aria-pressed={filter === key} onClick={() => setFilter(key)} className="rounded-xl">
+                    {t[key]} ({groups[key].length})
+                  </Button>
+                ))}
+              </div>
+              {groups[filter].length === 0 ? (
+                <p className="rounded-2xl border border-slate-200 bg-white p-6 text-sm text-slate-600">{t.notFound}</p>
+              ) : (
+                <div className="space-y-3">
+                  {groups[filter].map((item) => (
+                    <Card key={item.id} className="rounded-2xl border-slate-200 bg-white py-0 shadow-none">
+                      <CardContent className="flex flex-col gap-4 p-5 sm:flex-row sm:items-center">
+                        <div className="min-w-0 flex-1">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <h3 className="font-extrabold" dir="auto">{item.title}</h3>
+                            <StatusPill tone={tone(item)}>{severity(item)}</StatusPill>
+                          </div>
+                          <p className="mt-2 line-clamp-2 text-sm leading-6 text-slate-600" dir="auto">{item.explanation}</p>
+                          <p className="mt-3 text-xs font-semibold text-slate-500">{item.category}</p>
+                        </div>
+                        <Button variant="outline" className="shrink-0 rounded-xl" onClick={() => openEvidence(item.id)}>
+                          <Eye className="size-4" />{t.view}
+                        </Button>
+                      </CardContent>
+                    </Card>
+                  ))}
+                </div>
+              )}
+            </>
+          )}
+        </>
+      )}
+      <section className="mt-8 rounded-2xl border border-slate-200 bg-[#07111f] p-6 text-white">
+        <h2 className="font-extrabold">{t.noCharge}</h2>
+        <p className="mt-3 text-sm leading-7 text-slate-300">{t.noChargeNote}</p>
+        <Button asChild className="mt-5 rounded-xl bg-white text-[#07111f] hover:bg-slate-100">
+          <Link href="/contact?product=fix-credits">{t.contact}<ArrowRight className="size-4" /></Link>
+        </Button>
+      </section>
+      <Dialog open={Boolean(selected)} onOpenChange={(open) => { if (!open) setSelected(null); }}>
+        <DialogContent className="max-h-[90vh] overflow-y-auto rounded-3xl sm:max-w-2xl">
+          {selected && (
+            <>
+              <DialogHeader>
+                <StatusPill tone={tone(selected)}>{severity(selected)}</StatusPill>
+                <DialogTitle dir="auto" className="mt-3 text-xl font-extrabold">{selected.title}</DialogTitle>
+                <DialogDescription>{t.status}: {selected.status} · {selected.category}</DialogDescription>
+              </DialogHeader>
+              <section>
+                <h3 className="text-sm font-extrabold">{t.explanation}</h3>
+                <p className="mt-2 whitespace-pre-wrap text-sm leading-7 text-slate-700" dir="auto">{selected.explanation}</p>
+              </section>
+              <section className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                <h3 className="text-sm font-extrabold">{t.evidence}</h3>
+                <p className="mt-2 whitespace-pre-wrap break-words text-sm leading-7 text-slate-700" dir="auto">{selected.evidence || t.noEvidence}</p>
+              </section>
+              <section>
+                <h3 className="text-sm font-extrabold">{t.source}</h3>
+                {source ? <a href={source} target="_blank" rel="noopener noreferrer" className="mt-2 inline-flex max-w-full items-center gap-2 break-all text-sm font-semibold text-blue-700 underline">{source}<ExternalLink className="size-4 shrink-0" /></a> : <p className="mt-2 text-sm text-slate-500">{t.noSource}</p>}
+              </section>
+              <DialogFooter>
+                <Button asChild className="rounded-xl bg-blue-600"><Link href={reportHref}>{t.report}<ArrowRight className="size-4" /></Link></Button>
+              </DialogFooter>
+            </>
+          )}
+        </DialogContent>
+      </Dialog>
+    </AppShell>
+  );
 }

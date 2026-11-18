@@ -1,5 +1,5 @@
 import { getAuthenticatedUser } from "@/app/auth";
-import { createSupportTicket } from "@/db/support";
+import { createSupportTicket, SupportRateLimitError } from "@/db/support";
 
 export const runtime = "edge";
 
@@ -43,7 +43,11 @@ async function hash(value: string) {
 export async function POST(request: Request) {
   let payload: TicketRequest;
   try {
-    payload = (await request.json()) as TicketRequest;
+    const value: unknown = await request.json();
+    if (value === null || typeof value !== "object" || Array.isArray(value)) {
+      return Response.json({ error: "Invalid request body." }, { status: 400 });
+    }
+    payload = value as TicketRequest;
   } catch {
     return Response.json({ error: "Invalid request body." }, { status: 400 });
   }
@@ -81,7 +85,13 @@ export async function POST(request: Request) {
       question,
       pageUrl,
     });
-  } catch {
+  } catch (error) {
+    if (error instanceof SupportRateLimitError) {
+      return Response.json(
+        { error: "Too many requests. Please try again later.", code: "rate_limited" },
+        { status: 429, headers: { "Retry-After": "3600", "Cache-Control": "no-store" } },
+      );
+    }
     return Response.json({ error: "Support is temporarily unavailable. Please try again shortly." }, { status: 503 });
   }
 

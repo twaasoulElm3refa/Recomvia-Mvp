@@ -515,6 +515,10 @@ export const supportTickets = sqliteTable(
       table.status,
       table.createdAt,
     ),
+    index("idx_support_tickets_email_created").on(
+      table.requesterEmail,
+      table.createdAt,
+    ),
   ],
 );
 

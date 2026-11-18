@@ -1,5 +1,14 @@
 import { env } from "cloudflare:workers";
 
+const MAX_SUPPORT_TICKETS_PER_HOUR = 5;
+
+export class SupportRateLimitError extends Error {
+  constructor() {
+    super("Support ticket hourly limit reached.");
+    this.name = "SupportRateLimitError";
+  }
+}
+
 export type SupportTicket = {
   id: number;
   publicId: string;
@@ -28,11 +37,23 @@ export async function createSupportTicket(input: {
   question: string;
   pageUrl: string;
 }) {
-  await database().prepare(`
+  // Enforce the per-email limit in the INSERT itself: two concurrent requests
+  // cannot both pass a separate count check and then create excess tickets.
+  const result = await database().prepare(`
     INSERT INTO support_tickets
       (public_id, access_key_hash, requester_name, requester_email, authenticated_user_id, question, page_url)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
-  `).bind(input.publicId,input.accessKeyHash,input.requesterName,input.requesterEmail,input.authenticatedUserId,input.question,input.pageUrl).run();
+    SELECT ?, ?, ?, ?, ?, ?, ?
+    WHERE (
+      SELECT COUNT(*) FROM support_tickets
+      WHERE requester_email = ?
+        AND created_at >= datetime('now', '-1 hour')
+    ) < ?
+  `).bind(
+    input.publicId, input.accessKeyHash, input.requesterName, input.requesterEmail,
+    input.authenticatedUserId, input.question, input.pageUrl,
+    input.requesterEmail, MAX_SUPPORT_TICKETS_PER_HOUR,
+  ).run();
+  if (result.meta.changes === 0) throw new SupportRateLimitError();
   return { publicId: input.publicId };
 }
 

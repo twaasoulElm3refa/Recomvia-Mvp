@@ -15,7 +15,6 @@ import {
   clearPayPalTokenCache,
   STARTER_PRICE_AMOUNT,
   STARTER_CURRENCY,
-  STARTER_AMOUNT_CENTS,
   processVerifiedWebhookEvent,
 } from "../lib/paypal";
 import { database, getEntitlementForUser, getReportForUser } from "../db/product";
@@ -28,6 +27,8 @@ import { GET as currentSubscriptionRoute } from "../app/api/payments/paypal/curr
 import { POST as webhookRoute } from "../app/api/payments/paypal/webhook/route";
 import { isPayPalPaymentsEnabled } from "../lib/paypal/availability";
 import { canStartPaidCheckout, isPlanActionDisabled } from "../lib/payment-checkout-ui";
+import { paymentFailure } from "../lib/paypal/http";
+import { PayPalError } from "../lib/paypal/client";
 
 const TEST_CONFIG = {
   PAYPAL_ENV: "sandbox",
@@ -104,6 +105,54 @@ test("disabled checkout routes return 503 before PayPal calls or local checkout 
   assert.equal(providerCalls, 0);
   assert.equal((sqlite.prepare("SELECT COUNT(*) AS n FROM subscription_checkout_claims").get() as any).n, 0);
   sqlite.close();
+});
+
+test("checkout routes reject malformed JSON shapes before payment or database writes", async () => {
+  const sqlite = createFixture(false, false);
+  Object.assign(state.env, TEST_CONFIG);
+  state.user = userA;
+  let providerCalls = 0;
+  setPayPalTransport(async () => { providerCalls++; throw new Error("Provider should not be called"); });
+
+  const routes = [
+    ["create-order", createOrderRoute, "scanId"],
+    ["capture-order", captureOrderRoute, "orderId"],
+    ["create-subscription", createSubscriptionRoute, "plan"],
+    ["revise-subscription", reviseSubscriptionRoute, "plan"],
+    ["sync-subscription", syncSubscriptionRoute, "subscriptionId"],
+  ] as const;
+  for (const [name, handler, field] of routes) {
+    for (const payload of ["null", "[]", '"string"', "123"]) {
+      const response = await handler(new Request(`https://recomvia.test/api/payments/paypal/${name}`, { method: "POST", body: payload }));
+      assert.equal(response.status, 400, `${name} should reject ${payload}`);
+      assert.equal(((await response.json()) as { code: string }).code, "invalid_request");
+    }
+    const response = await handler(new Request(`https://recomvia.test/api/payments/paypal/${name}`, {
+      method: "POST", body: JSON.stringify({ [field]: 123 }),
+    }));
+    assert.equal(response.status, 400, `${name} should reject a non-string ${field}`);
+  }
+  const webhook = await webhookRoute(new Request("https://recomvia.test/api/payments/paypal/webhook", { method: "POST", body: "null" }));
+  assert.equal(webhook.status, 400);
+  assert.equal(providerCalls, 0);
+  assert.equal((sqlite.prepare("SELECT COUNT(*) AS n FROM report_purchases").get() as { n: number }).n, 0);
+  assert.equal((sqlite.prepare("SELECT COUNT(*) AS n FROM subscription_checkout_claims").get() as { n: number }).n, 0);
+  sqlite.close();
+});
+
+test("payment failures preserve safe status codes without leaking provider diagnostics", async () => {
+  for (const [error, status] of [
+    [new PayPalError("PRIVATE_PROVIDER_DETAILS", 400, "PRIVATE_DEBUG_ID"), 400],
+    [new PayPalError("PRIVATE_PROVIDER_DETAILS", 403, "PRIVATE_DEBUG_ID"), 403],
+    [new PayPalError("PRIVATE_PROVIDER_DETAILS", 401, "PRIVATE_DEBUG_ID"), 502],
+    [new PayPalError("PRIVATE_PROVIDER_DETAILS", 429, "PRIVATE_DEBUG_ID"), 503],
+    [new Error("PRIVATE_DATABASE_DETAILS"), 500],
+  ] as const) {
+    const response = paymentFailure(error, "Payment could not be completed.", "paypal_error");
+    assert.equal(response.status, status);
+    assert.deepEqual(await response.json(), { error: "Payment could not be completed.", code: "paypal_error" });
+    assert.equal(response.headers.get("Cache-Control"), "no-store");
+  }
 });
 
 function seedUserAndOrg(sqlite: any) {
@@ -282,10 +331,10 @@ test("Starter Order Capture: unlocks target report, enforces $4.99 amount, cross
   Object.assign(state.env, TEST_CONFIG);
   clearPayPalTokenCache();
 
-  let captureReturnStatus = "COMPLETED";
+  const captureReturnStatus = "COMPLETED";
   let captureAmountValue = "4.99";
   let captureCurrency = "USD";
-  let captureCustomId = "org-target-test-a:scan-a";
+  const captureCustomId = "org-target-test-a:scan-a";
 
   setPayPalTransport(async (url) => {
     const urlStr = String(url);

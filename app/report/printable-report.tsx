@@ -32,6 +32,8 @@ export function PrintableReport({ scan, starter, ar, plan }: { scan: StoredScan;
     : scan.insights?.level === "advanced" ? "Growth / Pro" : plan;
   return <article className="print-report" dir={ar ? "rtl" : "ltr"} lang={ar ? "ar" : "en"}>
     <header className="print-cover">
+      {/* A local SVG in the printable document does not benefit from Next image optimization. */}
+      {/* eslint-disable-next-line @next/next/no-img-element */}
       <div className="print-brand" dir="ltr"><img src="/favicon.svg" alt="Recomvia" width="38" height="38" /><span>recomvia</span></div>
       <p className="print-eyebrow">{t("Private visibility report", "تقرير ظهور خاص")}</p>
       <h1>{t("AI Visibility Report", "تقرير الظهور في الذكاء الاصطناعي")}</h1>

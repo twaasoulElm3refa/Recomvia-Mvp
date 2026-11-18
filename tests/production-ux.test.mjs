@@ -16,9 +16,9 @@ const Button = ({ asChild, children, disabled }) => asChild ? children : React.c
 const icons = new Proxy({}, { get: () => () => null });
 function load(path, mocks = {}) {
   const js = ts.transpileModule(source(path), { compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX, target: ts.ScriptTarget.ES2022 } }).outputText;
-  const module = { exports: {} };
-  new Function("require", "module", "exports", js)((id) => mocks[id] ?? require(id), module, module.exports);
-  return module.exports;
+  const loadedModule = { exports: {} };
+  new Function("require", "module", "exports", js)((id) => mocks[id] ?? require(id), loadedModule, loadedModule.exports);
+  return loadedModule.exports;
 }
 const plans = load("lib/plans.ts");
 const mocks = {
@@ -63,6 +63,20 @@ test("workspace navigation and public report labels are accurate", () => {
     assert.match(text, /signedIn && <Link href="\/report"/);
     assert.match(text, /My reports/);
     assert.match(text, /\/dashboard/);
-    assert.match(text, /\/auth\/google/);
+    assert.match(text, /\/auth\/start/);
   }
+});
+
+test("Fix Center shows report-owned evidence, not fabricated brands or credit prices", () => {
+  const page = source("app/fix-center/page.tsx");
+  const ui = source("app/fix-center/fix-center-experience.tsx");
+  assert.match(page, /getLatestWebsiteReportForUser/);
+  assert.match(page, /canViewFullReport/);
+  assert.match(page, /finding.status !== "pass"/);
+  assert.match(ui, /selected.evidence/);
+  assert.match(ui, /applicationEnabled: false/);
+  assert.doesNotMatch(ui, /Acme|provisional credits|Illustrative confidence|const issues:/);
+  const report = source("app/report/report-content.tsx");
+  assert.match(report, /canUseFixCredits && fullScan\?\.readinessScore/);
+  assert.match(report, /\/fix-center\?scan=/);
 });

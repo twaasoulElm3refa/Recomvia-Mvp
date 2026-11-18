@@ -304,9 +304,9 @@ export function BrandMark({ compact = false }: { compact?: boolean }) {
   );
 }
 
-export function ScanExperience({ paymentsEnabled }: { paymentsEnabled: boolean }) {
+export function ScanExperience({ paymentsEnabled, initialLocale = "en" }: { paymentsEnabled: boolean; initialLocale?: Locale }) {
   const signedIn = useAccountEntry();
-  const [locale, setLocale] = useState<Locale>("en");
+  const [locale, setLocale] = useState<Locale>(initialLocale);
   const [url, setUrl] = useState("");
   const [status, setStatus] = useState<"idle" | "scanning" | "done">("idle");
   const [scanResult, setScanResult] = useState<LiveScan | null>(null);
@@ -321,6 +321,9 @@ export function ScanExperience({ paymentsEnabled }: { paymentsEnabled: boolean }
   const [needsSignIn, setNeedsSignIn] = useState(false);
   const t = text[locale];
   const rtl = locale === "ar";
+  const blogRoot = rtl ? "/ar/blog" : "/blog";
+  const localizedPages = new Set(["/pricing", "/contact", "/faq", "/methodology", "/privacy", "/terms", "/billing-policy"]);
+  const publicHref = (href: string) => rtl && localizedPages.has(href) ? `/ar${href}` : href;
   const domain = useMemo(
     () =>
       url
@@ -330,7 +333,11 @@ export function ScanExperience({ paymentsEnabled }: { paymentsEnabled: boolean }
   );
 
   useEffect(() => {
-    const syncLocale = () => setLocale(readStoredSiteLocale("en"));
+    const syncLocale = () => {
+      // Root page language is carried by a canonical URL for SSR and SEO.
+      const path = window.location.pathname;
+      setLocale(path === "/ar" ? "ar" : path === "/" ? "en" : readStoredSiteLocale("en"));
+    };
     const timer = window.setTimeout(syncLocale, 0);
     window.addEventListener(SITE_LOCALE_EVENT, syncLocale);
     window.addEventListener("storage", syncLocale);
@@ -588,11 +595,11 @@ export function ScanExperience({ paymentsEnabled }: { paymentsEnabled: boolean }
 
   const navigation: SiteNavItem[] = [
     { href: "/#product", label: t.product },
-    { href: "/pricing", label: t.subscriptions },
-    { href: "/blog", label: t.blog },
-    { href: "/methodology", label: t.methodology },
-    { href: "/faq", label: t.faq },
-    { href: "/contact", label: t.contact },
+    { href: publicHref("/pricing"), label: t.subscriptions },
+    { href: blogRoot, label: t.blog },
+    { href: publicHref("/methodology"), label: t.methodology },
+    { href: publicHref("/faq"), label: t.faq },
+    { href: publicHref("/contact"), label: t.contact },
   ];
   const stats = [
     { value: "12", label: t.stats[0], icon: BookOpen },
@@ -675,15 +682,15 @@ export function ScanExperience({ paymentsEnabled }: { paymentsEnabled: boolean }
               className="rounded-xl"
               onClick={() => {
                 const nextLocale = rtl ? "en" : "ar";
-                setLocale(nextLocale);
                 storeSiteLocale(nextLocale);
+                window.location.assign(nextLocale === "ar" ? "/ar" : "/");
               }}
             >
               <Globe2 className="size-4" />
               {rtl ? "EN" : "العربية"}
             </Button>
             <a
-              href={signedIn ? "/dashboard" : "/auth/google"}
+              href={signedIn ? "/dashboard" : "/auth/start"}
               className="hidden text-sm font-bold text-slate-700 lg:block"
             >
               {signedIn ? (rtl ? "لوحة التحكم" : "Dashboard") : t.signin}
@@ -692,7 +699,7 @@ export function ScanExperience({ paymentsEnabled }: { paymentsEnabled: boolean }
               items={navigation}
               menuLabel={t.menu}
               ctaLabel={signedIn ? (rtl ? "لوحة التحكم" : "Dashboard") : t.signin}
-              ctaHref={signedIn ? "/dashboard" : "/auth/google"}
+              ctaHref={signedIn ? "/dashboard" : "/auth/start"}
               direction={rtl ? "rtl" : "ltr"}
             />
           </div>
@@ -909,7 +916,7 @@ export function ScanExperience({ paymentsEnabled }: { paymentsEnabled: boolean }
               )}
               {needsSignIn && (
                 <Button asChild className="mt-3 rounded-xl bg-[#07111f]">
-                  <a href="/auth/google">{t.signin}</a>
+                  <a href="/auth/start">{t.signin}</a>
                 </Button>
               )}
               <p className="mt-4 flex items-center gap-2 text-sm text-slate-500">
@@ -1158,13 +1165,13 @@ export function ScanExperience({ paymentsEnabled }: { paymentsEnabled: boolean }
                 icon: Globe2,
                 title: t.global,
                 description: t.globalText,
-                href: "/methodology",
+                href: publicHref("/methodology"),
               },
               {
                 icon: Sparkles,
                 title: t.action,
                 description: t.actionText,
-                href: "/pricing",
+                href: publicHref("/pricing"),
               },
             ].map(({ icon: Icon, title, description, href }) => (
               <Link
@@ -1190,7 +1197,7 @@ export function ScanExperience({ paymentsEnabled }: { paymentsEnabled: boolean }
           <div className="mx-auto max-w-[1240px] px-5 py-16 sm:px-8">
             <h2 className="text-3xl font-extrabold">{locale === "ar" ? "باقة لكل خطوة في رحلتك" : "A plan for every step"}</h2>
             <p className="mt-4 text-sm leading-7 text-slate-600">{locale === "ar" ? "ابدأ بالفحص المجاني، وافتح التقرير المبدئي، أو اختر باقة مدفوعة لتحليل أعمق ومتابعة دورية." : "Start free, unlock an initial report, or choose a paid plan for deeper analysis and recurring monitoring."}</p>
-            <div className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-5">{PLAN_CATALOG.map((plan) => <Link key={plan.id} href={`/pricing#${plan.id}`} className="rounded-2xl border border-slate-200 bg-white p-5 transition hover:border-blue-500">
+            <div className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-5">{PLAN_CATALOG.map((plan) => <Link key={plan.id} href={`${publicHref("/pricing")}#${plan.id}`} className="rounded-2xl border border-slate-200 bg-white p-5 transition hover:border-blue-500">
               <h3 className="font-extrabold">{plan.name[locale]}</h3>
               <strong className="mt-4 inline-block text-3xl tracking-tight" dir="ltr">{plan.price.amount}</strong>
               <p className="mt-1 text-xs text-slate-500">{plan.price.cadence[locale]}</p>
@@ -1218,7 +1225,7 @@ export function ScanExperience({ paymentsEnabled }: { paymentsEnabled: boolean }
                 </p>
               </div>
               <Link
-                href="/blog"
+                href={blogRoot}
                 className="flex shrink-0 items-center gap-2 text-sm font-bold text-blue-700"
               >
                 {t.viewGuides}
@@ -1229,7 +1236,7 @@ export function ScanExperience({ paymentsEnabled }: { paymentsEnabled: boolean }
               {featuredArticles[locale].map((article) => (
                 <Link
                   key={article.slug}
-                  href={`/blog/${article.slug}`}
+                  href={`${blogRoot}/${article.slug}`}
                   className="group rounded-[22px] border border-slate-200 bg-slate-50 p-6 transition hover:border-blue-300 hover:bg-white hover:shadow-xl"
                 >
                   <span className="text-xs font-bold uppercase tracking-[.12em] text-blue-600">
@@ -1267,7 +1274,7 @@ export function ScanExperience({ paymentsEnabled }: { paymentsEnabled: boolean }
               asChild
               className="h-12 shrink-0 rounded-xl bg-white px-6 font-bold text-[#07111f] hover:bg-cyan-50"
             >
-              <Link href="/contact">
+              <Link href={publicHref("/contact")}>
                 {t.contactCta}
                 <ArrowRight className={`size-4 ${rtl ? "rotate-180" : ""}`} />
               </Link>
@@ -1299,9 +1306,9 @@ export function ScanExperience({ paymentsEnabled }: { paymentsEnabled: boolean }
               {t.resourcesGroup}
             </p>
             <nav className="mt-4 flex flex-col gap-3 text-sm font-semibold text-slate-500">
-              <Link href="/blog">{t.blog}</Link>
-              <Link href="/methodology">{t.methodology}</Link>
-              <Link href="/faq">{t.faq}</Link>
+              <Link href={blogRoot}>{t.blog}</Link>
+              <Link href={publicHref("/methodology")}>{t.methodology}</Link>
+              <Link href={publicHref("/faq")}>{t.faq}</Link>
             </nav>
           </div>
           <div>
@@ -1309,11 +1316,11 @@ export function ScanExperience({ paymentsEnabled }: { paymentsEnabled: boolean }
               {t.companyGroup}
             </p>
             <nav className="mt-4 flex flex-col gap-3 text-sm font-semibold text-slate-500">
-              <Link href="/pricing">{t.subscriptions}</Link>
-              <Link href="/contact">{t.contact}</Link>
-              <Link href="/privacy">{t.privacy}</Link>
-              <Link href="/terms">{t.terms}</Link>
-              <Link href="/billing-policy">{t.billing}</Link>
+              <Link href={publicHref("/pricing")}>{t.subscriptions}</Link>
+              <Link href={publicHref("/contact")}>{t.contact}</Link>
+              <Link href={publicHref("/privacy")}>{t.privacy}</Link>
+              <Link href={publicHref("/terms")}>{t.terms}</Link>
+              <Link href={publicHref("/billing-policy")}>{t.billing}</Link>
             </nav>
           </div>
         </div>

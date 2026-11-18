@@ -2,6 +2,7 @@ import { getAuthenticatedUser } from "@/app/auth";
 import { activePaidSubscriptions, attachSubscriptionCheckout, claimSubscriptionCheckout, ensureWorkspace, releaseSubscriptionCheckout, upsertPayPalSubscription } from "@/db/product";
 import { createPayPalSubscription } from "@/lib/paypal";
 import { isPayPalPaymentsEnabled, paymentNotConfiguredResponse } from "@/lib/paypal/availability";
+import { paymentFailure, paymentString, readPaymentBody } from "@/lib/paypal/http";
 
 export const runtime = "edge";
 const headers = { "Cache-Control": "no-store" };
@@ -14,14 +15,12 @@ export async function POST(request: Request) {
   }
   if (!isPayPalPaymentsEnabled()) return paymentNotConfiguredResponse();
 
-  let body: { plan?: string };
-  try {
-    body = await request.json();
-  } catch {
+  const body = await readPaymentBody(request);
+  if (!body) {
     return json({ error: "Invalid JSON body", code: "invalid_request" }, 400);
   }
 
-  const rawPlan = typeof body.plan === "string" ? body.plan.toLowerCase().trim() : null;
+  const rawPlan = paymentString(body, "plan").toLowerCase();
   if (rawPlan !== "essential" && rawPlan !== "growth" && rawPlan !== "pro") {
     return json(
       {
@@ -72,11 +71,8 @@ export async function POST(request: Request) {
     await attachSubscriptionCheckout(workspace.organizationId, subscriptionId);
 
     return json({ subscriptionId, approveUrl });
-  } catch (err: any) {
+  } catch (error) {
     await releaseSubscriptionCheckout(workspace.organizationId);
-    return json(
-      { error: err.message || "Failed to create PayPal subscription", code: "paypal_error" },
-      err.status || 500,
-    );
+    return paymentFailure(error, "Failed to create PayPal subscription", "paypal_error");
   }
 }

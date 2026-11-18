@@ -7,10 +7,12 @@ import ts from "typescript";
 
 const root = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const credentials = {
+  AUTH_PROVIDER: "google",
   GOOGLE_CLIENT_ID: "configured-client-id",
   GOOGLE_CLIENT_SECRET: "configured-client-secret",
   AUTH_SECRET: "test-hmac-secret",
 };
+let mockIdentityHeaders = new Headers();
 
 class MockResponse {
   constructor(location) {
@@ -35,24 +37,26 @@ function load(relativePath) {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
     fileName: relativePath,
   });
-  const module = { exports: {} };
+  const loadedModule = { exports: {} };
   const requireMock = (specifier) => {
     if (specifier === "cloudflare:workers") return { env: credentials };
     if (specifier === "next/server") return { NextResponse: MockResponse };
-    if (specifier === "next/headers") return { cookies: async () => ({ get: () => undefined }) };
+    if (specifier === "next/headers") return { cookies: async () => ({ get: () => undefined }), headers: async () => mockIdentityHeaders };
     if (specifier === "next/navigation") return { redirect: () => { throw new Error("Unexpected redirect"); } };
     if (specifier === "@/app/auth") return load("app/auth.ts");
+    if (specifier === "@/app/chatgpt-auth") return load("app/chatgpt-auth.ts");
     throw new Error(`Unexpected import: ${specifier}`);
   };
-  new Function("require", "module", "exports", outputText)(requireMock, module, module.exports);
-  loaded.set(relativePath, module.exports);
-  return module.exports;
+  new Function("require", "module", "exports", outputText)(requireMock, loadedModule, loadedModule.exports);
+  loaded.set(relativePath, loadedModule.exports);
+  return loadedModule.exports;
 }
 
 const auth = load("app/auth.ts");
 const start = load("app/auth/google/route.ts");
 const callback = load("app/auth/google/callback/route.ts");
 const signout = load("app/auth/signout/route.ts");
+const authStart = load("app/auth/start/route.ts");
 
 function request(url, cookies = new Map()) {
   return {
@@ -160,4 +164,37 @@ test("signout returns to the request origin", async () => {
   const response = await signout.GET(request(`${origin}/auth/signout`));
   assert.equal(response.location, origin);
   assert.equal(response.cookies.get(auth.SESSION_COOKIE).options.maxAge, 0);
+});
+
+test("standalone login entry uses Google without accepting identity headers", async () => {
+  const origin = "https://recomvia-staging.recomvia.workers.dev";
+  mockIdentityHeaders = new Headers({
+    "oai-authenticated-user-id": "spoofed-user",
+    "oai-authenticated-user-email": "spoofed@example.com",
+  });
+  assert.equal(await auth.getAuthenticatedUser(), null);
+  assert.equal((await authStart.GET(request(`${origin}/auth/start`))).location, `${origin}/auth/google`);
+  mockIdentityHeaders = new Headers();
+});
+
+test("Sites login preserves the authenticated platform user and redirects safely", async () => {
+  const origin = "https://recomvia-ai-visibility.omarghazi85.chatgpt.site";
+  credentials.AUTH_PROVIDER = "chatgpt";
+  mockIdentityHeaders = new Headers({
+    "oai-authenticated-user-id": "existing-site-user",
+    "oai-authenticated-user-email": "owner@example.com",
+    "oai-authenticated-user-full-name": encodeURIComponent("عمر"),
+    "oai-authenticated-user-full-name-encoding": "percent-encoded-utf-8",
+  });
+  try {
+    assert.deepEqual(await auth.getAuthenticatedUser(), {
+      userId: "existing-site-user", displayName: "عمر", email: "owner@example.com", fullName: "عمر",
+    });
+    assert.equal(auth.signInPath("//outside.example"), "/signin-with-chatgpt?return_to=%2F");
+    assert.equal((await authStart.GET(request(`${origin}/auth/start`))).location, `${origin}/signin-with-chatgpt?return_to=%2Fdashboard`);
+    assert.equal((await signout.GET(request(`${origin}/auth/signout`))).location, `${origin}/signout-with-chatgpt?return_to=%2F`);
+  } finally {
+    credentials.AUTH_PROVIDER = "google";
+    mockIdentityHeaders = new Headers();
+  }
 });

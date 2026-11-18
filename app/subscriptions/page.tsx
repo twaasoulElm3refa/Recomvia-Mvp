@@ -7,7 +7,9 @@ export const metadata: Metadata = {
   title: { absolute: "Recomvia Subscriptions & Billing — Reports, Monitoring & Fix Credits" },
   description:
     "One free score, a $4.99 initial report, and $24, $49 and $99 monthly plans for one or three projects.",
-  alternates: { canonical: `${SITE_URL}/subscriptions` },
+  // This page handles personalized checkout callbacks; public plan discovery belongs on /pricing.
+  robots: { index: false, follow: false },
+  alternates: { canonical: `${SITE_URL}/pricing` },
   openGraph: {
     title: "Recomvia Subscriptions & Billing — Reports, Monitoring & Fix Credits",
     description:

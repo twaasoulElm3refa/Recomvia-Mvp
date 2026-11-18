@@ -2,6 +2,7 @@ import { getAuthenticatedUser } from "@/app/auth";
 import { ensureWorkspace, getScanForUser, recordStarterPurchase } from "@/db/product";
 import { createStarterOrder, STARTER_AMOUNT_CENTS } from "@/lib/paypal";
 import { isPayPalPaymentsEnabled, paymentNotConfiguredResponse } from "@/lib/paypal/availability";
+import { paymentFailure, paymentString, readPaymentBody } from "@/lib/paypal/http";
 
 export const runtime = "edge";
 const headers = { "Cache-Control": "no-store" };
@@ -14,14 +15,12 @@ export async function POST(request: Request) {
   }
   if (!isPayPalPaymentsEnabled()) return paymentNotConfiguredResponse();
 
-  let body: { scanId?: string };
-  try {
-    body = await request.json();
-  } catch {
+  const body = await readPaymentBody(request);
+  if (!body) {
     return json({ error: "Invalid JSON body", code: "invalid_request" }, 400);
   }
 
-  const scanId = body.scanId?.trim();
+  const scanId = paymentString(body, "scanId");
   if (!scanId) {
     return json({ error: "scanId is required", code: "missing_scan_id" }, 400);
   }
@@ -59,10 +58,7 @@ export async function POST(request: Request) {
     });
 
     return json({ orderId, approveUrl });
-  } catch (err: any) {
-    return json(
-      { error: err.message || "Failed to create PayPal order", code: "paypal_error" },
-      err.status || 500,
-    );
+  } catch (error) {
+    return paymentFailure(error, "Failed to create PayPal order", "paypal_error");
   }
 }

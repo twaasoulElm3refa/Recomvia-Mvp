@@ -15,9 +15,9 @@ export type PolicyCopy = {
   sections: { title: string; paragraphs: PolicyParagraph[] }[];
 };
 
-export function PolicyPage({ copy }: { copy: Record<SiteLocale, PolicyCopy> }) {
+export function PolicyPage({ copy, initialLocale = "en" }: { copy: Record<SiteLocale, PolicyCopy>; initialLocale?: SiteLocale }) {
   const pageMetadata: LocalizedMetadata = { en: copy.en.metadata, ar: copy.ar.metadata };
-  return <PublicShell pageMetadata={pageMetadata}>{locale => {
+  return <PublicShell pageMetadata={pageMetadata} initialLocale={initialLocale}>{locale => {
     const t = copy[locale];
     return <main>
       <section className="border-b border-slate-200 bg-[#07111f] text-white"><div className="mx-auto max-w-[920px] px-5 py-16 sm:px-8 sm:py-20"><p className="text-sm font-bold uppercase tracking-[.15em] text-cyan-300">{t.eyebrow}</p><h1 className="mt-4 text-4xl font-extrabold tracking-[-.045em] sm:text-5xl">{t.title}</h1><p className="mt-5 max-w-3xl text-lg leading-8 text-slate-300">{t.intro}</p><p className="mt-6 text-xs font-semibold text-slate-500">{t.effective}</p></div></section>

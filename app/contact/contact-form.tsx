@@ -36,12 +36,17 @@ export function ContactForm({ locale }: { locale: SiteLocale }) {
   const [reference, setReference] = useState("");
   const [interest, setInterest] = useState<{ plan: string | null; credits: boolean; scan: string | null } | null>(null);
   useEffect(() => {
-    const query = new URLSearchParams(window.location.search);
-    const plan = planById(query.get("plan"));
-    const scan = query.get("scan");
-    if ((plan && plan.billing !== "free") || query.get("product") === "fix-credits") {
-      setInterest({ plan: plan && plan.billing !== "free" ? plan.id : null, credits: query.get("product") === "fix-credits", scan: scan && /^[a-zA-Z0-9_-]{1,100}$/.test(scan) ? scan : null });
-    }
+    // URL is browser-owned state; read it after hydration without a synchronous
+    // render cascade, and cancel if the page is unmounted immediately.
+    const timer = window.setTimeout(() => {
+      const query = new URLSearchParams(window.location.search);
+      const plan = planById(query.get("plan"));
+      const scan = query.get("scan");
+      if ((plan && plan.billing !== "free") || query.get("product") === "fix-credits") {
+        setInterest({ plan: plan && plan.billing !== "free" ? plan.id : null, credits: query.get("product") === "fix-credits", scan: scan && /^[a-zA-Z0-9_-]{1,100}$/.test(scan) ? scan : null });
+      }
+    }, 0);
+    return () => window.clearTimeout(timer);
   }, []);
   const selectedPlan = planById(interest?.plan);
   const interestText = selectedPlan
@@ -61,7 +66,13 @@ export function ContactForm({ locale }: { locale: SiteLocale }) {
       });
       const data = (await response.json()) as { reference?: string; accessKey?: string; status?: string; error?: string };
       if (!response.ok || !data.reference || !data.accessKey) throw new Error(locale === "ar" ? t.failed : data.error || t.failed);
-      window.localStorage.setItem(ticketStorageKey, JSON.stringify({ reference: data.reference, accessKey: data.accessKey, question, status: data.status || "open" }));
+      // The ticket already exists on the server. A blocked storage API must not
+      // turn a successful submission into a visible failure or duplicate ticket.
+      try {
+        window.localStorage.setItem(ticketStorageKey, JSON.stringify({ reference: data.reference, accessKey: data.accessKey, question, status: data.status || "open" }));
+      } catch {
+        // The tracking reference is still displayed to the visitor.
+      }
       setReference(data.reference);
       setMessage("");
     } catch (caught) {

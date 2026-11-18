@@ -392,6 +392,13 @@ export function ReportContent({
                         "هذه توصيات قابلة للمراجعة. لم يُعدَّل موقع أو ملف خارجي.",
                       )}
                     </p>
+                    {report?.entitlement.canUseFixCredits && fullScan?.readinessScore != null && scan.issueCount > 0 && (
+                      <Button asChild variant="outline" className="mt-5 rounded-xl">
+                        <Link href={`/fix-center?scan=${encodeURIComponent(scan.id)}`}>
+                          {t("Review saved website findings in Fix Center", "راجع ملاحظات الموقع المحفوظة في مركز الإصلاح")}
+                        </Link>
+                      </Button>
+                    )}
                   </Panel>
                 ) : (
                   <LockedReportCard ar={ar} scanId={scan.id} />

@@ -84,7 +84,16 @@ export type PayPalWebhookEvent = {
   resource_type: string;
   event_type: string;
   summary?: string;
-  resource: Record<string, any>;
+  resource: {
+    id?: string;
+    custom_id?: string;
+    plan_id?: string;
+    status?: string;
+    billing_agreement_id?: string;
+    billing_info?: { next_billing_time?: string };
+    supplementary_data?: { related_ids?: { order_id?: string } };
+    amount?: { value?: string; currency_code?: string };
+  };
   links?: PayPalLink[];
 };
 

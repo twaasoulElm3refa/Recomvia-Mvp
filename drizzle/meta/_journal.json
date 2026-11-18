@@ -57,6 +57,13 @@
       "when": 1793269335767,
       "tag": "0007_round_veda",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1795060800000,
+      "tag": "0008_support_ticket_rate_limit",
+      "breakpoints": true
     }
   ]
 }
