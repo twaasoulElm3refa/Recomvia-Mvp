@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { FaqPageContent } from "@/app/faq/page";
+import { FaqPageContent } from "@/app/faq/faq-page-content";
 import { SITE_URL } from "@/lib/site-config";
 
 export const metadata: Metadata = {
