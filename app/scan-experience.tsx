@@ -304,9 +304,9 @@ export function BrandMark({ compact = false }: { compact?: boolean }) {
   );
 }
 
-export function ScanExperience({ paymentsEnabled }: { paymentsEnabled: boolean }) {
+export function ScanExperience({ paymentsEnabled, initialLocale = "en" }: { paymentsEnabled: boolean; initialLocale?: Locale }) {
   const signedIn = useAccountEntry();
-  const [locale, setLocale] = useState<Locale>("en");
+  const [locale, setLocale] = useState<Locale>(initialLocale);
   const [url, setUrl] = useState("");
   const [status, setStatus] = useState<"idle" | "scanning" | "done">("idle");
   const [scanResult, setScanResult] = useState<LiveScan | null>(null);
@@ -331,7 +331,11 @@ export function ScanExperience({ paymentsEnabled }: { paymentsEnabled: boolean }
   );
 
   useEffect(() => {
-    const syncLocale = () => setLocale(readStoredSiteLocale("en"));
+    const syncLocale = () => {
+      // Root page language is carried by a canonical URL for SSR and SEO.
+      const path = window.location.pathname;
+      setLocale(path === "/ar" ? "ar" : path === "/" ? "en" : readStoredSiteLocale("en"));
+    };
     const timer = window.setTimeout(syncLocale, 0);
     window.addEventListener(SITE_LOCALE_EVENT, syncLocale);
     window.addEventListener("storage", syncLocale);
@@ -676,8 +680,8 @@ export function ScanExperience({ paymentsEnabled }: { paymentsEnabled: boolean }
               className="rounded-xl"
               onClick={() => {
                 const nextLocale = rtl ? "en" : "ar";
-                setLocale(nextLocale);
                 storeSiteLocale(nextLocale);
+                window.location.assign(nextLocale === "ar" ? "/ar" : "/");
               }}
             >
               <Globe2 className="size-4" />
