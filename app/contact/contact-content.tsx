@@ -23,8 +23,8 @@ const copy = {
   },
 } as const;
 
-export function ContactContent() {
-  return <PublicShell pageMetadata={pageMetadata}>{locale => {
+export function ContactContent({ initialLocale = "en" }: { initialLocale?: "en" | "ar" }) {
+  return <PublicShell pageMetadata={pageMetadata} initialLocale={initialLocale}>{locale => {
     const t = copy[locale];
     const schema = { "@context": "https://schema.org", "@type": "ContactPage", name: locale === "ar" ? "اتصل بـ Recomvia" : "Contact Recomvia", url: `${SITE_URL}/contact`, about: { "@id": `${SITE_URL}/#organization` }, inLanguage: locale };
     return <main>
