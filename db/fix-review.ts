@@ -87,3 +87,42 @@ export async function requestFindingReview(userId: string, scanId: string, findi
   if (!record) throw new FixReviewNotAllowed();
   return { request: record, alreadyRequested: insert.meta.changes === 0 };
 }
+
+/** Private staff queue. Caller must enforce the configured admin user ID. */
+export async function listPendingFixReviews(): Promise<Array<{
+  id: string;
+  organizationName: string;
+  website: string;
+  findingTitle: string;
+  explanation: string;
+  evidence: string;
+  sourceUrl: string;
+  severity: string;
+  createdAt: string;
+}>> {
+  const result = await database().prepare(`
+    SELECT f.id, o.name AS organizationName, site.normalized_url AS website,
+           finding.title AS findingTitle, finding.explanation,
+           finding.evidence, finding.source_url AS sourceUrl,
+           finding.severity, f.created_at AS createdAt
+    FROM fixes f
+    JOIN organizations o ON o.id = f.organization_id
+    JOIN sites site ON site.id = f.site_id AND site.organization_id = f.organization_id
+    JOIN scans scan ON scan.id = f.scan_id AND scan.organization_id = f.organization_id
+    JOIN scan_findings finding ON finding.id = f.finding_id AND finding.scan_id = scan.id
+    WHERE f.kind = 'finding_review' AND f.status = 'review_requested'
+    ORDER BY f.created_at DESC
+    LIMIT 100
+  `).all<{
+    id: string;
+    organizationName: string;
+    website: string;
+    findingTitle: string;
+    explanation: string;
+    evidence: string;
+    sourceUrl: string;
+    severity: string;
+    createdAt: string;
+  }>();
+  return result.results;
+}
