@@ -64,6 +64,13 @@
       "when": 1795060800000,
       "tag": "0008_support_ticket_rate_limit",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "6",
+      "when": 1795075200000,
+      "tag": "0009_fix_proposal_versions",
+      "breakpoints": true
     }
   ]
 }
