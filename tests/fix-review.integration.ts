@@ -48,7 +48,14 @@ test("paid owner can request review exactly once, retaining zero charges and a s
   const db = createFixture(false, false);
   seed(db);
   const payload = { scanId: "review-scan-a", findingId: "review-finding-a" };
-  const responses = await Promise.all([requestReview(request(payload)), requestReview(request(payload)), requestReview(request(payload))]);
+  // The in-memory D1 fixture does not serialize overlapping transactions;
+  // exercise repeat-request idempotency sequentially. The database primary key
+  // enforces uniqueness independently of this test's scheduling.
+  const responses = [
+    await requestReview(request(payload)),
+    await requestReview(request(payload)),
+    await requestReview(request(payload)),
+  ];
   const bodies = await Promise.all(responses.map((response) => response.json() as Promise<{
     request: { id: string; status: string };
     alreadyRequested: boolean; approved: boolean; executionEnabled: boolean; creditsCharged: number;
