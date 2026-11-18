@@ -26,6 +26,14 @@ type Props = {
   hasWebsiteAudit: boolean;
   findings: Finding[];
   requestedFindingIds: string[];
+  reviewProposals: Array<{
+    findingId: string;
+    proposalVersion: number;
+    scope: string;
+    proposedText: string;
+    rationale: string;
+    rollbackPlan: string;
+  }>;
 };
 
 const severityOrder: Record<Finding["severity"], number> = {
@@ -47,6 +55,8 @@ const copy = {
     reviewRequest: "Request human review", reviewRequested: "Review requested", reviewPending: "Sending request…",
     reviewError: "Could not save this review request. Please try again.",
     reviewNote: "A request only records this finding for human review; it does not authorize implementation or charge credits.",
+    proposal: "Draft proposal", proposalScope: "Affected area", proposalReason: "Reason", proposalRollback: "Rollback plan",
+    proposalNotice: "Proposed text has NOT been applied to your site. Viewing it does not approve a change or purchase Fix Credits.",
   },
   ar: {
     title: "مركز الإصلاح", description: "راجع الملاحظات الحقيقية من فحص موقعك المحفوظ قبل اقتراح أي تغيير.",
@@ -62,10 +72,12 @@ const copy = {
     reviewRequest: "اطلب مراجعة بشرية", reviewRequested: "طُلِبت المراجعة", reviewPending: "جارٍ إرسال الطلب…",
     reviewError: "تعذر حفظ طلب المراجعة، حاول مرة أخرى.",
     reviewNote: "يسجل الطلب الملاحظة للمراجعة البشرية فقط، ولا يسمح بتنفيذ التعديل أو خصم النقاط.",
+    proposal: "مسودة التعديل المقترح", proposalScope: "النطاق المستهدف", proposalReason: "أسباب المقترح", proposalRollback: "خطة التراجع",
+    proposalNotice: "لم يُنفذ هذا المقترح على موقعك. والاطلاع عليه لا يُعد موافقة على التغيير أو شراء نقاط الإصلاح.",
   },
 } as const;
 
-export function FixCenterExperience({ scanId, targetName, hasWebsiteAudit, findings, requestedFindingIds }: Props) {
+export function FixCenterExperience({ scanId, targetName, hasWebsiteAudit, findings, requestedFindingIds, reviewProposals }: Props) {
   const ar = useSiteLocale() === "ar";
   const t = copy[ar ? "ar" : "en"];
   const [filter, setFilter] = useState<Filter>("all");
@@ -148,6 +160,7 @@ export function FixCenterExperience({ scanId, targetName, hasWebsiteAudit, findi
 
   const reportHref = scanId ? `/report?scan=${encodeURIComponent(scanId)}` : "/dashboard";
   const source = selected ? safeSourceUrl(selected.sourceUrl) : null;
+  const selectedProposal = selected ? reviewProposals.find((proposal) => proposal.findingId === selected.id) : null;
   const severity = (item: Finding) => ar ? severityAr[item.severity] : item.severity;
   const tone = (item: Finding) => item.severity === "critical" || item.severity === "high" ? "bad" as const : "warn" as const;
 
@@ -255,6 +268,16 @@ export function FixCenterExperience({ scanId, targetName, hasWebsiteAudit, findi
                 <h3 className="text-sm font-extrabold">{t.source}</h3>
                 {source ? <a href={source} target="_blank" rel="noopener noreferrer" className="mt-2 inline-flex max-w-full items-center gap-2 break-all text-sm font-semibold text-blue-700 underline">{source}<ExternalLink className="size-4 shrink-0" /></a> : <p className="mt-2 text-sm text-slate-500">{t.noSource}</p>}
               </section>
+              {selectedProposal && (
+                <section className="space-y-3 rounded-2xl border border-blue-200 bg-blue-50/50 p-4">
+                  <h3 className="font-extrabold">{t.proposal} · v{selectedProposal.proposalVersion}</h3>
+                  <p className="text-xs font-semibold leading-6 text-blue-900">{t.proposalNotice}</p>
+                  <div><h4 className="text-xs font-bold">{t.proposalScope}</h4><p className="mt-1 whitespace-pre-wrap break-words text-sm" dir="auto">{selectedProposal.scope}</p></div>
+                  <p className="whitespace-pre-wrap break-words rounded-xl bg-white p-3 text-sm leading-7" dir="auto">{selectedProposal.proposedText}</p>
+                  <div><h4 className="text-xs font-bold">{t.proposalReason}</h4><p className="mt-1 whitespace-pre-wrap break-words text-sm" dir="auto">{selectedProposal.rationale}</p></div>
+                  <div><h4 className="text-xs font-bold">{t.proposalRollback}</h4><p className="mt-1 whitespace-pre-wrap break-words text-sm" dir="auto">{selectedProposal.rollbackPlan}</p></div>
+                </section>
+              )}
               <p className="text-xs leading-6 text-slate-500">{t.reviewNote}</p>
               {requestError && <p role="alert" className="text-sm font-semibold text-red-700">{requestError}</p>}
               <DialogFooter>
