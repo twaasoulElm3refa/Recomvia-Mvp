@@ -1,4 +1,5 @@
 import { database, getReportForUser } from "@/db/product";
+import { env } from "cloudflare:workers";
 
 export type FixReviewRequest = {
   id: string;
@@ -169,7 +170,6 @@ export async function createFixProposalVersion(
   fixId: string,
   draft: FixProposalDraft,
 ) {
-  const { env } = await import("cloudflare:workers");
   if (!env.RECOMVIA_ADMIN_USER_ID || env.RECOMVIA_ADMIN_USER_ID !== authorUserId) {
     throw new FixProposalNotAllowed();
   }
