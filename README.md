@@ -56,6 +56,7 @@ Working now:
 - Server-selected multi-model analysis policies, bounded page samples, evidence-linked action plans and advanced comparisons
 - Leased monitoring endpoint and separate Cron Worker (requires deployment and secrets)
 - Account-scoped monitoring schedule display and pause/resume controls; resuming never triggers an immediate AI run, and manual analysis preserves an explicitly paused schedule
+- Project-slot dashboard showing actual registered projects, quota position and recent reports; owners may rename display labels without releasing slots, changing project identities or resetting usage
 - Comparable measurement history, partial-coverage handling and per-run provider cost records
 - Explainable findings and evidence report
 - User-owned dashboard and scan history
