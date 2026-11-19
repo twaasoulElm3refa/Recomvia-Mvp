@@ -9,6 +9,8 @@ import { useSiteLocale } from "@/hooks/use-site-locale";
 import type { ReportSummary } from "@/db/product";
 import type { MonitoringScheduleSummary } from "@/db/monitoring-controls";
 import { MonitoringControls } from "./monitoring-controls";
+import { ProjectSlotControls } from "./project-slot-controls";
+import type { ProjectSlotSummary } from "@/db/project-slots";
 
 type ScanRow = Pick<
   ReportSummary,
@@ -26,12 +28,14 @@ export function DashboardContent({
   scans,
   entitlement,
   monitoringSchedules,
+  projectSlots,
 }: {
   displayName: string;
   latest: ReportSummary | null;
   scans: ScanRow[];
   entitlement: ReportEntitlement;
   monitoringSchedules: MonitoringScheduleSummary[];
+  projectSlots: ProjectSlotSummary[];
 }) {
   const ar = useSiteLocale() === "ar";
   const [project, setProject] = useState("");
@@ -145,6 +149,7 @@ export function DashboardContent({
           </Link>
         </Button>
       )}
+      <ProjectSlotControls initialProjects={projectSlots} projectLimit={entitlement.projectLimit} canMonitor={entitlement.canMonitor} />
       <MonitoringControls initialSchedules={monitoringSchedules} canMonitor={entitlement.canMonitor} />
       <section className="mt-8 rounded-3xl border border-slate-200 bg-white p-6">
         <h2 className="text-lg font-extrabold">
