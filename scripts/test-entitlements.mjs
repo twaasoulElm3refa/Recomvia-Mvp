@@ -26,6 +26,7 @@ try {
       files: [
         join(root, "tests/report-entitlements.test.ts"),
         join(root, "tests/fix-review.integration.ts"),
+        join(root, "tests/monitoring-controls.integration.ts"),
         join(root, "cloudflare-env.d.ts"),
       ],
     }),
@@ -57,7 +58,7 @@ try {
     );
     const run = spawnSync(
       process.execPath,
-      ["--require", mock, "--test", join(output, "tests/report-entitlements.test.js"), join(output, "tests/fix-review.integration.js")],
+      ["--require", mock, "--test", join(output, "tests/report-entitlements.test.js"), join(output, "tests/fix-review.integration.js"), join(output, "tests/monitoring-controls.integration.js")],
       { stdio: "inherit", env: { ...process.env, AI_TEST_MODE: "mock" } },
     );
     if (run.error) throw run.error;
