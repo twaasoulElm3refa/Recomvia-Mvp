@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { createFixture, state, userA, userB } from "./target-runtime-fixture";
 import { POST as requestReview } from "../app/api/fix-reviews/route";
+import { GET as exportReviewEvidence } from "../app/api/fix-reviews/export/route";
 import { POST as saveProposal } from "../app/api/fix-proposals/route";
 import { POST as decideOnProposal } from "../app/api/fix-proposals/decision/route";
 import {
@@ -324,6 +325,56 @@ test("proposal decision endpoint rejects foreign accounts, forged origin and mis
     assert.equal((await decideOnProposal(decisionRequest(valid))).status, 401);
     assert.equal(db.prepare("SELECT COUNT(*) AS n FROM fix_proposal_decisions").get()?.n, 0);
   } finally {
+    db.close();
+  }
+});
+
+test("Fix Center export is account-scoped, no-store and includes only saved proposal evidence", async () => {
+  const db = createFixture(false, false);
+  seed(db);
+  const staff = {
+    userId: "staff-export-review",
+    email: "export-staff@example.test", displayName: "Staff", fullName: "Review Staff",
+  };
+  try {
+    const query = new Request("https://recomvia.test/api/fix-reviews/export?scan=review-scan-a");
+    assert.equal((await exportReviewEvidence(query)).status, 200);
+    assert.equal((await requestReview(request({ scanId: "review-scan-a", findingId: "review-finding-a" }))).status, 201);
+    state.env.RECOMVIA_ADMIN_USER_ID = staff.userId;
+    state.user = staff;
+    const draft = await saveProposal(proposalRequest({
+      fixId: "review_review-finding-a",
+      scope: "Public page metadata field",
+      proposedText: "Document the intended metadata revision for a service page.",
+      rationale: "The finding contains observed evidence of weak metadata.",
+      rollbackPlan: "Restore the verified original metadata from the saved revision.",
+    }));
+    assert.equal(draft.status, 201);
+    state.user = userA;
+    const response = await exportReviewEvidence(query);
+    assert.equal(response.status, 200);
+    assert.match(response.headers.get("Content-Type") || "", /application\/json/);
+    assert.match(response.headers.get("Cache-Control") || "", /no-store/);
+    assert.match(response.headers.get("Content-Disposition") || "", /attachment/);
+    const data = await response.json() as {
+      scanId: string; executionEnabled: boolean; siteBackupIncluded: boolean; creditsCharged: number;
+      reviews: Array<{ reviewId: string; finding: { id: string }; proposals: Array<{ version: number; rollbackPlan: string }> }>;
+    };
+    assert.equal(data.scanId, "review-scan-a");
+    assert.deepEqual([data.executionEnabled, data.siteBackupIncluded, data.creditsCharged], [false, false, 0]);
+    assert.equal(data.reviews.length, 1);
+    assert.equal(data.reviews[0].finding.id, "review-finding-a");
+    assert.equal(data.reviews[0].proposals.length, 1);
+    assert.match(data.reviews[0].proposals[0].rollbackPlan, /Restore the verified original/);
+    state.user = userB;
+    const foreign = await exportReviewEvidence(query);
+    assert.equal(foreign.status, 404);
+    assert.match(foreign.headers.get("Cache-Control") || "", /no-store/);
+    state.user = null;
+    assert.equal((await exportReviewEvidence(query)).status, 401);
+    assert.equal(db.prepare("SELECT COUNT(*) AS n FROM credit_ledger").get()?.n, 0);
+  } finally {
+    delete state.env.RECOMVIA_ADMIN_USER_ID;
     db.close();
   }
 });

@@ -52,7 +52,7 @@ const copy = {
     locked: "Execution locked", beta: "Evidence review only", notice: "No website is modified, no credit balance is charged, and no change is automatically approved.",
     scope: "Saved website analysis", missing: "No completed website audit yet", missingText: "Analyze a website to see real technical and content findings. A person or topic analysis does not create a website audit.",
     clear: "No unresolved findings in this audit", clearText: "This does not guarantee visibility or recommend any website change.",
-    start: "Analyze a website", report: "Open original report", issues: "Findings for review",
+    start: "Analyze a website", report: "Open original report", exportEvidence: "Download review evidence (JSON)", issues: "Findings for review",
     all: "All", critical: "Critical", high: "High", other: "Other",
     view: "Inspect evidence", evidence: "Recorded evidence", explanation: "Why it matters", source: "Original source",
     noEvidence: "No evidence excerpt was stored for this finding.", noSource: "No public source URL was recorded.",
@@ -74,7 +74,7 @@ const copy = {
     locked: "التنفيذ مغلق", beta: "مراجعة الأدلة فقط", notice: "لن يُعدَّل أي موقع، ولن تُخصم نقاط، ولن تتم الموافقة تلقائيًا على أي تغيير.",
     scope: "فحص موقع محفوظ", missing: "لا يوجد فحص موقع مكتمل بعد", missingText: "ابدأ فحص موقع لعرض ملاحظاته التقنية والتحريرية الفعلية. تحليل الأشخاص والموضوعات لا ينشئ فحصًا تقنيًا للموقع.",
     clear: "لا توجد ملاحظات معلقة في هذا الفحص", clearText: "هذه النتيجة ليست ضمانًا للظهور ولا تفويضًا بإجراء تغييرات على الموقع.",
-    start: "ابدأ فحص موقع", report: "افتح التقرير الأصلي", issues: "الملاحظات التي تحتاج مراجعة",
+    start: "ابدأ فحص موقع", report: "افتح التقرير الأصلي", exportEvidence: "تنزيل سجل المراجعة والأدلة (JSON)", issues: "الملاحظات التي تحتاج مراجعة",
     all: "الكل", critical: "حرجة", high: "مرتفعة", other: "أخرى",
     view: "راجع الدليل", evidence: "الدليل المحفوظ", explanation: "أهمية الملاحظة", source: "المصدر الأصلي",
     noEvidence: "لم يُحفظ مقتطف دليل لهذه الملاحظة.", noSource: "لم يُحفظ رابط مصدر عام لهذه الملاحظة.",
@@ -246,7 +246,16 @@ export function FixCenterExperience({ scanId, targetName, hasWebsiteAudit, findi
               <p className="text-xs font-bold uppercase tracking-wider text-slate-500">{t.scope}</p>
               <h2 className="mt-1 text-lg font-extrabold" dir="auto">{targetName || t.scope}</h2>
             </div>
-            <Button asChild variant="outline" className="rounded-xl"><Link href={reportHref}>{t.report}<ArrowRight className="size-4" /></Link></Button>
+            <div className="flex flex-wrap gap-2">
+              <Button asChild variant="outline" className="rounded-xl"><Link href={reportHref}>{t.report}<ArrowRight className="size-4" /></Link></Button>
+              {scanId && requested.length > 0 && (
+                <Button asChild variant="outline" className="rounded-xl">
+                  <a href={`/api/fix-reviews/export?scan=${encodeURIComponent(scanId)}`} download>
+                    {t.exportEvidence}
+                  </a>
+                </Button>
+              )}
+            </div>
           </div>
           {unresolved.length === 0 ? (
             <Card className="rounded-3xl border-slate-200 bg-white">
