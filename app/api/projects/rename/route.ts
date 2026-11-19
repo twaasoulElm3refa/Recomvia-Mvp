@@ -1,0 +1,51 @@
+import { getAuthenticatedUser } from "@/app/auth";
+import { ProjectSlotError, renameProjectSlot } from "@/db/project-slots";
+
+export const runtime = "edge";
+const respond = (data: unknown, status: number) => Response.json(data, {
+  status, headers: { "Cache-Control": "no-store" },
+});
+
+export async function POST(request: Request) {
+  const user = await getAuthenticatedUser();
+  if (!user) return respond({ code: "sign_in" }, 401);
+
+  const origin = request.headers.get("origin");
+  if (!origin || origin !== new URL(request.url).origin) {
+    return respond({ code: "invalid_origin" }, 403);
+  }
+  if (!request.headers.get("content-type")?.toLowerCase().startsWith("application/json")) {
+    return respond({ code: "invalid_request" }, 415);
+  }
+  let input: unknown;
+  try {
+    const payload = await request.text();
+    if (payload.length > 500) return respond({ code: "invalid_request" }, 413);
+    input = JSON.parse(payload);
+  } catch {
+    return respond({ code: "invalid_request" }, 400);
+  }
+  if (!input || typeof input !== "object" || Array.isArray(input)) {
+    return respond({ code: "invalid_request" }, 400);
+  }
+  const data = input as Record<string, unknown>;
+  const projectId = data.projectId;
+  const expectedName = data.expectedName;
+  const name = typeof data.displayName === "string" ? data.displayName.trim().normalize("NFC") : null;
+  if (typeof projectId !== "string" || !/^[a-zA-Z0-9_-]{1,100}$/.test(projectId) ||
+      typeof expectedName !== "string" || expectedName.length > 160 ||
+      !name || name.length < 2 || name.length > 80 ||
+      /[\u0000-\u001f\u007f]/.test(name)) {
+    return respond({ code: "invalid_request" }, 400);
+  }
+
+  try {
+    const updated = await renameProjectSlot(user, projectId, expectedName, name);
+    return respond({ ...updated, projectKeyUnchanged: true, quotasReset: false }, 200);
+  } catch (error) {
+    if (error instanceof ProjectSlotError) {
+      return respond({ code: error.code }, error.code === "forbidden" ? 403 : error.code === "conflict" ? 409 : 404);
+    }
+    return respond({ code: "temporarily_unavailable" }, 503);
+  }
+}
