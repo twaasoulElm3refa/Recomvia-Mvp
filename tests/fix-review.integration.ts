@@ -3,6 +3,7 @@ import test from "node:test";
 import { createFixture, state, userA, userB } from "./target-runtime-fixture";
 import { POST as requestReview } from "../app/api/fix-reviews/route";
 import { POST as saveProposal } from "../app/api/fix-proposals/route";
+import { POST as decideOnProposal } from "../app/api/fix-proposals/decision/route";
 import { listFixReviewRequests, listPendingFixReviews } from "../db/fix-review";
 
 type Fixture = ReturnType<typeof createFixture>;
@@ -208,6 +209,102 @@ test("staff proposal endpoint enforces admin identity, same-origin and input bou
     assert.equal(db.prepare("SELECT COUNT(*) AS n FROM credit_ledger").get()?.n, 0);
   } finally {
     delete state.env.RECOMVIA_ADMIN_USER_ID;
+    db.close();
+  }
+});
+
+function decisionRequest(body: unknown, origin = "https://recomvia.test") {
+  return new Request("https://recomvia.test/api/fix-proposals/decision", {
+    method: "POST", headers: { "Content-Type": "application/json", Origin: origin },
+    body: JSON.stringify(body),
+  });
+}
+
+test("customer decision is version-bound, idempotent and never authorizes execution or credits", async () => {
+  const db = createFixture(false, false);
+  seed(db);
+  const staff = {
+    userId: "staff-proposal-decision",
+    email: "decision-staff@example.test", displayName: "Staff", fullName: "Review Staff",
+  };
+  const template = {
+    fixId: "review_review-finding-a",
+    scope: "Meta description of the submitted service page",
+    proposedText: "A precise description based on the website evidence.",
+    rationale: "The stored finding shows an unclear service description.",
+    rollbackPlan: "Restore the verified original text from the saved revision.",
+  };
+  try {
+    assert.equal((await requestReview(request({ scanId: "review-scan-a", findingId: "review-finding-a" }))).status, 201);
+    state.env.RECOMVIA_ADMIN_USER_ID = staff.userId;
+    state.user = staff;
+    const drafted = await saveProposal(proposalRequest(template));
+    assert.equal(drafted.status, 201);
+    const first = await drafted.json() as { proposal: { id: string; version: number } };
+    state.user = userA;
+    const payload = { scanId: "review-scan-a", proposalId: first.proposal.id, decision: "accepted_for_planning" };
+    const accepted = await decideOnProposal(decisionRequest(payload));
+    assert.equal(accepted.status, 201);
+    const answer = await accepted.json() as {
+      applied: boolean; approvedForExecution: boolean; creditsCharged: number;
+      decision: { proposalId: string; decision: string };
+    };
+    assert.equal(answer.decision.proposalId, first.proposal.id);
+    assert.deepEqual([answer.decision.decision, answer.applied, answer.approvedForExecution, answer.creditsCharged],
+      ["accepted_for_planning", false, false, 0]);
+    assert.equal((await decideOnProposal(decisionRequest(payload))).status, 200);
+    assert.equal((await decideOnProposal(decisionRequest({ ...payload, decision: "changes_requested", comment: "Please revise." }))).status, 409);
+    assert.equal(db.prepare("SELECT status FROM fixes WHERE id = ?").get(template.fixId)?.status, "proposal_reviewed");
+    assert.equal(db.prepare("SELECT COUNT(*) AS n FROM fix_proposal_decisions").get()?.n, 1);
+    assert.equal(db.prepare("SELECT COUNT(*) AS n FROM audit_logs").get()?.n, 3);
+    assert.equal(db.prepare("SELECT COUNT(*) AS n FROM credit_ledger").get()?.n, 0);
+    assert.equal(db.prepare("SELECT approved_at FROM fixes WHERE id = ?").get(template.fixId)?.approved_at, null);
+
+    state.user = staff;
+    const revision = await saveProposal(proposalRequest({ ...template, proposedText: "An updated and separately reviewed suggestion." }));
+    assert.equal(revision.status, 201);
+    const second = await revision.json() as { proposal: { id: string; version: number } };
+    assert.equal(second.proposal.version, 2);
+    state.user = userA;
+    assert.equal((await decideOnProposal(decisionRequest(payload))).status, 409);
+    assert.equal(db.prepare("SELECT status FROM fixes WHERE id = ?").get(template.fixId)?.status, "proposal_ready");
+    assert.equal((await decideOnProposal(decisionRequest({
+      scanId: "review-scan-a", proposalId: second.proposal.id,
+      decision: "changes_requested", comment: "Please clarify the intended audience and include source evidence.",
+    }))).status, 201);
+    assert.equal(db.prepare("SELECT status FROM fixes WHERE id = ?").get(template.fixId)?.status, "changes_requested");
+    const latest = await listFixReviewRequests(userA.userId, "review-scan-a");
+    assert.equal(latest[0].proposalVersion, 2);
+    assert.equal(latest[0].decision, "changes_requested");
+    assert.match(latest[0].decisionComment || "", /clarify/);
+    assert.equal((await listFixReviewRequests(userB.userId, "review-scan-a")).length, 0);
+    assert.equal(db.prepare("SELECT COUNT(*) AS n FROM fix_proposal_decisions").get()?.n, 2);
+    assert.equal(db.prepare("SELECT COUNT(*) AS n FROM credit_ledger").get()?.n, 0);
+  } finally {
+    delete state.env.RECOMVIA_ADMIN_USER_ID;
+    db.close();
+  }
+});
+
+test("proposal decision endpoint rejects foreign accounts, forged origin and missing reasons", async () => {
+  const db = createFixture(false, false);
+  seed(db);
+  try {
+    const valid = {
+      scanId: "review-scan-a",
+      proposalId: "proposal_known-only-to-owner",
+      decision: "changes_requested",
+      comment: "This proposal needs clarification.",
+    };
+    assert.equal((await decideOnProposal(decisionRequest(valid, "https://evil.example"))).status, 403);
+    assert.equal((await decideOnProposal(decisionRequest({ ...valid, comment: "no" }))).status, 400);
+    assert.equal((await decideOnProposal(decisionRequest(null))).status, 400);
+    state.user = userB;
+    assert.equal((await decideOnProposal(decisionRequest(valid))).status, 404);
+    state.user = null;
+    assert.equal((await decideOnProposal(decisionRequest(valid))).status, 401);
+    assert.equal(db.prepare("SELECT COUNT(*) AS n FROM fix_proposal_decisions").get()?.n, 0);
+  } finally {
     db.close();
   }
 });

@@ -459,6 +459,26 @@ export const fixProposalVersions = sqliteTable(
   ],
 );
 
+
+/** A decision applies only to one immutable proposal version. */
+export const fixProposalDecisions = sqliteTable(
+  "fix_proposal_decisions",
+  {
+    id: text("id").primaryKey(),
+    proposalId: text("proposal_id").notNull().references(() => fixProposalVersions.id),
+    fixId: text("fix_id").notNull().references(() => fixes.id),
+    organizationId: text("organization_id").notNull().references(() => organizations.id),
+    actorUserId: text("actor_user_id").notNull().references(() => users.id),
+    decision: text("decision").notNull(),
+    comment: text("comment").notNull().default(""),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    uniqueIndex("idx_fix_proposal_decisions_proposal").on(table.proposalId),
+    index("idx_fix_proposal_decisions_org_created").on(table.organizationId, table.createdAt),
+  ],
+);
+
 export const creditLedger = sqliteTable(
   "credit_ledger",
   {

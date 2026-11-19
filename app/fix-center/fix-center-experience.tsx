@@ -28,7 +28,10 @@ type Props = {
   requestedFindingIds: string[];
   reviewProposals: Array<{
     findingId: string;
+    proposalId: string;
     proposalVersion: number;
+    decision: string | null;
+    decisionComment: string | null;
     scope: string;
     proposedText: string;
     rationale: string;
@@ -57,6 +60,11 @@ const copy = {
     reviewNote: "A request only records this finding for human review; it does not authorize implementation or charge credits.",
     proposal: "Draft proposal", proposalScope: "Affected area", proposalReason: "Reason", proposalRollback: "Rollback plan",
     proposalNotice: "Proposed text has NOT been applied to your site. Viewing it does not approve a change or purchase Fix Credits.",
+    acceptDraft: "Accept for planning only", changeDraft: "Request changes", decisionPending: "Saving your decision…",
+    decisionSuccess: "Your decision has been recorded. It does not authorize implementation or a charge.",
+    decisionError: "Unable to record this decision. Please try again.",
+    decisionNote: "Explain the requested change (at least 10 characters).",
+    decisionAccepted: "Accepted for planning — not for execution", decisionChanges: "Changes requested",
   },
   ar: {
     title: "مركز الإصلاح", description: "راجع الملاحظات الحقيقية من فحص موقعك المحفوظ قبل اقتراح أي تغيير.",
@@ -74,6 +82,11 @@ const copy = {
     reviewNote: "يسجل الطلب الملاحظة للمراجعة البشرية فقط، ولا يسمح بتنفيذ التعديل أو خصم النقاط.",
     proposal: "مسودة التعديل المقترح", proposalScope: "النطاق المستهدف", proposalReason: "أسباب المقترح", proposalRollback: "خطة التراجع",
     proposalNotice: "لم يُنفذ هذا المقترح على موقعك. والاطلاع عليه لا يُعد موافقة على التغيير أو شراء نقاط الإصلاح.",
+    acceptDraft: "أقبل المسودة لأغراض التخطيط فقط", changeDraft: "اطلب تعديل المسودة", decisionPending: "جارٍ حفظ القرار…",
+    decisionSuccess: "حُفظ قرارك، وهو لا يسمح بتنفيذ تعديل أو تحصيل رسوم.",
+    decisionError: "تعذر حفظ قرارك، حاول مرة أخرى.",
+    decisionNote: "وضح التعديل المطلوب (10 حروف على الأقل).",
+    decisionAccepted: "مقبولة للتخطيط، وليست للتنفيذ", decisionChanges: "طُلِبت تعديلات",
   },
 } as const;
 
@@ -85,6 +98,12 @@ export function FixCenterExperience({ scanId, targetName, hasWebsiteAudit, findi
   const [requested, setRequested] = useState<string[]>(requestedFindingIds);
   const [requesting, setRequesting] = useState(false);
   const [requestError, setRequestError] = useState("");
+  const [decisionComment, setDecisionComment] = useState("");
+  const [decisionSending, setDecisionSending] = useState(false);
+  const [decisionError, setDecisionError] = useState("");
+  const [decisions, setDecisions] = useState<Record<string, string>>(() =>
+    Object.fromEntries(reviewProposals.filter((item) => item.decision).map((item) => [item.proposalId, item.decision!])),
+  );
   const unresolved = useMemo(
     () => findings.filter((finding) => finding.status !== "pass")
       .sort((a, b) => severityOrder[a.severity] - severityOrder[b.severity]),
@@ -161,6 +180,39 @@ export function FixCenterExperience({ scanId, targetName, hasWebsiteAudit, findi
   const reportHref = scanId ? `/report?scan=${encodeURIComponent(scanId)}` : "/dashboard";
   const source = selected ? safeSourceUrl(selected.sourceUrl) : null;
   const selectedProposal = selected ? reviewProposals.find((proposal) => proposal.findingId === selected.id) : null;
+  const selectedDecision = selectedProposal ? decisions[selectedProposal.proposalId] ?? null : null;
+
+  async function decideOnDraft(decision: "accepted_for_planning" | "changes_requested") {
+    if (!scanId || !selectedProposal || selectedDecision || decisionSending) return;
+    if (decision === "changes_requested" && decisionComment.trim().length < 10) {
+      setDecisionError(t.decisionNote);
+      return;
+    }
+    setDecisionSending(true);
+    setDecisionError("");
+    try {
+      const response = await fetch("/api/fix-proposals/decision", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          scanId, proposalId: selectedProposal.proposalId,
+          decision, comment: decisionComment.trim(),
+        }),
+      });
+      const result: { decision?: { proposalId?: string; decision?: string }; applied?: boolean; creditsCharged?: number } =
+        await response.json();
+      if (!response.ok || result.decision?.proposalId !== selectedProposal.proposalId ||
+          result.decision.decision !== decision || result.applied !== false || result.creditsCharged !== 0) {
+        throw new Error("Review decision not confirmed");
+      }
+      setDecisions((current) => ({ ...current, [selectedProposal.proposalId]: decision }));
+      setDecisionComment("");
+    } catch {
+      setDecisionError(t.decisionError);
+    } finally {
+      setDecisionSending(false);
+    }
+  }
   const severity = (item: Finding) => ar ? severityAr[item.severity] : item.severity;
   const tone = (item: Finding) => item.severity === "critical" || item.severity === "high" ? "bad" as const : "warn" as const;
 
@@ -276,6 +328,27 @@ export function FixCenterExperience({ scanId, targetName, hasWebsiteAudit, findi
                   <p className="whitespace-pre-wrap break-words rounded-xl bg-white p-3 text-sm leading-7" dir="auto">{selectedProposal.proposedText}</p>
                   <div><h4 className="text-xs font-bold">{t.proposalReason}</h4><p className="mt-1 whitespace-pre-wrap break-words text-sm" dir="auto">{selectedProposal.rationale}</p></div>
                   <div><h4 className="text-xs font-bold">{t.proposalRollback}</h4><p className="mt-1 whitespace-pre-wrap break-words text-sm" dir="auto">{selectedProposal.rollbackPlan}</p></div>
+                  {selectedDecision ? (
+                    <p role="status" className="rounded-xl bg-white p-3 text-sm font-bold text-blue-900">
+                      {selectedDecision === "accepted_for_planning" ? t.decisionAccepted : t.decisionChanges}
+                      <span className="mt-1 block text-xs font-normal">{t.decisionSuccess}</span>
+                    </p>
+                  ) : (
+                    <div className="space-y-3 rounded-xl border border-blue-200 bg-white p-3">
+                      <p className="text-xs font-bold text-slate-700">{t.decisionSuccess}</p>
+                      <textarea value={decisionComment} onChange={(event) => setDecisionComment(event.target.value)}
+                        maxLength={800} placeholder={t.decisionNote} dir="auto"
+                        className="min-h-20 w-full rounded-xl border border-slate-200 p-3 text-sm" />
+                      {decisionError && <p role="alert" className="text-xs font-bold text-red-700">{decisionError}</p>}
+                      <div className="flex flex-wrap gap-2">
+                        <Button type="button" disabled={decisionSending} onClick={() => void decideOnDraft("accepted_for_planning")}
+                          className="rounded-xl bg-blue-600">{decisionSending ? t.decisionPending : t.acceptDraft}</Button>
+                        <Button type="button" variant="outline" disabled={decisionSending || decisionComment.trim().length < 10}
+                          onClick={() => void decideOnDraft("changes_requested")}
+                          className="rounded-xl">{t.changeDraft}</Button>
+                      </div>
+                    </div>
+                  )}
                 </section>
               )}
               <p className="text-xs leading-6 text-slate-500">{t.reviewNote}</p>

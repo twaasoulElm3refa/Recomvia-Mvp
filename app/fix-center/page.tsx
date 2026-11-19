@@ -44,7 +44,10 @@ export default async function FixCenterPage({
     <FixCenterExperience
       reviewProposals={requestedReviews.filter((item) => item.proposalVersion !== null).map((item) => ({
         findingId: item.findingId,
+        proposalId: item.proposalId!,
         proposalVersion: item.proposalVersion!,
+        decision: item.decision,
+        decisionComment: item.decisionComment,
         scope: item.scope || "",
         proposedText: item.proposedText || "",
         rationale: item.rationale || "",
