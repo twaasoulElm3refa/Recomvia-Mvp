@@ -48,7 +48,9 @@ export async function scheduleMonitoring(workspace: Workspace, scanId: string, i
     (id,organization_id,user_id,project_key,input_json,target_json,last_scan_id,next_run_at)
     VALUES (?,?,?,?,?,?,?,datetime('now',?))
     ON CONFLICT(organization_id,project_key) DO UPDATE SET input_json=excluded.input_json, target_json=excluded.target_json,
-      last_scan_id=excluded.last_scan_id, next_run_at=excluded.next_run_at, state='active', last_status='completed', updated_at=CURRENT_TIMESTAMP`)
+      last_scan_id=excluded.last_scan_id, next_run_at=excluded.next_run_at,
+      state=CASE WHEN monitoring_schedules.state='paused' THEN 'paused' ELSE 'active' END,
+      last_status='completed', updated_at=CURRENT_TIMESTAMP`)
     .bind(createId("monitor"), workspace.organizationId, workspace.userId, analysisProjectKey(input), JSON.stringify(input), JSON.stringify(target), scanId, `+${policy.monitoringDays} days`).run();
 }
 export type MonitoringJob = { id: string; organizationId: string; userId: string; email: string; displayName: string; inputJson: string; targetJson: string; projectKey: string; leaseToken: string };
