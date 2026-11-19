@@ -67,7 +67,8 @@ test("owner can rename project display label without changing project identity o
     assert.equal(db.prepare("SELECT COUNT(*) AS total FROM audit_logs").get()?.total, 1);
     const noop = await rename(request({ projectId: "project-one", expectedName: "Customer's market research", displayName: "Customer's market research" }));
     assert.equal(noop.status, 200);
-    assert.equal((await noop.json()).changed, false);
+    const noopBody = await noop.json() as { changed: boolean };
+    assert.equal(noopBody.changed, false);
     assert.equal(db.prepare("SELECT COUNT(*) AS total FROM audit_logs").get()?.total, 1);
   } finally {
     db.close();
