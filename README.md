@@ -62,6 +62,7 @@ Working now:
 - Read-only Fix Center review of real account-owned website findings, with evidence and source links; no execution or credits charged
 - Optional, account-owned requests for **human review** of findings, saved idempotently in existing `fixes` and `audit_logs` tables without consuming credits; admin-only private queue at `/support/fix-reviews`
 - Append-only, staff-authored proposal versions with stated scope, rationale and rollback instructions; customers can preview and explicitly accept a particular version for **planning only** or request changes, with no permission to execute or charge credits
+- Read-only proposal history for authorized account members and staff, with version text, rollback instructions and per-version decision audit trail; no additional migration
 - Grounded FAQ/blog assistant with human ticket escalation and a database-enforced hourly ticket cap per email
 - Blog, FAQ, methodology, pricing, contact, privacy, terms, and billing-policy pages with Arabic counterparts, reciprocal language metadata, and a bilingual sitemap
 
