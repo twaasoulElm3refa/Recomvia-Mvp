@@ -55,6 +55,7 @@ Working now:
 - Free/Starter/Essential/Growth/Pro catalog, scan-specific Starter purchase records, report access gates and project-slot limits
 - Server-selected multi-model analysis policies, bounded page samples, evidence-linked action plans and advanced comparisons
 - Leased monitoring endpoint and separate Cron Worker (requires deployment and secrets)
+- Account-scoped monitoring schedule display and pause/resume controls; resuming never triggers an immediate AI run, and manual analysis preserves an explicitly paused schedule
 - Comparable measurement history, partial-coverage handling and per-run provider cost records
 - Explainable findings and evidence report
 - User-owned dashboard and scan history
