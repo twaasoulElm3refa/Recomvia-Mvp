@@ -4,7 +4,8 @@ import { notFound } from "next/navigation";
 import { requireAuthenticatedUser } from "@/app/auth";
 import { AppShell } from "@/app/components/app-shell";
 import { NavigationLink as Link } from "@/app/components/navigation-link";
-import { listPendingFixReviews } from "@/db/fix-review";
+import { listPendingFixReviews, listFixProposalHistoryForStaff } from "@/db/fix-review";
+import { FixProposalHistory } from "@/app/components/fix-proposal-history";
 import { safeSourceUrl } from "@/lib/analysis-target";
 import { FixProposalForm } from "./proposal-form";
 
@@ -18,7 +19,10 @@ export const metadata: Metadata = {
 export default async function FixReviewInboxPage() {
   const user = await requireAuthenticatedUser();
   if (!env.RECOMVIA_ADMIN_USER_ID || env.RECOMVIA_ADMIN_USER_ID !== user.userId) notFound();
-  const requests = await listPendingFixReviews();
+  const [requests, proposalHistory] = await Promise.all([
+    listPendingFixReviews(),
+    listFixProposalHistoryForStaff(user.userId),
+  ]);
 
   return (
     <AppShell
@@ -68,6 +72,10 @@ export default async function FixReviewInboxPage() {
                     {item.proposedText}
                   </p>
                 )}
+                <FixProposalHistory
+                  entries={proposalHistory.filter((entry) => entry.fixId === item.id)}
+                  locale="en"
+                />
                 <FixProposalForm fixId={item.id} currentVersion={item.proposalVersion} />
               </article>
             );
