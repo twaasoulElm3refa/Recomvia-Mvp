@@ -3,6 +3,7 @@ import { requireAuthenticatedUser } from "@/app/auth";
 import { getLatestScanSummaryForUser, listScansForUser, getEntitlementForUser } from "@/db/product";
 import { DashboardContent } from "./dashboard-content";
 import { listMonitoringSchedulesForUser } from "@/db/monitoring-controls";
+import { listProjectSlotsForUser } from "@/db/project-slots";
 export const dynamic = "force-dynamic";
 export const runtime = "edge";
 export const metadata: Metadata = {
@@ -17,6 +18,7 @@ export default async function DashboardPage() {
     getEntitlementForUser(user),
     listMonitoringSchedulesForUser(user.userId),
   ]);
+  const projectSlots = await listProjectSlotsForUser(user, entitlement.projectLimit, entitlement.canMonitor);
   return (
     <DashboardContent
       displayName={user.displayName}
@@ -24,6 +26,7 @@ export default async function DashboardPage() {
       scans={scans}
       entitlement={entitlement}
       monitoringSchedules={monitoringSchedules}
+      projectSlots={projectSlots}
     />
   );
 }
