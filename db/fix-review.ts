@@ -285,7 +285,12 @@ export async function recordFixProposalDecision(
       UPDATE fixes SET status = ?, updated_at = CURRENT_TIMESTAMP
       WHERE id = (SELECT fix_id FROM fix_proposal_decisions WHERE id = ?)
         AND status = 'proposal_ready' AND kind = 'finding_review'
-    `).bind(newStatus, id),
+        AND EXISTS (
+          SELECT 1 FROM fix_proposal_versions p
+          WHERE p.id = ? AND p.fix_id = fixes.id
+            AND p.version = (SELECT MAX(v.version) FROM fix_proposal_versions v WHERE v.fix_id = fixes.id)
+        )
+    `).bind(newStatus, id, proposalId),
     db.prepare(`
       INSERT INTO audit_logs
         (id, organization_id, actor_user_id, action, target_type, target_id, metadata_json)
@@ -303,8 +308,10 @@ export async function recordFixProposalDecision(
            d.actor_user_id AS actorUserId, d.created_at AS createdAt
     FROM fix_proposal_decisions d
     JOIN fixes f ON f.id = d.fix_id
+    JOIN fix_proposal_versions p ON p.id = d.proposal_id
     JOIN organization_members m ON m.organization_id = f.organization_id
     WHERE d.id = ? AND d.proposal_id = ? AND f.scan_id = ?
+      AND p.version = (SELECT MAX(v.version) FROM fix_proposal_versions v WHERE v.fix_id = f.id)
       AND m.user_id = ? LIMIT 1
   `).bind(id, proposalId, scanId, userId).first<{
     id: string;
