@@ -6,7 +6,7 @@ import {
   getReportForUser,
 } from "@/db/product";
 import { FixAccessGate } from "./fix-access-gate";
-import { listFixReviewRequests } from "@/db/fix-review";
+import { listFixReviewRequests, listFixProposalHistoryForScan } from "@/db/fix-review";
 import { FixCenterExperience } from "./fix-center-experience";
 
 export const dynamic = "force-dynamic";
@@ -38,10 +38,16 @@ export default async function FixCenterPage({
       ? report.scan
       : null;
 
-  const requestedReviews = scan ? await listFixReviewRequests(user.userId, scan.id) : [];
+  const [requestedReviews, proposalHistory] = scan
+    ? await Promise.all([
+        listFixReviewRequests(user.userId, scan.id),
+        listFixProposalHistoryForScan(user.userId, scan.id),
+      ])
+    : [[], []];
 
   return (
     <FixCenterExperience
+      proposalHistory={proposalHistory}
       reviewProposals={requestedReviews.filter((item) => item.proposalVersion !== null).map((item) => ({
         findingId: item.findingId,
         proposalId: item.proposalId!,

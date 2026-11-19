@@ -4,7 +4,10 @@ import { createFixture, state, userA, userB } from "./target-runtime-fixture";
 import { POST as requestReview } from "../app/api/fix-reviews/route";
 import { POST as saveProposal } from "../app/api/fix-proposals/route";
 import { POST as decideOnProposal } from "../app/api/fix-proposals/decision/route";
-import { listFixReviewRequests, listPendingFixReviews } from "../db/fix-review";
+import {
+  listFixReviewRequests, listPendingFixReviews,
+  listFixProposalHistoryForScan, listFixProposalHistoryForStaff,
+} from "../db/fix-review";
 
 type Fixture = ReturnType<typeof createFixture>;
 
@@ -165,6 +168,15 @@ test("staff proposal versions are immutable, account-scoped and never apply chan
 
     state.user = userA;
     const visible = await listFixReviewRequests(userA.userId, "review-scan-a");
+    const history = await listFixProposalHistoryForScan(userA.userId, "review-scan-a");
+    assert.deepEqual(history.map((entry) => entry.version), [2, 1]);
+    assert.match(history[0].proposedText, /Revised draft/);
+    assert.match(history[1].proposedText, /accurate, concise/);
+    assert.equal(history[0].decision, null);
+    assert.deepEqual(await listFixProposalHistoryForScan(userB.userId, "review-scan-a"), []);
+    assert.deepEqual(await listFixProposalHistoryForStaff("unauthorized"), []);
+    const staffHistory = await listFixProposalHistoryForStaff(staff.userId);
+    assert.equal(staffHistory.length, 2);
     assert.equal(visible.length, 1);
     assert.equal(visible[0].proposalVersion, 2);
     assert.match(visible[0].proposedText || "", /Revised draft/);
@@ -276,6 +288,13 @@ test("customer decision is version-bound, idempotent and never authorizes execut
     const latest = await listFixReviewRequests(userA.userId, "review-scan-a");
     assert.equal(latest[0].proposalVersion, 2);
     assert.equal(latest[0].decision, "changes_requested");
+    const versionHistory = await listFixProposalHistoryForScan(userA.userId, "review-scan-a");
+    assert.deepEqual(versionHistory.map((entry) => entry.version), [2, 1]);
+    assert.deepEqual(versionHistory.map((entry) => entry.decision), [
+      "changes_requested", "accepted_for_planning",
+    ]);
+    assert.match(versionHistory[0].decisionComment || "", /clarify/);
+    assert.equal(versionHistory[1].decisionComment, "");
     assert.match(latest[0].decisionComment || "", /clarify/);
     assert.equal((await listFixReviewRequests(userB.userId, "review-scan-a")).length, 0);
     assert.equal(db.prepare("SELECT COUNT(*) AS n FROM fix_proposal_decisions").get()?.n, 2);

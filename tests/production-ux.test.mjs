@@ -80,3 +80,14 @@ test("Fix Center shows report-owned evidence, not fabricated brands or credit pr
   assert.match(report, /canUseFixCredits && fullScan\?\.readinessScore/);
   assert.match(report, /\/fix-center\?scan=/);
 });
+
+test("Fix Center exposes immutable proposal history only through scoped data", () => {
+  const page = source("app/fix-center/page.tsx");
+  const staff = source("app/support/fix-reviews/page.tsx");
+  const history = source("app/components/fix-proposal-history.tsx");
+  assert.match(page, /listFixProposalHistoryForScan\(user.userId, scan.id\)/);
+  assert.match(staff, /listFixProposalHistoryForStaff\(user.userId\)/);
+  assert.match(history, /Rollback plan/);
+  assert.match(history, /Accepted for planning only/);
+  assert.doesNotMatch(history, /fetch\(|creditsCharged/);
+});
