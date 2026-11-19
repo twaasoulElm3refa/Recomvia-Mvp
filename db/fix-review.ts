@@ -41,6 +41,66 @@ export async function listFixReviewRequests(userId: string, scanId: string): Pro
   return result.results;
 }
 
+export type FixProposalHistoryEntry = {
+  proposalId: string;
+  fixId: string;
+  findingId: string;
+  version: number;
+  scope: string;
+  proposedText: string;
+  rationale: string;
+  rollbackPlan: string;
+  createdAt: string;
+  decision: string | null;
+  decisionComment: string | null;
+  decisionAt: string | null;
+};
+
+/** Read-only proposal revisions, filtered to the signed-in report owner's organization. */
+export async function listFixProposalHistoryForScan(
+  userId: string, scanId: string,
+): Promise<FixProposalHistoryEntry[]> {
+  const report = await getReportForUser(userId, scanId);
+  if (!report || !report.entitlement.canViewFullReport || !report.entitlement.canUseFixCredits ||
+      !("findings" in report.scan) || report.scan.status !== "completed") return [];
+  const rows = await database().prepare(`
+    SELECT p.id AS proposalId, f.id AS fixId, f.finding_id AS findingId,
+      p.version, p.scope, p.proposed_text AS proposedText,
+      p.rationale, p.rollback_plan AS rollbackPlan, p.created_at AS createdAt,
+      d.decision, d.comment AS decisionComment, d.created_at AS decisionAt
+    FROM fix_proposal_versions p
+    JOIN fixes f ON f.id = p.fix_id AND f.organization_id = p.organization_id
+    JOIN scans s ON s.id = f.scan_id AND s.organization_id = f.organization_id
+    JOIN organization_members m ON m.organization_id = s.organization_id
+    LEFT JOIN fix_proposal_decisions d ON d.proposal_id = p.id
+    WHERE s.id = ? AND m.user_id = ? AND f.kind = 'finding_review'
+    ORDER BY f.id ASC, p.version DESC
+    LIMIT 200
+  `).bind(scanId, userId).all<FixProposalHistoryEntry>();
+  return rows.results;
+}
+
+/** Defense in depth: only the configured administrator can read the staff history. */
+export async function listFixProposalHistoryForStaff(
+  adminUserId: string,
+): Promise<FixProposalHistoryEntry[]> {
+  if (!env.RECOMVIA_ADMIN_USER_ID || adminUserId !== env.RECOMVIA_ADMIN_USER_ID) return [];
+  const rows = await database().prepare(`
+    SELECT p.id AS proposalId, f.id AS fixId, f.finding_id AS findingId,
+      p.version, p.scope, p.proposed_text AS proposedText,
+      p.rationale, p.rollback_plan AS rollbackPlan, p.created_at AS createdAt,
+      d.decision, d.comment AS decisionComment, d.created_at AS decisionAt
+    FROM fix_proposal_versions p
+    JOIN fixes f ON f.id = p.fix_id AND f.organization_id = p.organization_id
+    LEFT JOIN fix_proposal_decisions d ON d.proposal_id = p.id
+    WHERE f.kind = 'finding_review'
+      AND f.status IN ('review_requested', 'proposal_ready', 'proposal_reviewed', 'changes_requested')
+    ORDER BY p.created_at DESC, p.version DESC
+    LIMIT 300
+  `).all<FixProposalHistoryEntry>();
+  return rows.results;
+}
+
 export class FixReviewNotAllowed extends Error {
   constructor() { super("This finding is not eligible for review."); }
 }
