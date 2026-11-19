@@ -10,6 +10,8 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { useSiteLocale } from "@/hooks/use-site-locale";
 import { safeSourceUrl } from "@/lib/analysis-target";
 import type { StoredFinding } from "@/db/product";
+import type { FixProposalHistoryEntry } from "@/db/fix-review";
+import { FixProposalHistory } from "@/app/components/fix-proposal-history";
 
 type Finding = Pick<
   StoredFinding,
@@ -26,6 +28,7 @@ type Props = {
   hasWebsiteAudit: boolean;
   findings: Finding[];
   requestedFindingIds: string[];
+  proposalHistory: FixProposalHistoryEntry[];
   reviewProposals: Array<{
     findingId: string;
     proposalId: string;
@@ -90,7 +93,7 @@ const copy = {
   },
 } as const;
 
-export function FixCenterExperience({ scanId, targetName, hasWebsiteAudit, findings, requestedFindingIds, reviewProposals }: Props) {
+export function FixCenterExperience({ scanId, targetName, hasWebsiteAudit, findings, requestedFindingIds, reviewProposals, proposalHistory }: Props) {
   const ar = useSiteLocale() === "ar";
   const t = copy[ar ? "ar" : "en"];
   const [filter, setFilter] = useState<Filter>("all");
@@ -351,6 +354,10 @@ export function FixCenterExperience({ scanId, targetName, hasWebsiteAudit, findi
                   )}
                 </section>
               )}
+              <FixProposalHistory
+                entries={proposalHistory.filter((entry) => entry.findingId === selected.id)}
+                locale={ar ? "ar" : "en"}
+              />
               <p className="text-xs leading-6 text-slate-500">{t.reviewNote}</p>
               {requestError && <p role="alert" className="text-sm font-semibold text-red-700">{requestError}</p>}
               <DialogFooter>
