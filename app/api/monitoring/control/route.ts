@@ -4,7 +4,7 @@ import { MonitoringControlError, setMonitoringScheduleState } from "@/db/monitor
 
 export const runtime = "edge";
 const respond = (data: unknown, status: number) => Response.json(data, {
-  status, headers: { "Cache-Control": "no-store" },
+  status, headers: { "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff" },
 });
 
 export async function POST(request: Request) {
@@ -12,13 +12,36 @@ export async function POST(request: Request) {
   if (!user) return respond({ code: "sign_in" }, 401);
   const origin = request.headers.get("origin");
   if (!origin || origin !== new URL(request.url).origin) return respond({ code: "invalid_origin" }, 403);
-  if (!request.headers.get("content-type")?.toLowerCase().startsWith("application/json")) {
+  if (!/^application\/json(?:\s*;|\s*$)/i.test(request.headers.get("content-type") ?? "")) {
     return respond({ code: "invalid_request" }, 415);
+  }
+  const declaredLength = request.headers.get("content-length");
+  if (declaredLength !== null) {
+    if (!/^(0|[1-9]\\d*)$/.test(declaredLength)) return respond({ code: "invalid_request" }, 400);
+    if (Number(declaredLength) > 300) return respond({ code: "invalid_request" }, 413);
   }
   let body: unknown;
   try {
-    const text = await request.text();
-    if (text.length > 300) return respond({ code: "invalid_request" }, 413);
+    const reader = request.body?.getReader();
+    if (!reader) return respond({ code: "invalid_request" }, 400);
+    const decoder = new TextDecoder("utf-8", { fatal: true });
+    let size = 0;
+    let text = "";
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        size += value.byteLength;
+        if (size > 300) {
+          await reader.cancel();
+          return respond({ code: "invalid_request" }, 413);
+        }
+        text += decoder.decode(value, { stream: true });
+      }
+      text += decoder.decode();
+    } finally {
+      reader.releaseLock();
+    }
     body = JSON.parse(text);
   } catch {
     return respond({ code: "invalid_request" }, 400);
