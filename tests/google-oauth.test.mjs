@@ -13,6 +13,7 @@ const credentials = {
   AUTH_SECRET: "test-hmac-secret",
 };
 let mockIdentityHeaders = new Headers();
+let mockSessionCookie = null;
 
 class MockResponse {
   constructor(location) {
@@ -41,7 +42,10 @@ function load(relativePath) {
   const requireMock = (specifier) => {
     if (specifier === "cloudflare:workers") return { env: credentials };
     if (specifier === "next/server") return { NextResponse: MockResponse };
-    if (specifier === "next/headers") return { cookies: async () => ({ get: () => undefined }), headers: async () => mockIdentityHeaders };
+    if (specifier === "next/headers") return {
+      cookies: async () => ({ get: (name) => name === "__Host-recomvia_session" && mockSessionCookie ? { value: mockSessionCookie } : undefined }),
+      headers: async () => mockIdentityHeaders,
+    };
     if (specifier === "next/navigation") return { redirect: () => { throw new Error("Unexpected redirect"); } };
     if (specifier === "@/app/auth") return load("app/auth.ts");
     if (specifier === "@/app/chatgpt-auth") return load("app/chatgpt-auth.ts");
@@ -196,5 +200,59 @@ test("Sites login preserves the authenticated platform user and redirects safely
   } finally {
     credentials.AUTH_PROVIDER = "google";
     mockIdentityHeaders = new Headers();
+  }
+});
+
+test("Google sessions reject oversized and malformed cookies before crypto work", async () => {
+  const secret = credentials.AUTH_SECRET;
+  try {
+    mockSessionCookie = await auth.createSession({ sub: "user-456", email: "person@example.com", name: "مستخدم تجريبي" });
+    assert.deepEqual(await auth.getAuthenticatedUser(), {
+      userId: "google:user-456", email: "person@example.com",
+      displayName: "مستخدم تجريبي", fullName: "مستخدم تجريبي",
+    });
+    // Missing secrets make it observable if an invalid request reaches HMAC verification.
+    credentials.AUTH_SECRET = "";
+    for (const malformed of [
+      "A".repeat(4097),
+      mockSessionCookie + ".extra",
+      "unexpected.invalid",
+      "a".repeat(4020) + "." + "a".repeat(43),
+    ]) {
+      const result = mockSessionCookie;
+      mockSessionCookie = malformed;
+      assert.equal(await auth.getAuthenticatedUser(), null);
+      mockSessionCookie = result;
+    }
+  } finally {
+    credentials.AUTH_SECRET = secret;
+    mockSessionCookie = null;
+  }
+});
+
+test("Google session verifier rejects signed but invalid claims and extended lifetimes", async () => {
+  const secret = credentials.AUTH_SECRET;
+  const now = Math.floor(Date.now() / 1000);
+  const baseline = { v: 1, sub: "person-456", email: "person@example.com", name: null, iat: now, exp: now + auth.SESSION_MAX_AGE };
+  const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  async function signedCookie(payload) {
+    const encoded = Buffer.from(JSON.stringify(payload), "utf8").toString("base64url");
+    const signature = Buffer.from(await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(encoded))).toString("base64url");
+    return `${encoded}.${signature}`;
+  }
+  try {
+    for (const claims of [
+      { ...baseline, email: { value: "person@example.com" } },
+      { ...baseline, iat: "not-a-timestamp" },
+      { ...baseline, exp: now + auth.SESSION_MAX_AGE * 3 },
+      { ...baseline, exp: now - 1 },
+    ]) {
+      mockSessionCookie = await signedCookie(claims);
+      assert.equal(await auth.getAuthenticatedUser(), null);
+    }
+    mockSessionCookie = await signedCookie(baseline);
+    assert.equal((await auth.getAuthenticatedUser())?.userId, "google:person-456");
+  } finally {
+    mockSessionCookie = null;
   }
 });
