@@ -217,7 +217,7 @@ test("Google sessions reject oversized and malformed cookies before crypto work"
       "A".repeat(4097),
       mockSessionCookie + ".extra",
       "unexpected.invalid",
-      "a".repeat(4020) + "." + "a".repeat(43),
+      "a".repeat(4020) + "!" + "." + "a".repeat(43),
     ]) {
       const result = mockSessionCookie;
       mockSessionCookie = malformed;
