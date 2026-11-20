@@ -9,11 +9,19 @@ type GoogleProfile = { sub?: string; email?: string; email_verified?: boolean; n
 
 export async function GET(request: NextRequest) {
   const appOrigin = getAppOrigin(request);
-  const code = request.nextUrl.searchParams.get("code");
-  const state = request.nextUrl.searchParams.get("state");
+  const params = request.nextUrl.searchParams;
+  const code = params.get("code");
+  const state = params.get("state");
   const savedState = request.cookies.get(OAUTH_STATE_COOKIE)?.value;
   const verifier = request.cookies.get(OAUTH_VERIFIER_COOKIE)?.value;
-  if (!code || !state || !savedState || !verifier || !constantTimeEqual(state, savedState)) return authError(appOrigin, "invalid_oauth_state");
+  // The app issues a 32-byte state and 48-byte PKCE verifier. Reject tampered
+  // cookies, ambiguous query parameters, and oversized codes before contacting Google.
+  if (params.getAll("code").length !== 1 || params.getAll("state").length !== 1 ||
+      !code || code.length > 4_096 ||
+      !state || !/^[A-Za-z0-9_-]{43}$/.test(state) ||
+      !savedState || !/^[A-Za-z0-9_-]{43}$/.test(savedState) ||
+      !verifier || !/^[A-Za-z0-9_-]{64}$/.test(verifier) ||
+      !constantTimeEqual(state, savedState)) return authError(appOrigin, "invalid_oauth_state");
 
   try {
     const { clientId, clientSecret } = getGoogleCredentials();
