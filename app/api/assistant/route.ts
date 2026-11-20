@@ -2,24 +2,62 @@ import { searchKnowledge } from "@/lib/knowledge-base";
 
 export const runtime = "edge";
 
+const MAX_BODY_BYTES = 3_000;
+const headers = { "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff" };
+const json = (body: unknown, status = 200) => Response.json(body, { status, headers });
+
+async function readBoundedBody(request: Request): Promise<string | null> {
+  if (!request.body) return null;
+  const reader = request.body.getReader();
+  const decoder = new TextDecoder();
+  let bytesRead = 0;
+  let text = "";
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      bytesRead += value.byteLength;
+      if (bytesRead > MAX_BODY_BYTES) {
+        await reader.cancel().catch(() => undefined);
+        return null;
+      }
+      text += decoder.decode(value, { stream: true });
+    }
+    return text + decoder.decode();
+  } finally {
+    reader.releaseLock();
+  }
+}
+
 export async function POST(request: Request) {
+  const origin = request.headers.get("origin");
+  if (origin && origin !== new URL(request.url).origin) {
+    return json({ error: "Invalid request origin." }, 403);
+  }
+  if (!request.headers.get("content-type")?.toLowerCase().startsWith("application/json")) {
+    return json({ error: "JSON content type required." }, 415);
+  }
+
+  const declaredLength = Number(request.headers.get("content-length") || 0);
+  if (declaredLength > MAX_BODY_BYTES) {
+    return json({ error: "Request body is too large." }, 413);
+  }
   let payload: unknown;
   try {
-    payload = await request.json();
+    const raw = await readBoundedBody(request);
+    if (raw === null) return json({ error: "Request body is too large or missing." }, 413);
+    payload = JSON.parse(raw);
   } catch {
-    return Response.json({ error: "Invalid request body." }, { status: 400 });
+    return json({ error: "Invalid request body." }, 400);
   }
 
-  const question =
-    payload && typeof payload === "object" && typeof (payload as { question?: unknown }).question === "string"
-      ? (payload as { question: string }).question.trim()
-      : "";
-
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+    return json({ error: "Invalid request body." }, 400);
+  }
+  const question = typeof (payload as { question?: unknown }).question === "string"
+    ? (payload as { question: string }).question.trim() : "";
   if (question.length < 2 || question.length > 600) {
-    return Response.json({ error: "Question must be between 2 and 600 characters." }, { status: 400 });
+    return json({ error: "Question must be between 2 and 600 characters." }, 400);
   }
-
-  return Response.json(searchKnowledge(question), {
-    headers: { "Cache-Control": "no-store" },
-  });
+  return json(searchKnowledge(question));
 }
