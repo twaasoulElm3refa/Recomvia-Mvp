@@ -20,7 +20,7 @@ try {
       if (tests.status !== 0) { process.exitCode = tests.status ?? 1; break; }
     }
     if (!process.exitCode) {
-      const authTests = spawnSync(process.execPath, ["--test", "tests/google-oauth.test.mjs", "tests/production-ux.test.mjs", "tests/support-ticket.test.mjs", "tests/support-ticket-status.test.mjs", "tests/support-ticket-reply.test.mjs", "tests/support-rate-limit.test.mjs", "tests/assistant-request-safety.test.mjs", "tests/indexing.test.mjs", "tests/blog-routes.test.mjs"], { stdio: "inherit" });
+      const authTests = spawnSync(process.execPath, ["--test", "tests/google-oauth.test.mjs", "tests/production-ux.test.mjs", "tests/support-ticket.test.mjs", "tests/support-ticket-status.test.mjs", "tests/support-ticket-reply.test.mjs", "tests/support-rate-limit.test.mjs", "tests/assistant-request-safety.test.mjs", "tests/scan-request-safety.test.mjs", "tests/indexing.test.mjs", "tests/blog-routes.test.mjs"], { stdio: "inherit" });
       if (authTests.error) throw authTests.error;
       if (authTests.status !== 0) process.exitCode = authTests.status ?? 1;
     }
