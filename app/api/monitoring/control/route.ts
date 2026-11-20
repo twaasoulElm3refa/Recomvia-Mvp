@@ -17,7 +17,7 @@ export async function POST(request: Request) {
   }
   const declaredLength = request.headers.get("content-length");
   if (declaredLength !== null) {
-    if (!/^(0|[1-9]\\d*)$/.test(declaredLength)) return respond({ code: "invalid_request" }, 400);
+    if (!/^(0|[1-9]\d*)$/.test(declaredLength)) return respond({ code: "invalid_request" }, 400);
     if (Number(declaredLength) > 300) return respond({ code: "invalid_request" }, 413);
   }
   let body: unknown;
