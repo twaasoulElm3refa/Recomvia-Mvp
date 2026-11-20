@@ -58,3 +58,49 @@ test("valid tracking key returns only the private ticket status with no-store", 
   assert.deepEqual(await response.json(), fixture);
   assert.equal(databaseLookups, 1);
 });
+
+test("ticket status requires JSON and returns non-sniffable private errors", async () => {
+  const valid = JSON.stringify({ reference: fixture.publicId, accessKey });
+  const before = databaseLookups;
+  for (const type of ["text/plain", "application/jsonp", ""]) {
+    const headers = { Origin: "https://recomvia.test" };
+    if (type) headers["Content-Type"] = type;
+    const response = await POST(new Request("https://recomvia.test/api/support/tickets/status", {
+      method: "POST", headers, body: valid,
+    }));
+    assert.equal(response.status, 415, type);
+    assert.equal(response.headers.get("Cache-Control"), "no-store");
+    assert.equal(response.headers.get("X-Content-Type-Options"), "nosniff");
+  }
+  assert.equal(databaseLookups, before);
+});
+
+test("ticket status rejects declared and streamed overflow before database lookup", async () => {
+  const valid = JSON.stringify({ reference: fixture.publicId, accessKey });
+  const before = databaseLookups;
+  const declared = await POST(new Request("https://recomvia.test/api/support/tickets/status", {
+    method: "POST", headers: { Origin: "https://recomvia.test", "Content-Type": "application/json", "Content-Length": "513" },
+    body: valid,
+  }));
+  assert.equal(declared.status, 413);
+  const streamed = await POST(request("x".repeat(513)));
+  assert.equal(streamed.status, 413);
+  const unicode = await POST(request(JSON.stringify({ reference: "🌐".repeat(150), accessKey })));
+  assert.equal(unicode.status, 413);
+  assert.equal(databaseLookups, before);
+});
+
+test("ticket status accepts bounded JSON with charset without caching the private reply", async () => {
+  const valid = JSON.stringify({ reference: fixture.publicId, accessKey });
+  const before = databaseLookups;
+  const response = await POST(new Request("https://recomvia.test/api/support/tickets/status", {
+    method: "POST",
+    headers: { "Content-Type": "application/json; charset=utf-8", Origin: "https://recomvia.test" },
+    body: valid,
+  }));
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get("Cache-Control"), "no-store");
+  assert.equal(response.headers.get("X-Content-Type-Options"), "nosniff");
+  assert.deepEqual(await response.json(), fixture);
+  assert.equal(databaseLookups, before + 1);
+});
