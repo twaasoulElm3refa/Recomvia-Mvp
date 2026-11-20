@@ -3,6 +3,33 @@ import { createSupportTicket, SupportRateLimitError } from "@/db/support";
 
 export const runtime = "edge";
 
+const MAX_BODY_BYTES = 16_384;
+const noStore = { "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff" };
+const json = (body: unknown, status: number) => Response.json(body, { status, headers: noStore });
+
+async function readBoundedBody(request: Request): Promise<string | null> {
+  if (!request.body) return "";
+  const reader = request.body.getReader();
+  const decoder = new TextDecoder();
+  let bytesRead = 0;
+  let result = "";
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      bytesRead += value.byteLength;
+      if (bytesRead > MAX_BODY_BYTES) {
+        await reader.cancel().catch(() => undefined);
+        return null;
+      }
+      result += decoder.decode(value, { stream: true });
+    }
+    return result + decoder.decode();
+  } finally {
+    reader.releaseLock();
+  }
+}
+
 type TicketRequest = {
   name?: unknown;
   email?: unknown;
@@ -41,19 +68,34 @@ async function hash(value: string) {
 }
 
 export async function POST(request: Request) {
+  const origin = request.headers.get("origin");
+  if (origin && origin !== new URL(request.url).origin) {
+    return json({ error: "Invalid request origin." }, 403);
+  }
+  const mediaType = request.headers.get("content-type")?.split(";")[0].trim().toLowerCase();
+  if (mediaType !== "application/json") {
+    return json({ error: "JSON content type required." }, 415);
+  }
+  const declaredLength = Number(request.headers.get("content-length") || 0);
+  if (declaredLength > MAX_BODY_BYTES) {
+    return json({ error: "Request body is too large." }, 413);
+  }
+
   let payload: TicketRequest;
   try {
-    const value: unknown = await request.json();
+    const body = await readBoundedBody(request);
+    if (body === null) return json({ error: "Request body is too large." }, 413);
+    const value: unknown = JSON.parse(body);
     if (value === null || typeof value !== "object" || Array.isArray(value)) {
-      return Response.json({ error: "Invalid request body." }, { status: 400 });
+      return json({ error: "Invalid request body." }, 400);
     }
     payload = value as TicketRequest;
   } catch {
-    return Response.json({ error: "Invalid request body." }, { status: 400 });
+    return json({ error: "Invalid request body." }, 400);
   }
 
   if (clean(payload.companyWebsite)) {
-    return Response.json({ error: "Request rejected." }, { status: 400 });
+    return json({ error: "Request rejected." }, 400);
   }
 
   const name = clean(payload.name);
@@ -62,13 +104,13 @@ export async function POST(request: Request) {
   const pageUrl = safePageUrl(clean(payload.pageUrl));
 
   if (name.length < 2 || name.length > 80) {
-    return Response.json({ error: "Please enter a valid name." }, { status: 400 });
+    return json({ error: "Please enter a valid name." }, 400);
   }
   if (!validEmail(email)) {
-    return Response.json({ error: "Please enter a valid email address." }, { status: 400 });
+    return json({ error: "Please enter a valid email address." }, 400);
   }
   if (question.length < 10 || question.length > 2000) {
-    return Response.json({ error: "Question must be between 10 and 2,000 characters." }, { status: 400 });
+    return json({ error: "Question must be between 10 and 2,000 characters." }, 400);
   }
 
   const accessKey = randomToken();
@@ -89,10 +131,10 @@ export async function POST(request: Request) {
     if (error instanceof SupportRateLimitError) {
       return Response.json(
         { error: "Too many requests. Please try again later.", code: "rate_limited" },
-        { status: 429, headers: { "Retry-After": "3600", "Cache-Control": "no-store" } },
+        { status: 429, headers: { ...noStore, "Retry-After": "3600" } },
       );
     }
-    return Response.json({ error: "Support is temporarily unavailable. Please try again shortly." }, { status: 503 });
+    return json({ error: "Support is temporarily unavailable. Please try again shortly." }, 503);
   }
 
   return Response.json(
@@ -102,6 +144,6 @@ export async function POST(request: Request) {
       status: "open",
       message: "Your question is in the human support queue.",
     },
-    { status: 201, headers: { "Cache-Control": "no-store" } },
+    { status: 201, headers: noStore },
   );
 }
