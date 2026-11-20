@@ -19,8 +19,8 @@ new Function("require", "module", "exports", compiled)((name) => {
   throw new Error("Unexpected dependency: " + name);
 }, compiledModule, compiledModule.exports);
 const { POST } = compiledModule.exports;
-const request = (body) => new Request("https://recomvia.test/api/support/tickets", {
-  method: "POST", headers: { "content-type": "application/json" }, body,
+const request = (body, extraHeaders = {}) => new Request("https://recomvia.test/api/support/tickets", {
+  method: "POST", headers: { "content-type": "application/json", ...extraHeaders }, body,
 });
 
 test("support rejects invalid JSON shapes without creating tickets", async () => {
@@ -29,6 +29,29 @@ test("support rejects invalid JSON shapes without creating tickets", async () =>
     assert.equal(response.status, 400, body);
     assert.deepEqual(await response.json(), { error: "Invalid request body." });
   }
+  assert.equal(created.length, 0);
+});
+
+test("support rejects cross-origin and non-JSON submissions without database writes", async () => {
+  const valid = JSON.stringify({ name: "Test Sender", email: "sender@example.org", question: "I need help with a report" });
+  const crossOrigin = await POST(request(valid, { Origin: "https://another.example" }));
+  assert.equal(crossOrigin.status, 403);
+  assert.equal(crossOrigin.headers.get("Cache-Control"), "no-store");
+  assert.equal(crossOrigin.headers.get("X-Content-Type-Options"), "nosniff");
+  const invalidType = await POST(request(valid, { "content-type": "text/plain" }));
+  assert.equal(invalidType.status, 415);
+  const jsonp = await POST(request(valid, { "content-type": "application/jsonp" }));
+  assert.equal(jsonp.status, 415);
+  assert.equal(created.length, 0);
+});
+
+test("support rejects oversized payloads before database writes", async () => {
+  const valid = JSON.stringify({ name: "Test Sender", email: "sender@example.org", question: "I need help with a report" });
+  const declared = await POST(request(valid, { "Content-Length": "16385" }));
+  assert.equal(declared.status, 413);
+  const streamed = await POST(request("x".repeat(16_385)));
+  assert.equal(streamed.status, 413);
+  assert.equal(streamed.headers.get("Cache-Control"), "no-store");
   assert.equal(created.length, 0);
 });
 
