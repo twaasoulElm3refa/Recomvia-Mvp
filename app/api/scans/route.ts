@@ -40,9 +40,34 @@ import {
 } from "@/lib/analysis-target";
 
 export const runtime = "edge";
-const headers = { "Cache-Control": "no-store" };
+const headers = { "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff" };
 const json = (body: unknown, status = 200) =>
   Response.json(body, { status, headers });
+
+const MAX_SCAN_BODY_BYTES = 4_000;
+
+async function readBoundedScanBody(request: Request): Promise<string | null> {
+  if (!request.body) return "";
+  const reader = request.body.getReader();
+  const decoder = new TextDecoder("utf-8", { fatal: true });
+  let size = 0;
+  let text = "";
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      size += value.byteLength;
+      if (size > MAX_SCAN_BODY_BYTES) {
+        await reader.cancel().catch(() => undefined);
+        return null;
+      }
+      text += decoder.decode(value, { stream: true });
+    }
+    return text + decoder.decode();
+  } finally {
+    reader.releaseLock();
+  }
+}
 
 export async function GET(request: Request) {
   const user = await getAuthenticatedUser();
@@ -61,20 +86,30 @@ export async function POST(request: Request) {
       { code: "sign_in", error: "Sign in before starting an analysis." },
       401,
     );
+
+  // Scan execution can incur provider costs. Accept only browser requests from this origin.
   const origin = request.headers.get("origin");
-  if (origin && origin !== new URL(request.url).origin)
-    return json({ error: "Invalid request origin." }, 403);
+  if (!origin || origin !== new URL(request.url).origin)
+    return json({ code: "invalid_origin", error: "Invalid request origin." }, 403);
+  const mediaType = request.headers.get("content-type")?.split(";")[0].trim().toLowerCase();
+  if (mediaType !== "application/json")
+    return json({ code: "invalid_input", error: "JSON content type required." }, 415);
+
+  const declaredLength = request.headers.get("content-length");
+  if (declaredLength && !/^\d+$/.test(declaredLength))
+    return json({ code: "invalid_input", error: "Invalid request size." }, 400);
+  if (declaredLength && Number(declaredLength) > MAX_SCAN_BODY_BYTES)
+    return json({ code: "invalid_input", error: "Request is too large." }, 413);
+
   let payload: Record<string, unknown>;
   try {
-    const body = await request.text();
-    if (body.length > 4_000)
-      return json(
-        { code: "invalid_input", error: "Request is too large." },
-        413,
-      );
-    payload = JSON.parse(body);
-    if (!payload || typeof payload !== "object" || Array.isArray(payload))
-      throw new Error();
+    const body = await readBoundedScanBody(request);
+    if (body === null)
+      return json({ code: "invalid_input", error: "Request is too large." }, 413);
+    const parsed: unknown = JSON.parse(body);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed))
+      throw new Error("Invalid scan input");
+    payload = parsed as Record<string, unknown>;
   } catch {
     return json({ code: "invalid_input", error: "Invalid request body." }, 400);
   }
