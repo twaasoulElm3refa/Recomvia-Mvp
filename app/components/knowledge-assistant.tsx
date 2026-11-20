@@ -1,6 +1,6 @@
 "use client";
 
-import { readStoredSiteLocale, SITE_LOCALE_EVENT } from "@/lib/site-locale";
+import { pageDisplayLocale, readStoredSiteLocale, SITE_LOCALE_EVENT } from "@/lib/site-locale";
 
 import { FormEvent, useCallback, useEffect, useState } from "react";
 import { NavigationLink as Link } from "@/app/components/navigation-link";
@@ -79,12 +79,13 @@ export function KnowledgeAssistant() {
 
   useEffect(() => {
     const root = document.documentElement;
-    // Canonical /ar routes determine the rendered language. Browser preference
-    // only acts as a fallback when the page itself has no language marker.
-    const syncLanguage = () => setPageArabic(
-      root.lang === "ar" ? true : root.lang === "en" ? false :
-        readStoredSiteLocale("en") === "ar",
-    );
+    // Canonical public URLs determine language, while private workspaces use
+    // the visitor's saved preference even when <html lang> remains English.
+    const syncLanguage = () => {
+      const fallback = root.lang.toLowerCase().startsWith("ar") ? "ar" : "en";
+      const preference = readStoredSiteLocale(fallback);
+      setPageArabic(pageDisplayLocale(window.location.pathname, preference) === "ar");
+    };
     syncLanguage();
     const observer = new MutationObserver(syncLanguage);
     observer.observe(root, { attributes: true, attributeFilter: ["lang"] });
