@@ -3,7 +3,7 @@ import { ProjectSlotError, renameProjectSlot } from "@/db/project-slots";
 
 export const runtime = "edge";
 const respond = (data: unknown, status: number) => Response.json(data, {
-  status, headers: { "Cache-Control": "no-store" },
+  status, headers: { "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff" },
 });
 
 export async function POST(request: Request) {
@@ -14,13 +14,39 @@ export async function POST(request: Request) {
   if (!origin || origin !== new URL(request.url).origin) {
     return respond({ code: "invalid_origin" }, 403);
   }
-  if (!request.headers.get("content-type")?.toLowerCase().startsWith("application/json")) {
+  if (!/^application\/json(?:\s*;|\s*$)/i.test(request.headers.get("content-type") ?? "")) {
     return respond({ code: "invalid_request" }, 415);
   }
+  // Bounded UTF-8 intake avoids buffering arbitrary request bodies and permits valid Unicode names.
+  const maxBodyBytes = 2_048;
+  const declaredLength = request.headers.get("content-length");
+  if (declaredLength !== null) {
+    if (!/^(0|[1-9]\d*)$/.test(declaredLength)) return respond({ code: "invalid_request" }, 400);
+    if (Number(declaredLength) > maxBodyBytes) return respond({ code: "invalid_request" }, 413);
+  }
+
   let input: unknown;
   try {
-    const payload = await request.text();
-    if (payload.length > 500) return respond({ code: "invalid_request" }, 413);
+    const reader = request.body?.getReader();
+    if (!reader) return respond({ code: "invalid_request" }, 400);
+    const decoder = new TextDecoder("utf-8", { fatal: true });
+    let bodyBytes = 0;
+    let payload = "";
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        bodyBytes += value.byteLength;
+        if (bodyBytes > maxBodyBytes) {
+          await reader.cancel();
+          return respond({ code: "invalid_request" }, 413);
+        }
+        payload += decoder.decode(value, { stream: true });
+      }
+      payload += decoder.decode();
+    } finally {
+      reader.releaseLock();
+    }
     input = JSON.parse(payload);
   } catch {
     return respond({ code: "invalid_request" }, 400);
