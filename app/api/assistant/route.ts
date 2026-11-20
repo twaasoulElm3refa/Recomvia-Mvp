@@ -9,7 +9,7 @@ const json = (body: unknown, status = 200) => Response.json(body, { status, head
 async function readBoundedBody(request: Request): Promise<string | null> {
   if (!request.body) return null;
   const reader = request.body.getReader();
-  const decoder = new TextDecoder();
+  const decoder = new TextDecoder("utf-8", { fatal: true });
   let bytesRead = 0;
   let text = "";
   try {
@@ -34,12 +34,16 @@ export async function POST(request: Request) {
   if (origin && origin !== new URL(request.url).origin) {
     return json({ error: "Invalid request origin." }, 403);
   }
-  if (!request.headers.get("content-type")?.toLowerCase().startsWith("application/json")) {
+  const mediaType = request.headers.get("content-type")?.split(";")[0].trim().toLowerCase();
+  if (mediaType !== "application/json") {
     return json({ error: "JSON content type required." }, 415);
   }
 
-  const declaredLength = Number(request.headers.get("content-length") || 0);
-  if (declaredLength > MAX_BODY_BYTES) {
+  const declaredLength = request.headers.get("content-length");
+  if (declaredLength !== null && !/^\d+$/.test(declaredLength)) {
+    return json({ error: "Invalid request size." }, 400);
+  }
+  if (declaredLength !== null && Number(declaredLength) > MAX_BODY_BYTES) {
     return json({ error: "Request body is too large." }, 413);
   }
   let payload: unknown;

@@ -57,3 +57,36 @@ test("assistant rejects invalid shapes, malformed JSON and oversized requests", 
   assert.equal((await POST(request(JSON.stringify({ question: "hello", filler: "x".repeat(3500) })))).status, 413);
   assert.equal(searched.length, 0);
 });
+
+test("assistant enforces an exact JSON media type and preserves charset compatibility", async () => {
+  searched = [];
+  const valid = JSON.stringify({ question: "هل يشمل الفحص المجاني التقرير؟" });
+  for (const contentType of ["application/jsonp", "application/json-patch+json", "text/json", ""]) {
+    const response = await POST(request(valid, { "Content-Type": contentType }));
+    assert.equal(response.status, 415, contentType);
+    assert.equal(response.headers.get("Cache-Control"), "no-store");
+    assert.equal(response.headers.get("X-Content-Type-Options"), "nosniff");
+  }
+  assert.equal(searched.length, 0);
+  assert.equal((await POST(request(valid, { "Content-Type": "application/json; charset=utf-8" }))).status, 200);
+  assert.deepEqual(searched, ["هل يشمل الفحص المجاني التقرير؟"]);
+});
+
+test("assistant rejects malformed declared lengths and invalid UTF-8 before knowledge lookup", async () => {
+  searched = [];
+  const valid = JSON.stringify({ question: "What does Essential include?" });
+  for (const value of ["-1", "Infinity", "NaN", "1e3", "301.0", ""]) {
+    const response = await POST(request(valid, { "Content-Length": value }));
+    assert.equal(response.status, 400, value);
+    assert.equal(response.headers.get("Cache-Control"), "no-store");
+    assert.equal(response.headers.get("X-Content-Type-Options"), "nosniff");
+  }
+  assert.equal((await POST(request(valid, { "Content-Length": "3001" }))).status, 413);
+  const badUtf8 = new Request("https://recomvia.test/api/assistant", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Origin: "https://recomvia.test" },
+    body: new Uint8Array([0x7b, 0xff, 0x7d]),
+  });
+  assert.equal((await POST(badUtf8)).status, 400);
+  assert.equal(searched.length, 0);
+});
