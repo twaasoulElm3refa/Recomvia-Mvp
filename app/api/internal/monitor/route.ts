@@ -5,18 +5,26 @@ import { runScanForUser } from "@/app/api/scans/route";
 import type { AnalysisTarget, TargetInput } from "@/lib/analysis-target";
 export const runtime = "edge";
 
+const privateHeaders = { "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff" };
+const respond = (data: unknown, status = 200) => Response.json(data, { status, headers: privateHeaders });
+
 export async function POST(request: Request) {
   const secret = env.MONITORING_SECRET;
-  if (!secret || secret.length < 32) return Response.json({ code: "not_configured" }, { status: 503 });
+  if (!secret || secret.length < 32) return respond({ code: "not_configured" }, 503);
   const supplied = request.headers.get("authorization") || "";
   const expected = `Bearer ${secret}`;
+  // The scheduled worker sends a single Bearer credential. Bound untrusted input
+  // before hashing, while preserving any intentionally longer configured secret.
+  if (!supplied.startsWith("Bearer ") || supplied.length > Math.max(1_024, expected.length)) {
+    return respond({ code: "unauthorized" }, 401);
+  }
   // Digest first: compare fixed-length values without logging either credential.
   const digest = async (text: string) => new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text)));
   const [a, b] = await Promise.all([digest(supplied), digest(expected)]);
   let difference = 0; for (let i = 0; i < a.length; i++) difference |= a[i] ^ b[i];
-  if (difference) return Response.json({ code: "unauthorized" }, { status: 401 });
+  if (difference) return respond({ code: "unauthorized" }, 401);
   const job = await claimMonitoringJob();
-  if (!job) return Response.json({ processed: 0 }, { headers: { "Cache-Control": "no-store" } });
+  if (!job) return respond({ processed: 0 });
   let status = "monitor_failed", pause = false;
   try {
     const user = { userId: job.userId, email: job.email, displayName: job.displayName, fullName: job.displayName };
@@ -31,5 +39,5 @@ export async function POST(request: Request) {
     }
   } catch { status = "monitor_failed"; }
   finally { await releaseMonitoringJob(job, status, pause); }
-  return Response.json({ processed: 1, status }, { headers: { "Cache-Control": "no-store" } });
+  return respond({ processed: 1, status });
 }
