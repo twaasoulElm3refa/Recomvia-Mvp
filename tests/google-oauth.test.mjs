@@ -256,3 +256,41 @@ test("Google session verifier rejects signed but invalid claims and extended lif
     mockSessionCookie = null;
   }
 });
+
+
+test("Google callback rejects oversized, duplicate, and malformed OAuth inputs without network calls", async () => {
+  const origin = "https://recomvia-staging.recomvia.workers.dev";
+  const startResponse = await start.GET(request(`${origin}/auth/google`));
+  const originalFetch = globalThis.fetch;
+  let externalCalls = 0;
+  globalThis.fetch = () => { externalCalls++; throw new Error("Invalid OAuth input must not reach Google"); };
+  try {
+    const cases = [
+      (incoming) => incoming.nextUrl.searchParams.append("code", "another-code"),
+      (incoming) => incoming.nextUrl.searchParams.append("state", "another-state"),
+      (incoming) => incoming.nextUrl.searchParams.set("code", "x".repeat(4_097)),
+      (incoming) => incoming.nextUrl.searchParams.set("state", "x".repeat(4_097)),
+      (incoming) => {
+        const getCookie = incoming.cookies.get;
+        incoming.cookies = { get: (name) => name === auth.OAUTH_VERIFIER_COOKIE
+          ? { value: "x".repeat(65) } : getCookie(name) };
+      },
+      (incoming) => {
+        const getCookie = incoming.cookies.get;
+        incoming.cookies = { get: (name) => name === auth.OAUTH_STATE_COOKIE
+          ? { value: "invalid-saved-state" } : getCookie(name) };
+      },
+    ];
+    for (const mutate of cases) {
+      const { request: incoming } = callbackRequest(origin, startResponse);
+      mutate(incoming);
+      const response = await callback.GET(incoming);
+      assert.equal(response.location, `${origin}/?auth_error=invalid_oauth_state`);
+      assert.equal(response.cookies.get(auth.OAUTH_STATE_COOKIE).options.maxAge, 0);
+      assert.equal(response.cookies.get(auth.OAUTH_VERIFIER_COOKIE).options.maxAge, 0);
+    }
+    assert.equal(externalCalls, 0);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
