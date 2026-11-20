@@ -23,6 +23,8 @@ export const SESSION_COOKIE = "__Host-recomvia_session";
 export const OAUTH_STATE_COOKIE = "__Host-recomvia_oauth_state";
 export const OAUTH_VERIFIER_COOKIE = "__Host-recomvia_oauth_verifier";
 export const SESSION_MAX_AGE = 60 * 60 * 24 * 7;
+// A browser cookie cannot exceed 4 KiB; reject larger or malformed values before HMAC work.
+const MAX_SESSION_COOKIE_LENGTH = 4096;
 
 // The hosted ChatGPT Site and standalone Cloudflare deployment use different
 // trusted identity providers. Never infer this setting from user-supplied headers.
@@ -102,13 +104,21 @@ export function constantTimeEqual(left: string, right: string) {
 }
 
 async function verifySession(value: string): Promise<SessionPayload | null> {
+  if (value.length > MAX_SESSION_COOKIE_LENGTH) return null;
   const [encodedPayload, signature, extra] = value.split(".");
-  if (!encodedPayload || !signature || extra) return null;
+  if (!encodedPayload || !/^[A-Za-z0-9_-]+$/.test(encodedPayload) ||
+      !signature || !/^[A-Za-z0-9_-]{43}$/.test(signature) || extra !== undefined) return null;
   if (!constantTimeEqual(signature, await sign(encodedPayload))) return null;
   try {
     const payload = JSON.parse(new TextDecoder().decode(decodeBase64Url(encodedPayload))) as SessionPayload;
     const now = Math.floor(Date.now() / 1000);
-    if (payload.v !== 1 || !payload.sub || !payload.email || payload.iat > now + 60 || payload.exp <= now) return null;
+    if (!payload || payload.v !== 1 ||
+        typeof payload.sub !== "string" || !payload.sub ||
+        typeof payload.email !== "string" || !payload.email ||
+        (payload.name !== null && typeof payload.name !== "string") ||
+        !Number.isSafeInteger(payload.iat) || !Number.isSafeInteger(payload.exp) ||
+        payload.iat > now + 60 || payload.exp <= now ||
+        payload.exp <= payload.iat || payload.exp - payload.iat > SESSION_MAX_AGE) return null;
     return payload;
   } catch {
     return null;
