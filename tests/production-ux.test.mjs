@@ -91,3 +91,59 @@ test("Fix Center exposes immutable proposal history only through scoped data", (
   assert.match(history, /Accepted for planning only/);
   assert.doesNotMatch(history, /fetch\(|creditsCharged/);
 });
+
+
+test("private report and print selectors are bounded before database lookups", async () => {
+  const calls = [];
+  const report = {
+    scan: { engineRuns: [], language: "en" },
+    entitlement: { canViewStarterReport: true, reportLevel: "full", planId: "growth" },
+  };
+  const routeMocks = {
+    "@/app/auth": { requireAuthenticatedUser: async () => ({ userId: "account-1", displayName: "Tester" }) },
+    "@/db/product": {
+      getReportForUser: async (userId, scanId) => {
+        calls.push(["scan", userId, scanId]);
+        return report;
+      },
+      getLatestReportForUser: async (userId) => {
+        calls.push(["latest", userId]);
+        return report;
+      },
+    },
+    "next/navigation": { notFound: () => { throw new Error("not_found"); } },
+    "./report-content": { ReportContent: () => null },
+    "../printable-report": { PrintableReport: () => null },
+    "./print-controls": { PrintControls: () => null },
+    "./print.css": {},
+  };
+  const { default: ReportPage } = load("app/report/page.tsx", routeMocks);
+  const { default: PrintReportPage } = load("app/report/print/page.tsx", routeMocks);
+
+  for (const scan of ["", "../other-account", "bad?query", "a".repeat(101), ["scan-1", "scan-2"], 123]) {
+    await assert.rejects(
+      () => ReportPage({ searchParams: Promise.resolve({ scan }) }),
+      /not_found/,
+    );
+    await assert.rejects(
+      () => PrintReportPage({ searchParams: Promise.resolve({ scan }) }),
+      /not_found/,
+    );
+    assert.deepEqual(calls, [], "invalid selectors must not reach private report queries");
+  }
+
+  await assert.rejects(
+    () => PrintReportPage({ searchParams: Promise.resolve({}) }),
+    /not_found/,
+  );
+  await ReportPage({ searchParams: Promise.resolve({}) });
+  assert.deepEqual(calls, [["latest", "account-1"]], "missing selector preserves latest-report UX");
+  calls.length = 0;
+
+  await ReportPage({ searchParams: Promise.resolve({ scan: "scan-1" }) });
+  await PrintReportPage({ searchParams: Promise.resolve({ scan: "scan-1" }) });
+  assert.deepEqual(calls, [
+    ["scan", "account-1", "scan-1"],
+    ["scan", "account-1", "scan-1"],
+  ], "valid selectors still request only the authenticated user's report");
+});
