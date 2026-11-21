@@ -90,3 +90,40 @@ test("assistant rejects malformed declared lengths and invalid UTF-8 before know
   assert.equal((await POST(badUtf8)).status, 400);
   assert.equal(searched.length, 0);
 });
+
+test("assistant rejects ambiguous decimal content lengths before knowledge lookup", async () => {
+  searched = [];
+  const valid = JSON.stringify({ question: "ما هي باقات Recomvia؟" });
+  for (const value of ["00", "01", "00042", "09", "+42", "-0"]) {
+    const response = await POST(request(valid, { "Content-Length": value }));
+    assert.equal(response.status, 400, value);
+    assert.equal(response.headers.get("Cache-Control"), "no-store");
+    assert.equal(response.headers.get("X-Content-Type-Options"), "nosniff");
+  }
+  assert.deepEqual(searched, []);
+  const canonical = String(new TextEncoder().encode(valid).byteLength);
+  assert.equal((await POST(request(valid, { "Content-Length": canonical }))).status, 200);
+  assert.deepEqual(searched, ["ما هي باقات Recomvia؟"]);
+});
+
+test("assistant continues accepting Arabic split across UTF-8 stream boundaries", async () => {
+  searched = [];
+  const valid = JSON.stringify({ question: "كيف أُحسّن ظهور الموقع؟" });
+  const bytes = new TextEncoder().encode(valid);
+  const firstArabicByte = bytes.indexOf(0xd9);
+  assert.ok(firstArabicByte > 0);
+  const body = new ReadableStream({
+    start(controller) {
+      controller.enqueue(bytes.subarray(0, firstArabicByte + 1));
+      controller.enqueue(bytes.subarray(firstArabicByte + 1));
+      controller.close();
+    },
+  });
+  const response = await POST(new Request("https://recomvia.test/api/assistant", {
+    method: "POST", body, duplex: "half",
+    headers: { Origin: "https://recomvia.test", "Content-Type": "application/json; charset=utf-8" },
+  }));
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get("Cache-Control"), "no-store");
+  assert.deepEqual(searched, ["كيف أُحسّن ظهور الموقع؟"]);
+});
