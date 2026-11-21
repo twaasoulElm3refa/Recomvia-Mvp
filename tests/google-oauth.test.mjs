@@ -291,7 +291,7 @@ test("Google callback rejects oversized, duplicate, and malformed OAuth inputs w
       mutate(incoming);
       const response = await callback.GET(incoming);
       assert.equal(response.location, `${origin}/?auth_error=invalid_oauth_state`);
-    assert.equal(response.headers.get("Cache-Control"), "no-store");
+      assert.equal(response.headers.get("Cache-Control"), "no-store");
       assert.equal(response.cookies.get(auth.OAUTH_STATE_COOKIE).options.maxAge, 0);
       assert.equal(response.cookies.get(auth.OAUTH_VERIFIER_COOKIE).options.maxAge, 0);
     }
