@@ -104,3 +104,53 @@ test("ticket status accepts bounded JSON with charset without caching the privat
   assert.deepEqual(await response.json(), fixture);
   assert.equal(databaseLookups, before + 1);
 });
+
+test("ticket status rejects ambiguous content lengths and malformed UTF-8 before any lookup", async () => {
+  const valid = JSON.stringify({ reference: fixture.publicId, accessKey });
+  const before = databaseLookups;
+  for (const length of ["-1", "+1", "01", "1.5", "1e2", "0x10", "3, 3", "NaN"]) {
+    const response = await POST(new Request("https://recomvia.test/api/support/tickets/status", {
+      method: "POST",
+      headers: { Origin: "https://recomvia.test", "Content-Type": "application/json", "Content-Length": length },
+      body: valid,
+    }));
+    assert.equal(response.status, 400, length);
+    assert.equal(response.headers.get("Cache-Control"), "no-store");
+  }
+
+  // The invalid byte is inside an otherwise valid JSON string; replacement decoding
+  // would have accepted it and queried the private ticket.
+  const prefix = new TextEncoder().encode(`{"reference":"${fixture.publicId}","accessKey":"${accessKey}","note":"`);
+  const bytes = new Uint8Array([...prefix, 0xff, ...new TextEncoder().encode('"}')]);
+  const malformed = await POST(request(bytes));
+  assert.equal(malformed.status, 400);
+  assert.equal(malformed.headers.get("Cache-Control"), "no-store");
+  assert.equal(databaseLookups, before);
+});
+
+test("ticket status accepts valid multibyte UTF-8 split between stream chunks", async () => {
+  const bytes = new TextEncoder().encode(JSON.stringify({
+    reference: fixture.publicId,
+    accessKey,
+    note: "مرحبا",
+  }));
+  const boundary = bytes.findIndex((byte) => byte === 0xd9 || byte === 0xd8);
+  assert.ok(boundary > 0);
+  const body = new ReadableStream({
+    start(controller) {
+      controller.enqueue(bytes.slice(0, boundary + 1));
+      controller.enqueue(bytes.slice(boundary + 1));
+      controller.close();
+    },
+  });
+  const before = databaseLookups;
+  const response = await POST(new Request("https://recomvia.test/api/support/tickets/status", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Origin: "https://recomvia.test" },
+    body,
+    duplex: "half",
+  }));
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), fixture);
+  assert.equal(databaseLookups, before + 1);
+});
