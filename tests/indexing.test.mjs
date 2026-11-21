@@ -31,3 +31,37 @@ test("robots keeps account and authentication routes private but allows public p
   assert.ok(!denied.includes("/pricing"));
   assert.ok(!denied.includes("/subscriptions")); // crawler must see the noindex directive
 });
+
+test("sitemap pairs every public English and Arabic URL with reciprocal hreflang links", () => {
+  const js = ts.transpileModule(readFileSync("app/sitemap.ts", "utf8"), {
+    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
+  }).outputText;
+  const mod = { exports: {} };
+  const articles = [
+    { slug: "first-article", modified: "2026-11-10" },
+    { slug: "second-article", modified: "2026-11-11" },
+  ];
+  new Function("require", "module", "exports", js)((name) => {
+    if (name === "@/lib/articles") return { SITE_URL: "https://recomvia.test", articles };
+    throw new Error("Unexpected import: " + name);
+  }, mod, mod.exports);
+
+  const rows = mod.exports.default();
+  const base = "https://recomvia.test";
+  const byUrl = new Map(rows.map((row) => [row.url, row]));
+  const paths = ["", "/blog", "/contact", "/faq", "/methodology", "/pricing", "/privacy", "/terms", "/billing-policy", ...articles.map((article) => `/blog/${article.slug}`)];
+  assert.equal(rows.length, paths.length * 2);
+  assert.equal(byUrl.size, rows.length, "duplicate sitemap URLs");
+  for (const path of paths) {
+    const english = `${base}${path}`;
+    const arabic = `${base}/ar${path}`;
+    for (const url of [english, arabic]) {
+      const row = byUrl.get(url);
+      assert.ok(row, `missing public URL: ${url}`);
+      assert.deepEqual(row.alternates?.languages, { en: english, ar: arabic }, `wrong hreflang pair: ${url}`);
+    }
+  }
+  for (const row of rows) {
+    assert.ok(!/\/(api|dashboard|report|fix-center|auth|subscriptions)(\/|$)/.test(new URL(row.url).pathname), `private route in sitemap: ${row.url}`);
+  }
+});

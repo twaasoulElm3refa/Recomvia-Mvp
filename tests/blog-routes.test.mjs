@@ -68,8 +68,19 @@ test("every public Arabic page has its own route and reciprocal metadata", () =>
     assert.match(arabic, /"ar":/, page);
     assert.match(arabic, /"en":/, page);
   }
-  const map = source("app/sitemap.ts");
-  for (const page of pages) assert.ok(map.includes(page ? `"/ar/${page}"` : '"/ar"'), page);
+  // Assert actual generated sitemap entries, not a particular source-code representation.
+  const script = ts.transpileModule(source("app/sitemap.ts"), {
+    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
+  }).outputText;
+  const loadedModule = { exports: {} };
+  new Function("require", "module", "exports", script)((specifier) => {
+    if (specifier === "@/lib/articles") return { SITE_URL: "https://recomvia.test", articles: [] };
+    throw new Error("Unexpected dependency: " + specifier);
+  }, loadedModule, loadedModule.exports);
+  const sitemapUrls = new Set(loadedModule.exports.default().map((entry) => entry.url));
+  for (const page of pages) {
+    assert.ok(sitemapUrls.has(`https://recomvia.test/ar${page ? `/${page}` : ""}`), page);
+  }
   assert.match(source("app/page.tsx"), /languages:/);
   assert.match(source("app/faq/page.tsx"), /FaqPageContent/);
 });
