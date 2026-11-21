@@ -47,9 +47,12 @@ export async function GET(request: Request) {
     ]);
     const ownedFindings = new Map(report.scan.findings.map((finding) => [finding.id, finding]));
     const requested = reviews.filter((review) => ownedFindings.has(review.findingId));
-    const relevantIds = new Set(requested.map((review) => review.id));
+    // A proposal must belong to the SAME finding as its review request.
+    // Checking both IDs independently can attach another owned finding's text
+    // to the wrong review in an exported evidence pack.
+    const reviewFindingIds = new Map(requested.map((review) => [review.id, review.findingId]));
     const history = versions.filter((entry) =>
-      relevantIds.has(entry.fixId) && ownedFindings.has(entry.findingId),
+      reviewFindingIds.get(entry.fixId) === entry.findingId,
     );
 
     const payload = {
