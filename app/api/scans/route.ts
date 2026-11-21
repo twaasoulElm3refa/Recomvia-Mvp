@@ -96,10 +96,13 @@ export async function POST(request: Request) {
     return json({ code: "invalid_input", error: "JSON content type required." }, 415);
 
   const declaredLength = request.headers.get("content-length");
-  if (declaredLength && !/^\d+$/.test(declaredLength))
-    return json({ code: "invalid_input", error: "Invalid request size." }, 400);
-  if (declaredLength && Number(declaredLength) > MAX_SCAN_BODY_BYTES)
-    return json({ code: "invalid_input", error: "Request is too large." }, 413);
+  if (declaredLength !== null) {
+    // Only canonical decimal lengths are valid; stream bytes remain the authoritative cap.
+    if (!/^(0|[1-9]\d*)$/.test(declaredLength))
+      return json({ code: "invalid_input", error: "Invalid request size." }, 400);
+    if (Number(declaredLength) > MAX_SCAN_BODY_BYTES)
+      return json({ code: "invalid_input", error: "Request is too large." }, 413);
+  }
 
   let payload: Record<string, unknown>;
   try {

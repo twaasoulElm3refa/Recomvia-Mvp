@@ -100,6 +100,48 @@ test("scan request limits count UTF-8 bytes, not JavaScript characters", async (
   assert.equal(workspaceCalls, before);
 });
 
+test("billable scans reject noncanonical declared lengths before workspace access", async () => {
+  const before = workspaceCalls;
+  for (const length of ["", "00", "0001", "+1", "1e3", "0x10", "4_000"]) {
+    const response = await POST(request(valid, { headers: { "Content-Length": length } }));
+    assert.equal(response.status, 400, `length=${JSON.stringify(length)}`);
+    assert.equal(response.headers.get("Cache-Control"), "no-store");
+    assert.equal(response.headers.get("X-Content-Type-Options"), "nosniff");
+  }
+  assert.equal(workspaceCalls, before);
+});
+
+test("billable scans reject malformed UTF-8 even inside otherwise JSON-shaped bytes", async () => {
+  const before = workspaceCalls;
+  const malformed = Uint8Array.from([0x7b, 0x22, 0x78, 0x22, 0x3a, 0x22, 0xc3, 0x28, 0x22, 0x7d]);
+  const response = await POST(request(malformed));
+  assert.equal(response.status, 400);
+  assert.equal(response.headers.get("Cache-Control"), "no-store");
+  assert.equal(workspaceCalls, before);
+});
+
+test("billable scans accept valid Arabic UTF-8 split across stream chunks", async () => {
+  const before = workspaceCalls;
+  const bytes = new TextEncoder().encode(JSON.stringify({
+    input: "مدونة عربية", kind: "topic", language: "ar",
+  }));
+  const splitAt = bytes.findIndex((byte) => byte > 0x7f) + 1;
+  assert.ok(splitAt > 1 && splitAt < bytes.length);
+  const body = new ReadableStream({
+    start(controller) {
+      controller.enqueue(bytes.subarray(0, splitAt));
+      controller.enqueue(bytes.subarray(splitAt));
+      controller.close();
+    },
+  });
+  const req = new Request("https://recomvia.test/api/scans", {
+    method: "POST", duplex: "half", body,
+    headers: { Origin: "https://recomvia.test", "Content-Type": "application/json" },
+  });
+  await assert.rejects(POST(req), /Scan workspace boundary reached/);
+  assert.equal(workspaceCalls, before + 1);
+});
+
 test("valid JSON with charset passes the ingress gate without starting a provider", async () => {
   const before = workspaceCalls;
   await assert.rejects(
