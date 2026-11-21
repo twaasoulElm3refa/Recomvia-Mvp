@@ -16,6 +16,7 @@ const reportReads = [];
 const reviewReads = [];
 const historyReads = [];
 const ownedFinding = { id: "finding_1", title: "Missing description" };
+const secondOwnedFinding = { id: "finding_2", title: "Missing heading" };
 const loaded = { exports: {} };
 new Function("require", "module", "exports", compiled)((name) => {
   if (name === "@/app/auth") return { getAuthenticatedUser: async () => user };
@@ -27,7 +28,7 @@ new Function("require", "module", "exports", compiled)((name) => {
         entitlement: { canViewFullReport: entitled, canUseFixCredits: entitled },
         scan: {
           id: scanId, status: "completed", readinessScore: 80, siteId: "site_1",
-          findings: [ownedFinding], target: { websiteUrl: "https://example.org" },
+          findings: [ownedFinding, secondOwnedFinding], target: { websiteUrl: "https://example.org" },
         },
       };
     },
@@ -46,6 +47,12 @@ new Function("require", "module", "exports", compiled)((name) => {
         {
           fixId: "review_owned", findingId: "finding_1", proposalId: "proposal_1",
           version: 1, proposedText: "Suggested text", decision: null,
+        },
+        {
+          // Both findings belong to this scan, but this proposal claims a
+          // different finding than the review it references: never export it.
+          fixId: "review_owned", findingId: "finding_2", proposalId: "proposal_cross",
+          version: 2, proposedText: "Unrelated owned finding evidence",
         },
         {
           fixId: "review_other", findingId: "finding_other", proposalId: "proposal_other",
@@ -131,4 +138,16 @@ test("one valid owned scan exports only its matching review evidence, without pe
   assert.deepEqual(payload.reviews[0].proposals.map((item) => item.proposalId), ["proposal_1"]);
   assert.deepEqual(reviewReads, [["owner-1", "scan_1"]]);
   assert.deepEqual(historyReads, [["owner-1", "scan_1"]]);
+});
+
+test("evidence export excludes mismatched proposals even when both findings are owned", async () => {
+  const response = await GET(request("?scan=scan_1"));
+  assert.equal(response.status, 200);
+  privateResponse(response);
+  const payload = await response.json();
+  const review = payload.reviews.find((item) => item.reviewId === "review_owned");
+  assert.ok(review);
+  assert.deepEqual(review.proposals.map((item) => item.proposalId), ["proposal_1"]);
+  assert.ok(!JSON.stringify(payload).includes("Unrelated owned finding evidence"));
+  assert.ok(!JSON.stringify(payload).includes("proposal_cross"));
 });
