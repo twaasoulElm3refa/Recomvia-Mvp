@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { requireAuthenticatedUser } from "@/app/auth";
+import { notFound } from "next/navigation";
 import { getLatestReportForUser, getReportForUser } from "@/db/product";
 import { ReportContent } from "./report-content";
 export const dynamic = "force-dynamic";
@@ -11,12 +12,16 @@ export const metadata: Metadata = {
 export default async function ReportPage({
   searchParams,
 }: {
-  searchParams: Promise<{ scan?: string }>;
+  searchParams: Promise<{ scan?: string | string[] }>;
 }) {
   const { scan: scanId } = await searchParams;
   const user = await requireAuthenticatedUser();
-  const report = scanId
-    ? await getReportForUser(user.userId, scanId)
-    : await getLatestReportForUser(user.userId);
+  // An explicit but malformed selector must never fall back to the latest report.
+  // Bound untrusted query input before any account-scoped database lookup.
+  if (scanId !== undefined &&
+      (typeof scanId !== "string" || !/^[a-zA-Z0-9_-]{1,100}$/.test(scanId))) notFound();
+  const report = scanId === undefined
+    ? await getLatestReportForUser(user.userId)
+    : await getReportForUser(user.userId, scanId);
   return <ReportContent report={report} displayName={user.displayName} />;
 }
