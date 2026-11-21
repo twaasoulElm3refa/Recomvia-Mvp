@@ -178,6 +178,22 @@ test("identity confirmation rejects malformed selectors before workspace or prov
   assert.equal(workspaceCalls, before, "invalid confirmation IDs must not touch workspace data");
 });
 
+test("orphan identity candidates never start a new billable scan", async () => {
+  const before = workspaceCalls;
+  for (const candidateId of ["candidate_1", "", "../other", 1, null]) {
+    // An otherwise valid website request must not turn an incomplete
+    // identity confirmation into a fresh scan or provider invocation.
+    const response = await POST(request(JSON.stringify({
+      input: "https://example.com", kind: "website", language: "en", candidateId,
+    })));
+    assert.equal(response.status, 400, JSON.stringify(candidateId));
+    assert.deepEqual(await response.json(), { code: "invalid_choice" });
+    assert.equal(response.headers.get("Cache-Control"), "no-store");
+    assert.equal(response.headers.get("X-Content-Type-Options"), "nosniff");
+  }
+  assert.equal(workspaceCalls, before, "orphan confirmations must not access workspace data");
+});
+
 test("valid identity confirmation selectors reach the existing authenticated workflow", async () => {
   const before = workspaceCalls;
   await assert.rejects(
