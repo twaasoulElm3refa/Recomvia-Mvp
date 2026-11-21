@@ -46,6 +46,12 @@ function validEmail(value: string) {
   return value.length <= 254 && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
 }
 
+// Ticket text is untrusted and displayed to support staff. Reject invisible
+// controls and bidi-formatting characters that can disguise text in the inbox.
+// Preserve normal line breaks in multi-line questions.
+const unsafeSingleLine = /[\u0000-\u001f\u007f\u202a-\u202e\u2066-\u2069]/;
+const unsafeQuestion = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f\u202a-\u202e\u2066-\u2069]/;
+
 function safePageUrl(value: string, origin: string) {
   // Source links open from the staff inbox. Never persist off-site or
   // browser-normalized cross-origin paths as clickable support links.
@@ -111,13 +117,13 @@ export async function POST(request: Request) {
   const question = clean(payload.question);
   const pageUrl = safePageUrl(clean(payload.pageUrl), new URL(request.url).origin);
 
-  if (name.length < 2 || name.length > 80) {
+  if (name.length < 2 || name.length > 80 || unsafeSingleLine.test(name)) {
     return json({ error: "Please enter a valid name." }, 400);
   }
-  if (!validEmail(email)) {
+  if (!validEmail(email) || unsafeSingleLine.test(email)) {
     return json({ error: "Please enter a valid email address." }, 400);
   }
-  if (question.length < 10 || question.length > 2000) {
+  if (question.length < 10 || question.length > 2000 || unsafeQuestion.test(question)) {
     return json({ error: "Question must be between 10 and 2,000 characters." }, 400);
   }
 
