@@ -10,10 +10,11 @@ export const dynamic = "force-dynamic";
 export const runtime = "edge";
 export const metadata: Metadata = { title: "Private visibility report · Print", robots: { index: false, follow: false } };
 
-export default async function PrintReportPage({ searchParams }: { searchParams: Promise<{ scan?: string; lang?: string }> }) {
+export default async function PrintReportPage({ searchParams }: { searchParams: Promise<{ scan?: string | string[]; lang?: string }> }) {
   const user = await requireAuthenticatedUser();
   const { scan: scanId, lang } = await searchParams;
-  if (!scanId) notFound();
+  // Reject malformed and repeated query selectors before reading private reports.
+  if (typeof scanId !== "string" || !/^[a-zA-Z0-9_-]{1,100}$/.test(scanId)) notFound();
   const report = await getReportForUser(user.userId, scanId);
   if (!report || !report.entitlement.canViewStarterReport || !("engineRuns" in report.scan)) notFound();
   const ar = lang === "ar" || (lang !== "en" && report.scan.language.toLowerCase().startsWith("ar"));
