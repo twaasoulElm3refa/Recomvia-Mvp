@@ -136,3 +136,33 @@ test("admin reply rejects malformed UTF-8 but accepts chunked Arabic replies", a
   assert.equal(writes.length, before + 1);
   assert.deepEqual(writes.at(-1), [12, reply, "admin-123"]);
 });
+
+
+test("admin replies reject invisible controls and bidi overrides without writing customer-visible text", async () => {
+  const before = writes.length;
+  const invalid = [
+    ["NUL", "Hello\u0000 there"],
+    ["escape", "Hello\u001b there"],
+    ["vertical tab", "Hello\u000b there"],
+    ["delete", "Hello\u007f there"],
+    ["RTL override", "Report\u202e.html"],
+    ["LTR isolate", "Hello\u2066 there"],
+    ["pop directional format", "Hello\u202c there"],
+  ];
+  for (const [label, reply] of invalid) {
+    const response = await POST(request(JSON.stringify({ reply })), context());
+    assert.equal(response.status, 400, label);
+    assert.equal(response.headers.get("Cache-Control"), "no-store", label);
+    assert.equal(response.headers.get("X-Content-Type-Options"), "nosniff", label);
+    assert.equal(writes.length, before, label);
+  }
+});
+
+test("admin replies preserve ordinary Arabic multiline formatting", async () => {
+  const reply = "مرحبًا،\nشكرًا لتواصلك معنا.\r\nسوف نراجع التقرير\tونرد عليك قريبًا.";
+  const before = writes.length;
+  const response = await POST(request(JSON.stringify({ reply })), context());
+  assert.equal(response.status, 200);
+  assert.equal(writes.length, before + 1);
+  assert.deepEqual(writes.at(-1), [12, reply, "admin-123"]);
+});
