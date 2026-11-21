@@ -44,8 +44,19 @@ test("ticket status endpoint rejects non-object JSON without lookup or internal 
 
 test("ticket status lookup rejects invalid keys and off-origin requests", async () => {
   const valid = JSON.stringify({ reference: fixture.publicId, accessKey });
+  const missingOrigin = await POST(new Request("https://recomvia.test/api/support/tickets/status", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: valid,
+  }));
+  const blankOrigin = await POST(request(valid, ""));
+  const opaqueOrigin = await POST(request(valid, "null"));
   const crossOrigin = await POST(request(valid, "https://evil.example"));
-  assert.equal(crossOrigin.status, 403);
+  for (const response of [missingOrigin, blankOrigin, opaqueOrigin, crossOrigin]) {
+    assert.equal(response.status, 403);
+    assert.equal(response.headers.get("Cache-Control"), "no-store");
+    assert.equal(response.headers.get("X-Content-Type-Options"), "nosniff");
+  }
   const invalid = await POST(request(JSON.stringify({ reference: fixture.publicId, accessKey: "nothex".repeat(6) })));
   assert.equal(invalid.status, 404);
   assert.equal(databaseLookups, 0);
