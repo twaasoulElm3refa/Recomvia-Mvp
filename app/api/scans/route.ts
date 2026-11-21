@@ -124,6 +124,13 @@ export async function POST(request: Request) {
 
 // The caller supplies authenticated identity. Options are internal-only, never copied from payload.
 export async function runScanForUser(user: AuthUser, payload: Record<string, unknown>, options: { monitoring?: boolean; confirmedTarget?: AnalysisTarget } = {}) {
+  // Confirmation references are client-supplied. Reject malformed or oversized IDs
+  // before workspace reads, quota checks or provider configuration work.
+  if (payload.scanId !== undefined && (
+    typeof payload.scanId !== "string" || !/^[a-zA-Z0-9_-]{1,100}$/.test(payload.scanId) ||
+    typeof payload.candidateId !== "string" || !/^[a-zA-Z0-9_-]{1,100}$/.test(payload.candidateId)
+  )) return json({ code: "invalid_choice" }, 400);
+
   const workspace = await ensureWorkspace(user);
   const entitlement = await getEntitlementForUser(user);
   if (options.monitoring && !entitlement.canMonitor) return json({ code: "subscription_required" }, 403);
