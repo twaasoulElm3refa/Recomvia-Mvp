@@ -30,6 +30,16 @@ const publicPageRoots = new Set([
   "privacy", "terms", "billing-policy",
 ]);
 
+/** Keep public links on their canonical language paths without changing private routes. */
+export function publicHrefForLocale(href: string, locale: SiteLocale): string {
+  if (locale !== "ar" || !href.startsWith("/") || href.startsWith("//") ||
+      href === "/ar" || href.startsWith("/ar/") || href.startsWith("/ar#")) return href;
+  if (href === "/") return "/ar";
+  if (href.startsWith("/#")) return `/ar${href.slice(1)}`;
+  const root = href.split(/[/?#]/)[1];
+  return publicPageRoots.has(root) ? `/ar${href}` : href;
+}
+
 export function pageDisplayLocale(pathname: string, preference: SiteLocale): SiteLocale {
   const path = pathname.split(/[?#]/, 1)[0].replace(/\/+$/, "") || "/";
   if (path === "/ar" || path.startsWith("/ar/")) return "ar";
