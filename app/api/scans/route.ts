@@ -124,6 +124,11 @@ export async function POST(request: Request) {
 
 // The caller supplies authenticated identity. Options are internal-only, never copied from payload.
 export async function runScanForUser(user: AuthUser, payload: Record<string, unknown>, options: { monitoring?: boolean; confirmedTarget?: AnalysisTarget } = {}) {
+  // A confirmation must carry both selectors. An orphan candidateId must not
+  // fall through to a new, potentially billable analysis when input is also supplied.
+  if ((payload.scanId === undefined) !== (payload.candidateId === undefined))
+    return json({ code: "invalid_choice" }, 400);
+
   // Confirmation references are client-supplied. Reject malformed or oversized IDs
   // before workspace reads, quota checks or provider configuration work.
   if (payload.scanId !== undefined && (
