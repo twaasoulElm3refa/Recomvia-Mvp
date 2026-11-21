@@ -93,3 +93,46 @@ test("valid admin reply saves once and keeps the existing success contract", asy
   assert.equal(missing.status, 404);
   found = true;
 });
+
+test("admin reply rejects ambiguous declared lengths before any writes", async () => {
+  const before = writes.length;
+  for (const length of ["-1", "+1", "01", "1.5", "1e2", "0x10", "3, 3", "Infinity", "NaN", ""]) {
+    const response = await POST(request(valid, { headers: { "Content-Length": length } }), context());
+    assert.equal(response.status, 400, length);
+    assert.equal(response.headers.get("Cache-Control"), "no-store");
+    assert.equal(response.headers.get("X-Content-Type-Options"), "nosniff");
+  }
+  assert.equal(writes.length, before);
+});
+
+test("admin reply rejects malformed UTF-8 but accepts chunked Arabic replies", async () => {
+  const before = writes.length;
+  const prefix = new TextEncoder().encode('{"reply":"A valid reply ');
+  const invalid = new Uint8Array([...prefix, 0xff, ...new TextEncoder().encode(' inside."}')]);
+  const malformed = await POST(request(invalid), context());
+  assert.equal(malformed.status, 400);
+  assert.equal(malformed.headers.get("Cache-Control"), "no-store");
+  assert.equal(writes.length, before);
+
+  const reply = "هذا رد واضح ومفيد بشأن التقرير";
+  const encoded = new TextEncoder().encode(JSON.stringify({ reply }));
+  const firstArabicByte = encoded.findIndex((byte) => byte >= 0x80);
+  assert.ok(firstArabicByte > 0);
+  const stream = new ReadableStream({
+    start(controller) {
+      controller.enqueue(encoded.slice(0, firstArabicByte + 1));
+      controller.enqueue(encoded.slice(firstArabicByte + 1));
+      controller.close();
+    },
+  });
+  const response = await POST(new Request("https://recomvia.test/api/support/tickets/12/reply", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Origin: "https://recomvia.test" },
+    body: stream,
+    duplex: "half",
+  }), context());
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get("Cache-Control"), "no-store");
+  assert.equal(writes.length, before + 1);
+  assert.deepEqual(writes.at(-1), [12, reply, "admin-123"]);
+});
