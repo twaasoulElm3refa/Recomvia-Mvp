@@ -40,7 +40,9 @@ export async function POST(request: Request) {
   }
 
   const declaredLength = request.headers.get("content-length");
-  if (declaredLength !== null && !/^\d+$/.test(declaredLength)) {
+  // Accept only canonical unsigned decimal lengths, as on the authenticated JSON APIs.
+  // Ambiguous representations can be interpreted differently by intermediaries.
+  if (declaredLength !== null && !/^(0|[1-9]\d*)$/.test(declaredLength)) {
     return json({ error: "Invalid request size." }, 400);
   }
   if (declaredLength !== null && Number(declaredLength) > MAX_BODY_BYTES) {
