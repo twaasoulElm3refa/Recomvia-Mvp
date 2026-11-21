@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { pageDisplayLocale, readStoredSiteLocale, SITE_LOCALE_EVENT, SITE_LOCALE_STORAGE_KEY, storeSiteLocale } from "../lib/site-locale";
+import { readFileSync } from "node:fs";
+import { pageDisplayLocale, publicHrefForLocale, readStoredSiteLocale, SITE_LOCALE_EVENT, SITE_LOCALE_STORAGE_KEY, storeSiteLocale } from "../lib/site-locale";
 
 test("keeps explicit English and Arabic choices across page reads and notifies listeners", () => {
   const data = new Map<string, string>();
@@ -33,4 +34,29 @@ test("assistant language follows canonical public routes and workspace preferenc
   assert.equal(pageDisplayLocale("/report?scan=example", "ar"), "ar");
   assert.equal(pageDisplayLocale("/fix-center", "ar"), "ar");
   assert.equal(pageDisplayLocale("/subscriptions", "ar"), "ar");
+});
+
+test("public navigation keeps Arabic readers on canonical Arabic routes without rewriting private links", () => {
+  for (const [href, arabic] of [
+    ["/", "/ar"],
+    ["/#product", "/ar#product"],
+    ["/pricing", "/ar/pricing"],
+    ["/blog/ai-visibility-guide", "/ar/blog/ai-visibility-guide"],
+    ["/faq?source=blog#guarantee", "/ar/faq?source=blog#guarantee"],
+  ]) {
+    assert.equal(publicHrefForLocale(href, "ar"), arabic, href);
+    assert.equal(publicHrefForLocale(href, "en"), href, href);
+  }
+  for (const href of [
+    "/dashboard", "/auth/start", "/report", "/fix-center", "/subscriptions",
+    "/ar", "/ar/blog", "/ar#product", "/pricing-preview",
+    "//untrusted.example/path", "https://untrusted.example/path",
+  ]) {
+    assert.equal(publicHrefForLocale(href, "ar"), href, href);
+  }
+
+  const shell = readFileSync("app/components/public-shell.tsx", "utf8");
+  assert.match(shell, /href: localizedHref\(href\)/, "main navigation must localize links");
+  assert.equal((shell.match(/href=\{localizedHref\("\/"\)\}/g) ?? []).length, 2,
+    "brand logo and scan CTA must preserve Arabic homepage routing");
 });

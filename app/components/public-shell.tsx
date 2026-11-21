@@ -8,7 +8,7 @@ import { BrandMark } from "@/app/scan-experience";
 import { KnowledgeAssistant } from "@/app/components/knowledge-assistant";
 import { MobileSiteMenu, type SiteNavItem } from "@/app/components/mobile-site-menu";
 import { Button } from "@/components/ui/button";
-import { readStoredSiteLocale, SITE_LOCALE_EVENT, storeSiteLocale, type SiteLocale } from "@/lib/site-locale";
+import { publicHrefForLocale, readStoredSiteLocale, SITE_LOCALE_EVENT, storeSiteLocale, type SiteLocale } from "@/lib/site-locale";
 import { useAccountEntry } from "@/hooks/use-account-entry";
 
 const copy = {
@@ -114,7 +114,7 @@ export function PublicShell({ children, pageMetadata, initialLocale = "en" }: {
   const rtl = locale === "ar";
   const accountLabel = signedIn ? (rtl ? "لوحة التحكم" : "Dashboard") : (rtl ? "تسجيل الدخول" : "Sign in");
   const accountHref = signedIn ? "/dashboard" : "/auth/start";
-  const localizedHref = (href: string) => locale === "ar" && localizedPublicPages.has(href) ? `/ar${href}` : href;
+  const localizedHref = (href: string) => publicHrefForLocale(href, locale);
   const navigation: SiteNavItem[] = navigationHrefs.map((href, index) => ({ href: localizedHref(href), label: t.navigation[index] }));
 
   function toggleLocale() {
@@ -134,14 +134,14 @@ export function PublicShell({ children, pageMetadata, initialLocale = "en" }: {
     <div lang={locale} dir={rtl ? "rtl" : "ltr"} className="min-h-screen bg-[#f8fafc] text-[#07111f]">
       <header lang={locale} dir={rtl ? "rtl" : "ltr"} className="sticky top-0 z-40 border-b border-slate-200/80 bg-white/90 backdrop-blur-xl">
         <div className="mx-auto flex h-[72px] max-w-[1240px] items-center justify-between gap-4 px-5 sm:px-8">
-          <Link href="/" className="shrink-0"><BrandMark /></Link>
+          <Link href={localizedHref("/")} className="shrink-0"><BrandMark /></Link>
           <nav className="hidden items-center gap-5 text-sm font-semibold text-slate-600 lg:flex" aria-label={t.menu}>
             {navigation.map((item) => <Link key={item.href} href={item.href} className="transition hover:text-blue-700">{item.label}</Link>)}
           </nav>
           <div className="flex items-center gap-2">
             <Button type="button" variant="ghost" size="sm" className="rounded-xl" onClick={toggleLocale}><Globe2 className="size-4" />{rtl ? "EN" : "العربية"}</Button>
             <Link href={accountHref} className="hidden text-sm font-bold text-slate-700 lg:inline-flex">{accountLabel}</Link>
-            <Button asChild className="hidden rounded-xl bg-[#07111f] font-bold sm:inline-flex"><Link href="/">{t.score}</Link></Button>
+            <Button asChild className="hidden rounded-xl bg-[#07111f] font-bold sm:inline-flex"><Link href={localizedHref("/")}>{t.score}</Link></Button>
             <MobileSiteMenu items={navigation} menuLabel={t.menu} ctaLabel={accountLabel} ctaHref={accountHref} direction={rtl ? "rtl" : "ltr"} />
           </div>
         </div>
