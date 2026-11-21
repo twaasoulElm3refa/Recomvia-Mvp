@@ -46,11 +46,14 @@ function validEmail(value: string) {
   return value.length <= 254 && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
 }
 
-function safePageUrl(value: string) {
-  if (!value || value.length > 500) return "";
-  if (value.startsWith("/") && !value.startsWith("//")) return value;
+function safePageUrl(value: string, origin: string) {
+  // Source links open from the staff inbox. Never persist off-site or
+  // browser-normalized cross-origin paths as clickable support links.
+  if (!value || value.length > 500 || /[\\\u0000-\u001f\u007f]/.test(value)) return "";
+  if (!value.startsWith("/") && !/^https?:\/\//i.test(value)) return "";
   try {
-    const url = new URL(value);
+    const url = new URL(value, origin);
+    if (url.origin !== origin || !["http:", "https:"].includes(url.protocol)) return "";
     return url.pathname + url.search;
   } catch {
     return "";
@@ -104,7 +107,7 @@ export async function POST(request: Request) {
   const name = clean(payload.name);
   const email = clean(payload.email).toLowerCase();
   const question = clean(payload.question);
-  const pageUrl = safePageUrl(clean(payload.pageUrl));
+  const pageUrl = safePageUrl(clean(payload.pageUrl), new URL(request.url).origin);
 
   if (name.length < 2 || name.length > 80) {
     return json({ error: "Please enter a valid name." }, 400);
