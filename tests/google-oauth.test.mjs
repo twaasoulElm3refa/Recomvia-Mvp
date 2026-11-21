@@ -18,6 +18,7 @@ let mockSessionCookie = null;
 class MockResponse {
   constructor(location) {
     this.location = location.toString();
+    this.headers = new Headers();
     this.cookies = {
       values: new Map(),
       set: (name, value, options) => this.cookies.values.set(name, { value, options }),
@@ -88,6 +89,7 @@ test("staging and production authorization use their own callback URL and config
   ]) {
     const response = await start.GET(request(`${origin}/auth/google?origin=https://attacker.example`));
     const authorization = new URL(response.location);
+    assert.equal(response.headers.get("Cache-Control"), "no-store");
     assert.equal(authorization.searchParams.get("redirect_uri"), `${origin}/auth/google/callback`);
     assert.equal(authorization.searchParams.get("client_id"), credentials.GOOGLE_CLIENT_ID);
     assert.equal(authorization.searchParams.get("state"), response.cookies.get(auth.OAUTH_STATE_COOKIE).value);
@@ -124,6 +126,7 @@ test("callback exchanges with the exact request-specific redirect URI and return
     assert.equal(body.get("client_secret"), credentials.GOOGLE_CLIENT_SECRET);
     assert.equal(body.get("code_verifier"), verifier);
     assert.equal(response.location, `${origin}/dashboard`);
+    assert.equal(response.headers.get("Cache-Control"), "no-store");
     assert.match(response.cookies.get(auth.SESSION_COOKIE).value, /^[^.]+\.[^.]+$/);
     assert.deepEqual(
       { httpOnly: response.cookies.get(auth.SESSION_COOKIE).options.httpOnly, secure: response.cookies.get(auth.SESSION_COOKIE).options.secure, sameSite: response.cookies.get(auth.SESSION_COOKIE).options.sameSite },
@@ -143,6 +146,7 @@ test("invalid OAuth state returns to staging with an error without exchanging a 
   try {
     const response = await callback.GET(request(`${origin}/auth/google/callback?code=test-code&state=bad`));
     assert.equal(response.location, `${origin}/?auth_error=invalid_oauth_state`);
+    assert.equal(response.headers.get("Cache-Control"), "no-store");
     assert.equal(response.cookies.get(auth.OAUTH_STATE_COOKIE).options.maxAge, 0);
   } finally {
     globalThis.fetch = originalFetch;
@@ -158,6 +162,7 @@ test("Google token errors return to the staging origin", async () => {
   try {
     const response = await callback.GET(incoming);
     assert.equal(response.location, `${origin}/?auth_error=token_exchange_failed`);
+    assert.equal(response.headers.get("Cache-Control"), "no-store");
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -286,6 +291,7 @@ test("Google callback rejects oversized, duplicate, and malformed OAuth inputs w
       mutate(incoming);
       const response = await callback.GET(incoming);
       assert.equal(response.location, `${origin}/?auth_error=invalid_oauth_state`);
+      assert.equal(response.headers.get("Cache-Control"), "no-store");
       assert.equal(response.cookies.get(auth.OAUTH_STATE_COOKIE).options.maxAge, 0);
       assert.equal(response.cookies.get(auth.OAUTH_VERIFIER_COOKIE).options.maxAge, 0);
     }

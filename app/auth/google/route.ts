@@ -18,6 +18,8 @@ export async function GET(request: Request) {
   authorizationUrl.searchParams.set("code_challenge_method", "S256");
   authorizationUrl.searchParams.set("prompt", "select_account");
   const response = NextResponse.redirect(authorizationUrl);
+  // OAuth state and PKCE verifier are single-use secrets: never cache this redirect.
+  response.headers.set("Cache-Control", "no-store");
   const options = { httpOnly: true, secure: true, sameSite: "lax" as const, path: "/", maxAge: 600 };
   response.cookies.set(OAUTH_STATE_COOKIE, state, options);
   response.cookies.set(OAUTH_VERIFIER_COOKIE, verifier, options);

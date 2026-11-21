@@ -37,6 +37,8 @@ export async function GET(request: NextRequest) {
     if (!profileResponse.ok || !profile.sub || !profile.email || profile.email_verified !== true) return authError(appOrigin, "unverified_google_account");
 
     const response = NextResponse.redirect(`${appOrigin}/dashboard`);
+    // Session-bearing authentication redirects must never be cached.
+    response.headers.set("Cache-Control", "no-store");
     response.cookies.set(SESSION_COOKIE, await createSession({ sub: profile.sub, email: profile.email.toLowerCase(), name: profile.name?.trim() || null }), {
       httpOnly: true, secure: true, sameSite: "lax", path: "/", maxAge: SESSION_MAX_AGE,
     });
@@ -49,6 +51,7 @@ export async function GET(request: NextRequest) {
 
 function authError(appOrigin: string, reason: string) {
   const response = NextResponse.redirect(`${appOrigin}/?auth_error=${encodeURIComponent(reason)}`);
+  response.headers.set("Cache-Control", "no-store");
   clearOAuthCookies(response);
   return response;
 }
