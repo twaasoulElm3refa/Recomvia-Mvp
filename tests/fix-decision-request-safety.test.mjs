@@ -133,3 +133,42 @@ test("fix decision keeps ownership and stale-version protections", async () => {
   assert.equal((await POST(request())).status, 409);
   databaseError = "";
 });
+
+
+test("fix decision comments reject invisible controls and bidi overrides without database writes", async () => {
+  const before = writes.length;
+  const unsafe = [
+    ["NUL", "\u0000"],
+    ["escape", "\u001b"],
+    ["vertical tab", "\u000b"],
+    ["form feed", "\u000c"],
+    ["delete", "\u007f"],
+    ["RTL override", "\u202e"],
+    ["LTR isolate", "\u2066"],
+    ["pop directional format", "\u202c"],
+  ];
+  for (const decision of ["accepted_for_planning", "changes_requested"]) {
+    for (const [label, character] of unsafe) {
+      const comment = "Please review" + character + " this recommendation.";
+      const response = await POST(request(JSON.stringify({ ...validData, decision, comment })));
+      assert.equal(response.status, 400, decision + ": " + label);
+      assert.equal(response.headers.get("Cache-Control"), "no-store", label);
+      assert.equal(response.headers.get("X-Content-Type-Options"), "nosniff", label);
+      assert.equal(writes.length, before, decision + ": " + label);
+    }
+  }
+});
+
+test("fix decision comments preserve legitimate Arabic line breaks and internal tabs", async () => {
+  const before = writes.length;
+  const comment = "أرجو تعديل النطاق\nوتوضيح السبب\r\nثم متابعة\tالعمل";
+  const response = await POST(request(JSON.stringify({
+    ...validData, decision: "changes_requested", comment,
+  })));
+  assert.equal(response.status, 201);
+  assert.equal(response.headers.get("Cache-Control"), "no-store");
+  assert.equal(writes.length, before + 1);
+  assert.deepEqual(writes.at(-1), [
+    "owner", "scan_1", "proposal_123", "changes_requested", comment,
+  ]);
+});
