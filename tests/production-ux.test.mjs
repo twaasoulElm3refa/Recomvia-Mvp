@@ -147,3 +147,42 @@ test("private report and print selectors are bounded before database lookups", a
     ["scan", "account-1", "scan-1"],
   ], "valid selectors still request only the authenticated user's report");
 });
+
+test("Fix Center rejects malformed and repeated report IDs without private report reads", async () => {
+  const calls = [];
+  const routeMocks = {
+    "@/app/auth": { requireAuthenticatedUser: async () => ({ userId: "account-1" }) },
+    "@/db/product": {
+      getEntitlementForUser: async () => ({ canUseFixCredits: true }),
+      getLatestWebsiteReportForUser: async (userId) => {
+        calls.push(["latest", userId]);
+        return null;
+      },
+      getReportForUser: async (userId, scanId) => {
+        calls.push(["scan", userId, scanId]);
+        return null;
+      },
+    },
+    "@/db/fix-review": {
+      listFixReviewRequests: async () => [],
+      listFixProposalHistoryForScan: async () => [],
+    },
+    "./fix-access-gate": { FixAccessGate: () => null },
+    "./fix-center-experience": { FixCenterExperience: () => null },
+  };
+  const { default: FixCenterPage } = load("app/fix-center/page.tsx", routeMocks);
+
+  for (const scan of ["", "../another-account", "bad?query", "a".repeat(101),
+    ["scan-1", "scan-2"], ["scan-1"], 123, null]) {
+    await FixCenterPage({ searchParams: Promise.resolve({ scan }) });
+    assert.deepEqual(calls, [], "invalid report IDs must never reach the private report query");
+  }
+
+  await FixCenterPage({ searchParams: Promise.resolve({}) });
+  assert.deepEqual(calls, [["latest", "account-1"]],
+    "only an absent selector can request the latest website report");
+  calls.length = 0;
+  await FixCenterPage({ searchParams: Promise.resolve({ scan: "scan-1" }) });
+  assert.deepEqual(calls, [["scan", "account-1", "scan-1"]],
+    "a valid selector must remain scoped to the authenticated account");
+});

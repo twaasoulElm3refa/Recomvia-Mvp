@@ -19,18 +19,19 @@ export const metadata: Metadata = {
 export default async function FixCenterPage({
   searchParams,
 }: {
-  searchParams: Promise<{ scan?: string }>;
+  searchParams: Promise<{ scan?: string | string[] }>;
 }) {
   const user = await requireAuthenticatedUser();
   const entitlement = await getEntitlementForUser(user);
   if (!entitlement.canUseFixCredits) return <FixAccessGate />;
 
   const requested = (await searchParams).scan;
-  const scanId = requested && /^[a-zA-Z0-9_-]{1,100}$/.test(requested)
+  // Duplicate or malformed selectors must not become an implicit latest-report request.
+  const scanId = typeof requested === "string" && /^[a-zA-Z0-9_-]{1,100}$/.test(requested)
     ? requested : null;
-  const report = requested
-    ? (scanId ? await getReportForUser(user.userId, scanId) : null)
-    : await getLatestWebsiteReportForUser(user.userId);
+  const report = requested === undefined
+    ? await getLatestWebsiteReportForUser(user.userId)
+    : scanId ? await getReportForUser(user.userId, scanId) : null;
   const scan = report?.entitlement.canViewFullReport &&
     "findings" in report.scan &&
     report.scan.status === "completed" &&
