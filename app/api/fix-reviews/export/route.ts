@@ -22,10 +22,13 @@ export async function GET(request: Request) {
   const user = await getAuthenticatedUser();
   if (!user) return error(401, "sign_in");
 
-  const scanId = new URL(request.url).searchParams.get("scan");
-  if (!scanId || !/^[a-zA-Z0-9_-]{1,100}$/.test(scanId)) {
+  // Reject ambiguous scan selectors before any customer report or proposal reads.
+  // Even identical repeated parameters are invalid; exports must name one scan.
+  const selectors = new URL(request.url).searchParams.getAll("scan");
+  if (selectors.length !== 1 || !/^[a-zA-Z0-9_-]{1,100}$/.test(selectors[0])) {
     return error(400, "invalid_scan");
   }
+  const scanId = selectors[0];
 
   try {
     const report = await getReportForUser(user.userId, scanId);

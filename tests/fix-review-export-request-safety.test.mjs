@@ -1,0 +1,134 @@
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { test } from "node:test";
+import ts from "typescript";
+
+// Exercise the deployed route with stubbed owner-scoped database boundaries.
+// Do not require live D1, customer accounts or paid integrations.
+const compiled = ts.transpileModule(
+  readFileSync("app/api/fix-reviews/export/route.ts", "utf8"),
+  { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } },
+).outputText;
+
+let user = { userId: "owner-1" };
+let entitled = true;
+const reportReads = [];
+const reviewReads = [];
+const historyReads = [];
+const ownedFinding = { id: "finding_1", title: "Missing description" };
+const loaded = { exports: {} };
+new Function("require", "module", "exports", compiled)((name) => {
+  if (name === "@/app/auth") return { getAuthenticatedUser: async () => user };
+  if (name === "@/db/product") return {
+    getReportForUser: async (userId, scanId) => {
+      reportReads.push([userId, scanId]);
+      if (scanId !== "scan_1") return null;
+      return {
+        entitlement: { canViewFullReport: entitled, canUseFixCredits: entitled },
+        scan: {
+          id: scanId, status: "completed", readinessScore: 80, siteId: "site_1",
+          findings: [ownedFinding], target: { websiteUrl: "https://example.org" },
+        },
+      };
+    },
+  };
+  if (name === "@/db/fix-review") return {
+    listFixReviewRequests: async (...args) => {
+      reviewReads.push(args);
+      return [
+        { id: "review_owned", findingId: "finding_1", status: "review_requested", createdAt: "2026-11-21" },
+        { id: "review_other", findingId: "finding_other", status: "review_requested", createdAt: "2026-11-21" },
+      ];
+    },
+    listFixProposalHistoryForScan: async (...args) => {
+      historyReads.push(args);
+      return [
+        {
+          fixId: "review_owned", findingId: "finding_1", proposalId: "proposal_1",
+          version: 1, proposedText: "Suggested text", decision: null,
+        },
+        {
+          fixId: "review_other", findingId: "finding_other", proposalId: "proposal_other",
+          version: 1, proposedText: "Other finding",
+        },
+      ];
+    },
+  };
+  throw new Error("Unexpected import: " + name);
+}, loaded, loaded.exports);
+
+const { GET } = loaded.exports;
+const request = (query = "") => new Request("https://recomvia.test/api/fix-reviews/export" + query);
+function privateResponse(response) {
+  assert.equal(response.headers.get("Cache-Control"), "private, no-store, max-age=0");
+  assert.equal(response.headers.get("X-Content-Type-Options"), "nosniff");
+}
+
+test("private evidence export requires authentication before customer data reads", async () => {
+  user = null;
+  const response = await GET(request("?scan=scan_1"));
+  user = { userId: "owner-1" };
+  assert.equal(response.status, 401);
+  assert.deepEqual(await response.json(), { code: "sign_in" });
+  privateResponse(response);
+  assert.equal(reportReads.length, 0);
+  assert.equal(reviewReads.length, 0);
+  assert.equal(historyReads.length, 0);
+});
+
+test("private evidence export rejects repeated and malformed selectors before database work", async () => {
+  const invalid = [
+    "", "?scan", "?scan=", "?scan=scan_1&scan=scan_1",
+    "?scan=scan_1&scan=scan_2", "?scan=scan_1&scan=",
+    "?scan=../other", "?scan=%00", "?scan=%20scan_1",
+    "?scan=scan%2F1", "?scan=" + "a".repeat(101),
+  ];
+  for (const query of invalid) {
+    const response = await GET(request(query));
+    assert.equal(response.status, 400, query);
+    assert.deepEqual(await response.json(), { code: "invalid_scan" });
+    privateResponse(response);
+  }
+  assert.deepEqual(reportReads, [], "invalid selectors must not read private reports");
+  assert.deepEqual(reviewReads, [], "invalid selectors must not read reviews");
+  assert.deepEqual(historyReads, [], "invalid selectors must not read proposal history");
+});
+
+test("private evidence export does not expose missing or plan-ineligible scans", async () => {
+  const missing = await GET(request("?scan=scan_missing"));
+  assert.equal(missing.status, 404);
+  privateResponse(missing);
+  entitled = false;
+  const notEntitled = await GET(request("?scan=scan_1"));
+  entitled = true;
+  assert.equal(notEntitled.status, 404);
+  privateResponse(notEntitled);
+  assert.deepEqual(reviewReads, []);
+  assert.deepEqual(historyReads, []);
+  assert.deepEqual(reportReads, [
+    ["owner-1", "scan_missing"],
+    ["owner-1", "scan_1"],
+  ]);
+});
+
+test("one valid owned scan exports only its matching review evidence, without permitting execution", async () => {
+  const response = await GET(request("?scan=scan_1"));
+  assert.equal(response.status, 200);
+  privateResponse(response);
+  assert.equal(response.headers.get("Content-Type"), "application/json; charset=utf-8");
+  assert.equal(response.headers.get("Content-Disposition"),
+    'attachment; filename="recomvia-fix-review-scan_1.json"');
+  const payload = await response.json();
+  assert.equal(payload.schemaVersion, 1);
+  assert.equal(payload.scanId, "scan_1");
+  assert.equal(payload.website, "https://example.org");
+  assert.equal(payload.executionEnabled, false);
+  assert.equal(payload.siteBackupIncluded, false);
+  assert.equal(payload.creditsCharged, 0);
+  assert.equal(payload.reviews.length, 1);
+  assert.equal(payload.reviews[0].reviewId, "review_owned");
+  assert.equal(payload.reviews[0].finding.id, "finding_1");
+  assert.deepEqual(payload.reviews[0].proposals.map((item) => item.proposalId), ["proposal_1"]);
+  assert.deepEqual(reviewReads, [["owner-1", "scan_1"]]);
+  assert.deepEqual(historyReads, [["owner-1", "scan_1"]]);
+});
