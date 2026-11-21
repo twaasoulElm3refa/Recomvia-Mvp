@@ -156,6 +156,37 @@ test("valid JSON with charset passes the ingress gate without starting a provide
   assert.equal(workspaceCalls, before + 1);
 });
 
+test("identity confirmation rejects malformed selectors before workspace or provider work", async () => {
+  const before = workspaceCalls;
+  const cases = [
+    { scanId: "", candidateId: "candidate_1" },
+    { scanId: "../another-scan", candidateId: "candidate_1" },
+    { scanId: "scan_1", candidateId: "../other" },
+    { scanId: "scan_1", candidateId: "x".repeat(101) },
+    { scanId: "x".repeat(101), candidateId: "candidate_1" },
+    { scanId: "scan_1", candidateId: 1 },
+    { scanId: 7, candidateId: "candidate_1" },
+    { scanId: "scan_1" },
+    { scanId: "scan_1", candidateId: "candidate_1\\n" },
+  ];
+  for (const payload of cases) {
+    const response = await POST(request(JSON.stringify(payload)));
+    assert.equal(response.status, 400, JSON.stringify(payload));
+    assert.deepEqual(await response.json(), { code: "invalid_choice" });
+    assert.equal(response.headers.get("Cache-Control"), "no-store");
+  }
+  assert.equal(workspaceCalls, before, "invalid confirmation IDs must not touch workspace data");
+});
+
+test("valid identity confirmation selectors reach the existing authenticated workflow", async () => {
+  const before = workspaceCalls;
+  await assert.rejects(
+    POST(request(JSON.stringify({ scanId: "scan_abc", candidateId: "candidate_2" }))),
+    /Scan workspace boundary reached/,
+  );
+  assert.equal(workspaceCalls, before + 1, "valid IDs must not be rejected by ingress validation");
+});
+
 test("private scan lookup rejects missing, repeated, malformed and oversized selectors before database access", async () => {
   reportReads = [];
   const invalid = [
