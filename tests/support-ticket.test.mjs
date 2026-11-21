@@ -94,3 +94,50 @@ test("support responds 429 without exposing database errors when hourly limit is
     simulateRateLimit = false;
   }
 });
+
+
+test("support rejects malformed declared lengths before creating tickets", async () => {
+  const body = JSON.stringify({ name: "Test Sender", email: "sender@example.org", question: "Please help with this report" });
+  const before = created.length;
+  for (const value of ["-1", "Infinity", "NaN", "1e3", "16.0", "01", ""]) {
+    const response = await POST(request(body, { "Content-Length": value }));
+    assert.equal(response.status, 400, value);
+    assert.equal(response.headers.get("Cache-Control"), "no-store");
+  }
+  assert.equal(created.length, before);
+});
+
+test("support rejects invalid UTF-8 but preserves streamed Arabic text", async () => {
+  const before = created.length;
+  const invalid = await POST(request(new Uint8Array([0x7b, 0x22, 0x71, 0x22, 0x3a, 0x22, 0xff, 0x22, 0x7d])));
+  assert.equal(invalid.status, 400);
+  assert.equal(invalid.headers.get("X-Content-Type-Options"), "nosniff");
+  assert.equal(created.length, before);
+
+  const input = {
+    name: "مستخدم عربي",
+    email: "arabic@example.org",
+    question: "أحتاج مساعدة في قراءة التقرير الخاص بموقعي",
+  };
+  const encoded = new TextEncoder().encode(JSON.stringify(input));
+  const firstArabicByte = encoded.findIndex((byte) => byte >= 0x80);
+  assert.ok(firstArabicByte >= 0);
+  const stream = new ReadableStream({
+    start(controller) {
+      controller.enqueue(encoded.slice(0, firstArabicByte + 1));
+      controller.enqueue(encoded.slice(firstArabicByte + 1));
+      controller.close();
+    },
+  });
+  const response = await POST(new Request("https://recomvia.test/api/support/tickets", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Origin: "https://recomvia.test" },
+    body: stream,
+    duplex: "half",
+  }));
+  assert.equal(response.status, 201);
+  assert.equal(response.headers.get("Cache-Control"), "no-store");
+  assert.equal(created.length, before + 1);
+  assert.equal(created.at(-1).requesterName, input.name);
+  assert.equal(created.at(-1).question, input.question);
+});
