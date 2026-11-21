@@ -17,7 +17,6 @@ export default function sitemap(): MetadataRoute.Sitemap {
   return [
     ...staticPages.map((path) => ({
       url: `${SITE_URL}${path}`,
-      lastModified: new Date("2026-09-21"),
       changeFrequency: path === "/blog" || path === "/faq" ? "weekly" as const : "monthly" as const,
       priority: path === "" ? 1 : path === "/blog" ? 0.9 : path === "/faq" ? 0.85 : 0.7,
       alternates: languageAlternates(path),
@@ -31,7 +30,6 @@ export default function sitemap(): MetadataRoute.Sitemap {
     })),
     ...staticPages.map((path) => ({
       url: `${SITE_URL}/ar${path}`,
-      lastModified: new Date("2026-09-21"),
       changeFrequency: path === "/blog" ? "weekly" as const : "monthly" as const,
       priority: path === "" ? 1 : path === "/blog" ? 0.85 : 0.7,
       alternates: languageAlternates(path),
