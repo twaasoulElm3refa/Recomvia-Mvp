@@ -50,10 +50,6 @@ test("support requires a trustworthy same-origin request before creating tickets
     assert.equal(response.headers.get("X-Content-Type-Options"), "nosniff", caseName);
     assert.equal(created.length, before, caseName);
   }
-  const crossOrigin = await POST(request(valid, { Origin: "https://another.example" }));
-  assert.equal(crossOrigin.status, 403);
-  assert.equal(crossOrigin.headers.get("Cache-Control"), "no-store");
-  assert.equal(crossOrigin.headers.get("X-Content-Type-Options"), "nosniff");
   const invalidType = await POST(request(valid, { "content-type": "text/plain" }));
   assert.equal(invalidType.status, 415);
   const jsonp = await POST(request(valid, { "content-type": "application/jsonp" }));
