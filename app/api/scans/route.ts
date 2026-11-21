@@ -72,9 +72,11 @@ async function readBoundedScanBody(request: Request): Promise<string | null> {
 export async function GET(request: Request) {
   const user = await getAuthenticatedUser();
   if (!user) return json({ code: "sign_in" }, 401);
-  const id = new URL(request.url).searchParams.get("scan");
-  if (!id || id.length > 100) return json({ code: "invalid_input" }, 400);
-  const report = await getReportForUser(user.userId, id);
+  const selectors = new URL(request.url).searchParams.getAll("scan");
+  // Report IDs must be unambiguous and bounded before an account-scoped database read.
+  if (selectors.length !== 1 || !/^[a-zA-Z0-9_-]{1,100}$/.test(selectors[0]))
+    return json({ code: "invalid_input" }, 400);
+  const report = await getReportForUser(user.userId, selectors[0]);
   if (!report) return json({ code: "not_found" }, 404);
   return json({ scan: report.scan, entitlement: report.entitlement });
 }
