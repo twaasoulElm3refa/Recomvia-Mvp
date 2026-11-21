@@ -11,7 +11,7 @@ const json = (body: unknown, status: number) => Response.json(body, { status, he
 async function readBoundedBody(request: Request): Promise<string | null> {
   if (!request.body) return "";
   const reader = request.body.getReader();
-  const decoder = new TextDecoder();
+  const decoder = new TextDecoder("utf-8", { fatal: true });
   let size = 0;
   let result = "";
   try {
@@ -44,9 +44,14 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
   if (request.headers.get("content-type")?.split(";")[0].trim().toLowerCase() !== "application/json") {
     return json({ error: "JSON content type required." }, 415);
   }
-  const declaredLength = Number(request.headers.get("content-length") || 0);
-  if (declaredLength > MAX_BODY_BYTES) {
-    return json({ error: "Request body is too large." }, 413);
+  const declaredLength = request.headers.get("content-length");
+  if (declaredLength !== null) {
+    if (!/^(0|[1-9]\d*)$/.test(declaredLength)) {
+      return json({ error: "Invalid request size." }, 400);
+    }
+    if (Number(declaredLength) > MAX_BODY_BYTES) {
+      return json({ error: "Request body is too large." }, 413);
+    }
   }
 
   const { id: rawId } = await context.params;
