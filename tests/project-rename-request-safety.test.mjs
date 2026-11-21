@@ -96,3 +96,37 @@ test("valid Arabic Unicode labels keep their original rename contract", async ()
   assert.equal(writes.length, 1);
   assert.deepEqual(writes[0], [{ userId: "owner" }, "project-one", expectedName, displayName]);
 });
+
+test("project rename blocks bidirectional formatting controls before database writes", async () => {
+  const before = writes.length;
+  const controls = [
+    ["Arabic letter mark", "\u061c"],
+    ["left-to-right mark", "\u200e"],
+    ["right-to-left mark", "\u200f"],
+    ["left-to-right embedding", "\u202a"],
+    ["right-to-left override", "\u202e"],
+    ["pop directional formatting", "\u202c"],
+    ["left-to-right isolate", "\u2066"],
+    ["pop directional isolate", "\u2069"],
+  ];
+  for (const [description, mark] of controls) {
+    const response = await POST(request(JSON.stringify({
+      ...validData, displayName: "مشروع " + mark + " جديد",
+    })));
+    assert.equal(response.status, 400, description);
+    assert.equal(response.headers.get("Cache-Control"), "no-store", description);
+    assert.equal(writes.length, before, description);
+  }
+});
+
+test("project rename preserves ordinary mixed Arabic and Latin names", async () => {
+  const before = writes.length;
+  const displayName = "موقع Recomvia - الرياض";
+  const response = await POST(request(JSON.stringify({ ...validData, displayName })));
+  assert.equal(response.status, 200);
+  assert.equal((await response.json()).displayName, displayName);
+  assert.equal(writes.length, before + 1);
+  assert.deepEqual(writes.at(-1), [
+    { userId: "owner" }, validData.projectId, validData.expectedName, displayName,
+  ]);
+});
