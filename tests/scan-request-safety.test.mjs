@@ -10,6 +10,7 @@ const compiled = ts.transpileModule(source, {
 
 let authenticated = true;
 let workspaceCalls = 0;
+let reportReads = [];
 const boundaryError = new Error("Scan workspace boundary reached");
 const loaded = { exports: {} };
 new Function("require", "module", "exports", compiled)((specifier) => {
@@ -18,6 +19,10 @@ new Function("require", "module", "exports", compiled)((specifier) => {
   };
   if (specifier === "@/db/product") return {
     ensureWorkspace: async () => { workspaceCalls++; throw boundaryError; },
+    getReportForUser: async (userId, scanId) => {
+      reportReads.push([userId, scanId]);
+      return scanId === "scan_abc" ? { scan: { id: scanId }, entitlement: { reportLevel: "full" } } : null;
+    },
   };
   if (specifier === "cloudflare:workers") return { env: {} };
   // Other imports are not used until after the deliberately stopped workspace boundary.
@@ -25,7 +30,7 @@ new Function("require", "module", "exports", compiled)((specifier) => {
   throw new Error("Unexpected import " + specifier);
 }, loaded, loaded.exports);
 
-const { POST } = loaded.exports;
+const { POST, GET } = loaded.exports;
 const valid = JSON.stringify({ input: "https://example.com", kind: "website", language: "en" });
 function request(body = valid, { headers = {}, noOrigin = false } = {}) {
   return new Request("https://recomvia.test/api/scans", {
@@ -149,4 +154,45 @@ test("valid JSON with charset passes the ingress gate without starting a provide
     /Scan workspace boundary reached/,
   );
   assert.equal(workspaceCalls, before + 1);
+});
+
+test("private scan lookup rejects missing, repeated, malformed and oversized selectors before database access", async () => {
+  reportReads = [];
+  const invalid = [
+    "", "?scan", "?scan=", "?scan=scan_abc&scan=scan_abc",
+    "?scan=scan_abc&scan=other", "?scan=../other",
+    "?scan=%00", "?scan=%20scan_abc", "?scan=scan%2Fabc",
+    "?scan=" + "a".repeat(101),
+  ];
+  for (const query of invalid) {
+    const response = await GET(new Request("https://recomvia.test/api/scans" + query));
+    assert.equal(response.status, 400, query);
+    assert.deepEqual(await response.json(), { code: "invalid_input" });
+    assert.equal(response.headers.get("Cache-Control"), "no-store");
+    assert.equal(response.headers.get("X-Content-Type-Options"), "nosniff");
+  }
+  assert.deepEqual(reportReads, [], "rejected selectors must not query private reports");
+});
+
+test("private scan lookup is authenticated and owner-scoped for valid identifiers", async () => {
+  reportReads = [];
+  authenticated = false;
+  const anonymous = await GET(new Request("https://recomvia.test/api/scans?scan=scan_abc"));
+  authenticated = true;
+  assert.equal(anonymous.status, 401);
+  assert.deepEqual(reportReads, []);
+
+  const request = (id) => new Request("https://recomvia.test/api/scans?scan=" + id);
+  const found = await GET(request("scan_abc"));
+  assert.equal(found.status, 200);
+  assert.equal(found.headers.get("Cache-Control"), "no-store");
+  assert.deepEqual(await found.json(), {
+    scan: { id: "scan_abc" }, entitlement: { reportLevel: "full" },
+  });
+  const missing = await GET(request("scan_other"));
+  assert.equal(missing.status, 404);
+  assert.deepEqual(reportReads, [
+    ["customer-1", "scan_abc"],
+    ["customer-1", "scan_other"],
+  ], "all private reads must remain scoped to the signed-in user");
 });
