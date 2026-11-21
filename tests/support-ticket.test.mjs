@@ -141,3 +141,34 @@ test("support rejects invalid UTF-8 but preserves streamed Arabic text", async (
   assert.equal(created.at(-1).requesterName, input.name);
   assert.equal(created.at(-1).question, input.question);
 });
+
+test("support source links stay on the app origin even for backslash or absolute URL tricks", async () => {
+  const base = created.length;
+  const input = {
+    name: "Test Sender", email: "sender@example.org",
+    question: "Please help me understand this report",
+  };
+  const unsafeSources = [
+    "//evil.example/phishing",
+    "/\\\\evil.example/phishing",
+    "https://evil.example/phishing",
+    "javascript:alert(1)",
+    "contact", // Relative links without a leading slash are not accepted.
+  ];
+  for (const pageUrl of unsafeSources) {
+    const response = await POST(request(JSON.stringify({ ...input, pageUrl })));
+    assert.equal(response.status, 201, pageUrl);
+    assert.equal(created.at(-1).pageUrl, "", pageUrl);
+  }
+
+  for (const [pageUrl, expected] of [
+    ["/ar/contact?from=help", "/ar/contact?from=help"],
+    ["https://recomvia.test/blog?from=faq#section", "/blog?from=faq"],
+  ]) {
+    const response = await POST(request(JSON.stringify({ ...input, pageUrl })));
+    assert.equal(response.status, 201, pageUrl);
+    assert.equal(created.at(-1).pageUrl, expected);
+    assert.equal(new URL(expected, "https://recomvia.test").origin, "https://recomvia.test");
+  }
+  assert.equal(created.length, base + unsafeSources.length + 2);
+});
