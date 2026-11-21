@@ -72,7 +72,9 @@ async function hash(value: string) {
 
 export async function POST(request: Request) {
   const origin = request.headers.get("origin");
-  if (origin && origin !== new URL(request.url).origin) {
+  // Browser-only support submissions must declare this origin before a ticket is created.
+  // Missing or opaque origins are not proof of a first-party request.
+  if (!origin || origin !== new URL(request.url).origin) {
     return json({ error: "Invalid request origin." }, 403);
   }
   const mediaType = request.headers.get("content-type")?.split(";")[0].trim().toLowerCase();

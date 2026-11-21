@@ -20,7 +20,7 @@ new Function("require", "module", "exports", compiled)((name) => {
 }, compiledModule, compiledModule.exports);
 const { POST } = compiledModule.exports;
 const request = (body, extraHeaders = {}) => new Request("https://recomvia.test/api/support/tickets", {
-  method: "POST", headers: { "content-type": "application/json", ...extraHeaders }, body,
+  method: "POST", headers: { "content-type": "application/json", Origin: "https://recomvia.test", ...extraHeaders }, body,
 });
 
 test("support rejects invalid JSON shapes without creating tickets", async () => {
@@ -32,12 +32,24 @@ test("support rejects invalid JSON shapes without creating tickets", async () =>
   assert.equal(created.length, 0);
 });
 
-test("support rejects cross-origin and non-JSON submissions without database writes", async () => {
+test("support requires a trustworthy same-origin request before creating tickets", async () => {
   const valid = JSON.stringify({ name: "Test Sender", email: "sender@example.org", question: "I need help with a report" });
-  const crossOrigin = await POST(request(valid, { Origin: "https://another.example" }));
-  assert.equal(crossOrigin.status, 403);
-  assert.equal(crossOrigin.headers.get("Cache-Control"), "no-store");
-  assert.equal(crossOrigin.headers.get("X-Content-Type-Options"), "nosniff");
+  const before = created.length;
+  const withoutOrigin = new Request("https://recomvia.test/api/support/tickets", {
+    method: "POST", headers: { "content-type": "application/json" }, body: valid,
+  });
+  for (const [caseName, submission] of [
+    ["missing", withoutOrigin],
+    ["blank", request(valid, { Origin: "" })],
+    ["opaque", request(valid, { Origin: "null" })],
+    ["external", request(valid, { Origin: "https://another.example" })],
+  ]) {
+    const response = await POST(submission);
+    assert.equal(response.status, 403, caseName);
+    assert.equal(response.headers.get("Cache-Control"), "no-store", caseName);
+    assert.equal(response.headers.get("X-Content-Type-Options"), "nosniff", caseName);
+    assert.equal(created.length, before, caseName);
+  }
   const invalidType = await POST(request(valid, { "content-type": "text/plain" }));
   assert.equal(invalidType.status, 415);
   const jsonp = await POST(request(valid, { "content-type": "application/jsonp" }));
