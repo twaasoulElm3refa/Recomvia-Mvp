@@ -10,7 +10,10 @@ const json = (data: unknown, status: number) => Response.json(data, { status, he
 function bounded(value: unknown, min: number, max: number): string | null {
   if (typeof value !== "string") return null;
   const text = value.trim();
-  return text.length >= min && text.length <= max && !/[\u0000-\u0008\u000e-\u001f\u007f]/.test(text) ? text : null;
+  // Permit ordinary Arabic multiline drafting, but reject invisible controls and
+  // bidi overrides that can disguise the approved scope, rationale or rollback plan.
+  return text.length >= min && text.length <= max &&
+    !/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f\u202a-\u202e\u2066-\u2069]/.test(text) ? text : null;
 }
 
 export async function POST(request: Request) {

@@ -155,3 +155,48 @@ test("staff proposal ownership errors stay private and do not grant execution", 
   assertPrivate(response);
   databaseError = false;
 });
+
+test("staff proposal text fields reject hidden controls and bidi overrides before any writes", async () => {
+  const initialWorkspaces = workspaces;
+  const initialSaves = saves.length;
+  const unsafe = [
+    ["NUL", "\u0000"],
+    ["escape", "\u001b"],
+    ["vertical tab", "\u000b"],
+    ["form feed", "\u000c"],
+    ["delete", "\u007f"],
+    ["RTL override", "\u202e"],
+    ["LTR isolate", "\u2066"],
+    ["pop directional format", "\u202c"],
+  ];
+  for (const field of ["scope", "proposedText", "rationale", "rollbackPlan"]) {
+    for (const [label, control] of unsafe) {
+      const payload = { ...draft, [field]: draft[field] + control + " Extra text" };
+      const response = await POST(request(JSON.stringify(payload)));
+      assert.equal(response.status, 400, field + ": " + label);
+      assertPrivate(response);
+      assert.equal(workspaces, initialWorkspaces, field + ": " + label);
+      assert.equal(saves.length, initialSaves, field + ": " + label);
+    }
+  }
+});
+
+test("legitimate Arabic proposal text with line breaks and tabs is retained exactly", async () => {
+  const before = saves.length;
+  const arabic = {
+    ...draft,
+    scope: "مراجعة وصف الخدمة",
+    proposedText: "تحسين العنوان\nووصف الصفحة\r\nمع مراعاة\tالمصطلحات",
+    rationale: "الحاجة إلى توضيح مضمون الصفحة",
+    rollbackPlan: "استعادة النص الأصلي\nثم التحقق من النتيجة",
+  };
+  const response = await POST(request(JSON.stringify(arabic)));
+  assert.equal(response.status, 201);
+  assertPrivate(response);
+  assert.equal(saves.length, before + 1);
+  assert.deepEqual(saves.at(-1), [
+    "staff-owner", arabic.fixId,
+    { scope: arabic.scope, proposedText: arabic.proposedText,
+      rationale: arabic.rationale, rollbackPlan: arabic.rollbackPlan },
+  ]);
+});
