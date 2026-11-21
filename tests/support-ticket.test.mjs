@@ -184,3 +184,41 @@ test("support source links stay on the app origin even for backslash or absolute
   }
   assert.equal(created.length, base + unsafeSources.length + 2);
 });
+
+
+test("support rejects invisible controls and bidi overrides before storing user-submitted text", async () => {
+  const before = created.length;
+  const valid = {
+    name: "Test Sender", email: "sender@example.org",
+    question: "Please explain the findings in my report.",
+  };
+  const invalid = [
+    ["name", "Test\u0000 Sender"],
+    ["name", "Test\nSender"],
+    ["name", "Test\u202eSender"],
+    ["email", "sender\u2066@example.org"],
+    ["question", "Please\u0007 explain the findings."],
+    ["question", "Please\u202e explain the findings."],
+    ["question", "Please\u2069 explain the findings."],
+  ];
+  for (const [field, value] of invalid) {
+    const response = await POST(request(JSON.stringify({ ...valid, [field]: value })));
+    assert.equal(response.status, 400, field + ": " + JSON.stringify(value));
+    assert.equal(response.headers.get("Cache-Control"), "no-store");
+    assert.equal(response.headers.get("X-Content-Type-Options"), "nosniff");
+    assert.equal(created.length, before, "invalid text must never create a ticket");
+  }
+});
+
+test("support still stores legitimate multiline Arabic questions without altering wording", async () => {
+  const input = {
+    name: "عميل عربي",
+    email: "arabic-multiline@example.org",
+    question: "أحتاج مساعدة في التقرير.\nهل يمكن توضيح النتائج بالإنجليزية أيضًا؟",
+  };
+  const response = await POST(request(JSON.stringify(input)));
+  assert.equal(response.status, 201);
+  assert.equal(created.at(-1).requesterName, input.name);
+  assert.equal(created.at(-1).question, input.question);
+  assert.equal(response.headers.get("Cache-Control"), "no-store");
+});
