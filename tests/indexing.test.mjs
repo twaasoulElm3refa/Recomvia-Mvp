@@ -59,6 +59,14 @@ test("sitemap pairs every public English and Arabic URL with reciprocal hreflang
       const row = byUrl.get(url);
       assert.ok(row, `missing public URL: ${url}`);
       assert.deepEqual(row.alternates?.languages, { en: english, ar: arabic }, `wrong hreflang pair: ${url}`);
+      const article = articles.find((item) => path === `/blog/${item.slug}`);
+      if (article) {
+        assert.equal(row.lastModified?.toISOString(), `${article.modified}T00:00:00.000Z`,
+          `article must publish its verified modified date: ${url}`);
+      } else {
+        assert.equal(Object.hasOwn(row, "lastModified"), false,
+          `static page must not advertise an invented modification date: ${url}`);
+      }
     }
   }
   for (const row of rows) {
