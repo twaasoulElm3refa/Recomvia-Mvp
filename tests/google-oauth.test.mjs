@@ -300,3 +300,71 @@ test("Google callback rejects oversized, duplicate, and malformed OAuth inputs w
     globalThis.fetch = originalFetch;
   }
 });
+
+test("Google callback bounds both identity provider requests with separate 10-second signals", async () => {
+  const origin = "https://recomvia-staging.recomvia.workers.dev";
+  const startResponse = await start.GET(request(`${origin}/auth/google`));
+  const { request: incoming } = callbackRequest(origin, startResponse);
+  const originalFetch = globalThis.fetch;
+  const originalTimeout = AbortSignal.timeout;
+  const deadlines = [];
+  const signals = [];
+  try {
+    AbortSignal.timeout = (milliseconds) => {
+      deadlines.push(milliseconds);
+      const signal = new AbortController().signal;
+      signals.push(signal);
+      return signal;
+    };
+    globalThis.fetch = async (url, options) => {
+      assert.equal(options.signal, signals[signals.length - 1], `Missing timeout on ${url}`);
+      if (url === "https://oauth2.googleapis.com/token") {
+        return { ok: true, json: async () => ({ access_token: "test-token" }) };
+      }
+      if (url === "https://openidconnect.googleapis.com/v1/userinfo") {
+        return { ok: true, json: async () => ({ sub: "user-789", email: "owner@example.com", email_verified: true }) };
+      }
+      throw new Error(`Unexpected identity provider URL: ${url}`);
+    };
+    const response = await callback.GET(incoming);
+    assert.equal(response.location, `${origin}/dashboard`);
+    assert.deepEqual(deadlines, [10_000, 10_000]);
+    assert.notEqual(signals[0], signals[1], "Each provider request needs a fresh deadline");
+  } finally {
+    globalThis.fetch = originalFetch;
+    AbortSignal.timeout = originalTimeout;
+  }
+});
+
+test("Google callback fails closed and clears transient OAuth cookies when either provider times out", async () => {
+  const origin = "https://recomvia-staging.recomvia.workers.dev";
+  const originalFetch = globalThis.fetch;
+  try {
+    for (const failingUrl of [
+      "https://oauth2.googleapis.com/token",
+      "https://openidconnect.googleapis.com/v1/userinfo",
+    ]) {
+      const startResponse = await start.GET(request(`${origin}/auth/google`));
+      const { request: incoming } = callbackRequest(origin, startResponse);
+      const requests = [];
+      globalThis.fetch = async (url, options) => {
+        requests.push(url);
+        assert.ok(options.signal instanceof AbortSignal, "Provider fetch must carry a timeout signal");
+        if (url === failingUrl) throw new DOMException("Identity provider timeout", "TimeoutError");
+        if (url === "https://oauth2.googleapis.com/token") {
+          return { ok: true, json: async () => ({ access_token: "test-token" }) };
+        }
+        throw new Error(`Unexpected URL: ${url}`);
+      };
+      const response = await callback.GET(incoming);
+      assert.equal(response.location, `${origin}/?auth_error=authentication_failed`);
+      assert.equal(response.headers.get("Cache-Control"), "no-store");
+      assert.equal(response.cookies.get(auth.SESSION_COOKIE), undefined);
+      assert.equal(response.cookies.get(auth.OAUTH_STATE_COOKIE).options.maxAge, 0);
+      assert.equal(response.cookies.get(auth.OAUTH_VERIFIER_COOKIE).options.maxAge, 0);
+      assert.equal(requests.length, failingUrl.includes("/userinfo") ? 2 : 1);
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
