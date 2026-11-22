@@ -51,8 +51,8 @@ export const faqEntries: FaqEntry[] = [
   ...PLAN_CATALOG.filter((plan) => plan.id !== "free").map((plan): FaqEntry => ({
     id: `${plan.id}-plan`, category: "Billing",
     question: `What does the ${plan.name.en} plan include?`, questionAr: `ماذا تشمل باقة ${plan.name.en}؟`,
-    answer: `${plan.name.en} costs ${plan.price.amount} ${plan.price.cadence.en}. ${plan.description.en} ${plan.features.map((feature) => feature.en).join(". ")}. ${plan.id === "starter" ? "Starter unlocks a specific saved report through its report page." : "Select this plan on the Subscriptions page to continue to checkout."}`,
-    answerAr: `سعر ${plan.name.en} هو ${plan.price.amount} ${plan.price.cadence.ar}. ${plan.description.ar} ${plan.features.map((feature) => feature.ar).join("، ")}. ${plan.id === "starter" ? "تفتح Starter تقريرًا محفوظًا محددًا من صفحة التقرير." : "اختر هذه الباقة من صفحة الاشتراكات للمتابعة إلى الدفع."}`,
+    answer: `${plan.name.en} costs ${plan.price.amount} ${plan.price.cadence.en}. ${plan.description.en} ${plan.features.map((feature) => feature.en).join(". ")}. ${plan.id === "starter" ? "Starter applies to one saved report; purchase is available only after online payments are activated." : "View the plan on the Subscriptions page; checkout is available only after online payments are activated."}`,
+    answerAr: `سعر ${plan.name.en} هو ${plan.price.amount} ${plan.price.cadence.ar}. ${plan.description.ar} ${plan.features.map((feature) => feature.ar).join("، ")}. ${plan.id === "starter" ? "تخص Starter تقريرًا محفوظًا واحدًا؛ ولا يمكن شراؤه إلا بعد تفعيل الدفع الإلكتروني." : "استعرض هذه الباقة في صفحة الاشتراكات؛ ولا يتاح إتمام الدفع إلا بعد تفعيل بوابة الدفع الإلكتروني."}`,
     keywords: [plan.id, plan.name.ar, plan.price.amount.slice(1), ...(plan.id === "starter" ? ["one report", "one time", "تقرير مبدئي", "مرة واحدة"] : [])],
   })),
   {
