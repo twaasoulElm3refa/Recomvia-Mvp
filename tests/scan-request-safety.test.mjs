@@ -25,6 +25,17 @@ new Function("require", "module", "exports", compiled)((specifier) => {
     },
   };
   if (specifier === "cloudflare:workers") return { env: {} };
+  if (specifier === "@/lib/analysis-target") return {
+    parseTargetInput: (payload) => {
+      const value = payload.input ?? payload.url;
+      if (typeof value !== "string" || value.trim().length < 2 ||
+          value.length > 500 ||
+          !["auto", "website", "topic", "person", "brand"].includes(payload.kind ?? "auto"))
+        throw new Error("invalid_input");
+      return { input: value.trim(), kind: payload.kind ?? "auto", language: payload.language ?? "en",
+        websiteUrl: payload.kind === "website" ? value.trim() : null, context: "" };
+    },
+  };
   // Other imports are not used until after the deliberately stopped workspace boundary.
   if (specifier.startsWith("@/")) return {};
   throw new Error("Unexpected import " + specifier);
@@ -145,6 +156,25 @@ test("billable scans accept valid Arabic UTF-8 split across stream chunks", asyn
   });
   await assert.rejects(POST(req), /Scan workspace boundary reached/);
   assert.equal(workspaceCalls, before + 1);
+});
+
+test("invalid scan targets return 400 before workspace reads or provider setup", async () => {
+  const before = workspaceCalls;
+  for (const payload of [
+    {}, { input: "" }, { input: "a" }, { input: 123 },
+    { input: "Valid topic", kind: "unsupported" },
+    { input: "a".repeat(501), kind: "topic" },
+  ]) {
+    const response = await POST(request(JSON.stringify(payload)));
+    assert.equal(response.status, 400, JSON.stringify(payload));
+    assert.deepEqual(await response.json(), {
+      code: "invalid_input",
+      error: "Enter a public URL, name, brand or topic.",
+    });
+    assert.equal(response.headers.get("Cache-Control"), "no-store");
+    assert.equal(response.headers.get("X-Content-Type-Options"), "nosniff");
+  }
+  assert.equal(workspaceCalls, before, "malformed targets must not touch account data");
 });
 
 test("valid JSON with charset passes the ingress gate without starting a provider", async () => {
