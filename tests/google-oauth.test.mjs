@@ -368,3 +368,83 @@ test("Google callback fails closed and clears transient OAuth cookies when eithe
     globalThis.fetch = originalFetch;
   }
 });
+
+
+test("Google callback rejects malformed or oversized access tokens before userinfo", async () => {
+  const origin = "https://recomvia-staging.recomvia.workers.dev";
+  const originalFetch = globalThis.fetch;
+  try {
+    for (const accessToken of [null, 42, {}, "", "bad token", "bad\nheader", "x".repeat(4_097)]) {
+      const started = await start.GET(request(origin + "/auth/google"));
+      const { request: incoming } = callbackRequest(origin, started);
+      const requests = [];
+      globalThis.fetch = async (url) => {
+        requests.push(url);
+        if (url === "https://oauth2.googleapis.com/token") {
+          return { ok: true, json: async () => ({ access_token: accessToken }) };
+        }
+        throw new Error("Malformed token must not be sent to userinfo");
+      };
+      const response = await callback.GET(incoming);
+      assert.equal(response.location, origin + "/?auth_error=token_exchange_failed");
+      assert.equal(response.headers.get("Cache-Control"), "no-store");
+      assert.equal(response.cookies.get(auth.SESSION_COOKIE), undefined);
+      assert.equal(response.cookies.get(auth.OAUTH_STATE_COOKIE).options.maxAge, 0);
+      assert.equal(response.cookies.get(auth.OAUTH_VERIFIER_COOKIE).options.maxAge, 0);
+      assert.deepEqual(requests, ["https://oauth2.googleapis.com/token"]);
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("Google callback rejects malformed identity claims without creating sessions", async () => {
+  const origin = "https://recomvia-staging.recomvia.workers.dev";
+  const originalFetch = globalThis.fetch;
+  const baseline = { sub: "user-123", email: "USER@example.org", email_verified: true, name: "مستخدم عربي" };
+  const invalidProfiles = [
+    { ...baseline, sub: 123 },
+    { ...baseline, sub: "x".repeat(256) },
+    { ...baseline, sub: "abc\n" },
+    { ...baseline, email: {} },
+    { ...baseline, email: "not-an-email" },
+    { ...baseline, email: "x".repeat(245) + "@test.org" },
+    { ...baseline, email: "x\u202ee@example.org" },
+    { ...baseline, email_verified: "true" },
+    { ...baseline, name: { invalid: "object" } },
+    { ...baseline, name: "x".repeat(201) },
+    { ...baseline, name: "اسم\u2066مضلل" },
+  ];
+  try {
+    for (const profile of invalidProfiles) {
+      const started = await start.GET(request(origin + "/auth/google"));
+      const { request: incoming } = callbackRequest(origin, started);
+      let requests = 0;
+      globalThis.fetch = async (url) => {
+        requests++;
+        if (url === "https://oauth2.googleapis.com/token")
+          return { ok: true, json: async () => ({ access_token: "safe-token" }) };
+        if (url === "https://openidconnect.googleapis.com/v1/userinfo")
+          return { ok: true, json: async () => profile };
+        throw new Error("Unexpected identity URL");
+      };
+      const response = await callback.GET(incoming);
+      assert.equal(response.location, origin + "/?auth_error=unverified_google_account");
+      assert.equal(response.cookies.get(auth.SESSION_COOKIE), undefined);
+      assert.equal(response.cookies.get(auth.OAUTH_STATE_COOKIE).options.maxAge, 0);
+      assert.equal(response.cookies.get(auth.OAUTH_VERIFIER_COOKIE).options.maxAge, 0);
+      assert.equal(requests, 2);
+    }
+    const started = await start.GET(request(origin + "/auth/google"));
+    const { request: incoming } = callbackRequest(origin, started);
+    globalThis.fetch = async (url) => ({
+      ok: true, json: async () => url === "https://oauth2.googleapis.com/token"
+        ? { access_token: "safe-token" } : baseline,
+    });
+    const accepted = await callback.GET(incoming);
+    assert.equal(accepted.location, origin + "/dashboard");
+    assert.ok(accepted.cookies.get(auth.SESSION_COOKIE)?.value, "Arabic display name must remain supported");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
