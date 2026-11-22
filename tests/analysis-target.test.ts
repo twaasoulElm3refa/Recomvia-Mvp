@@ -865,7 +865,7 @@ test("homepage X-Robots-Tag blocks a false indexing readiness pass without extra
         const url = String(input);
         requested.push(url);
         const path = new URL(url).pathname;
-        if (path === "/robots.txt") return new Response("User-agent: *\\nAllow: /");
+        if (path === "/robots.txt") return new Response("User-agent: *\nAllow: /");
         if (path === "/sitemap.xml") return new Response("<urlset></urlset>");
         assert.equal(path, "/", entry.label);
         return new Response(html, {
