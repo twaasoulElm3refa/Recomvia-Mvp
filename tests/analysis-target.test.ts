@@ -792,3 +792,50 @@ test("robots readiness rejects HTML fallbacks and ignores hints from failed poli
     globalThis.fetch = originalFetch;
   }
 });
+
+test("homepage meta robots noindex prevents a false indexing readiness pass", async () => {
+  const originalFetch = globalThis.fetch;
+  const origin = "https://indexing-fixture.example";
+  const cases: Array<{ label: string; head: string; blocked: boolean; body?: string }> = [
+    { label: "plain noindex", head: '<meta name="robots" content="noindex">', blocked: true },
+    { label: "none is equivalent to noindex", head: '<meta name="robots" content="none">', blocked: true },
+    { label: "mixed case and comma-separated directives", head: '<meta NAME="ROBOTS" CONTENT="follow, NoIndex">', blocked: true },
+    { label: "attributes in reverse order", head: '<meta content="NOINDEX" name="robots">', blocked: true },
+    { label: "later robots tag overrides initial index", head: '<meta name="robots" content="index"><meta name="robots" content="noindex">', blocked: true },
+    { label: "follow and index remain indexable", head: '<meta name="robots" content="index,follow">', blocked: false },
+    { label: "nofollow does not imply noindex", head: '<meta name="robots" content="nofollow">', blocked: false },
+    { label: "crawler-specific directive is not site-wide", head: '<meta name="googlebot" content="noindex">', blocked: false },
+    { label: "lookalike directive is not noindex", head: '<meta name="robots" content="noindexing">', blocked: false },
+    { label: "comment is not an active robots directive", head: '<!-- <meta name="robots" content="noindex"> -->', blocked: false },
+    { label: "body-only robots tag is not valid head metadata", head: "", body: '<meta name="robots" content="noindex">', blocked: false },
+    { label: "script example is not an active robots directive", head: '<script>const example = \'<meta name="robots" content="noindex">\';</script>', blocked: false },
+  ];
+  try {
+    for (const entry of cases) {
+      const html = '<!doctype html><html lang="en"><head><title>Indexing fixture</title>' +
+        entry.head + '</head><body><h1>Welcome</h1>' + (entry.body || "") + '</body></html>';
+      const requested: string[] = [];
+      globalThis.fetch = async (input) => {
+        const url = String(input);
+        requested.push(url);
+        const pathname = new URL(url).pathname;
+        if (pathname === "/robots.txt") return new Response("User-agent: *\nAllow: /");
+        if (pathname === "/sitemap.xml") return new Response("<urlset></urlset>");
+        assert.equal(pathname, "/", entry.label);
+        return new Response(html, { headers: { "Content-Type": "text/html" } });
+      };
+      const usage = { requestCount: 0, bytesFetched: 0 };
+      const result = await runLiveReadinessScan(origin + "/", undefined, usage);
+      const finding = result.findings.find((item) => item.code === "robots_policy");
+      assert.ok(finding, entry.label);
+      assert.equal(finding.status, entry.blocked ? "fail" : "pass", entry.label);
+      assert.equal(finding.awardedPoints, entry.blocked ? 0 : 7, entry.label);
+      assert.equal(finding.sourceUrl, entry.blocked ? origin + "/" : origin + "/robots.txt", entry.label);
+      if (entry.blocked) assert.match(finding.evidence, /meta robots requests noindex\/none/, entry.label);
+      assert.deepEqual(requested, [origin + "/", origin + "/robots.txt", origin + "/sitemap.xml"], entry.label);
+      assert.equal(usage.requestCount, 3, entry.label + ": no additional network work");
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
