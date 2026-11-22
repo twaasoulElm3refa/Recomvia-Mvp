@@ -59,10 +59,11 @@ function validEmail(value: string) {
 }
 
 // Ticket text is untrusted and displayed to support staff. Reject invisible
-// controls and bidi-formatting characters that can disguise text in the inbox.
+// controls and bidi-formatting characters (including invisible Arabic/LTR/RTL marks)
+// that can disguise text in the inbox.
 // Preserve normal line breaks in multi-line questions.
-const unsafeSingleLine = /[\u0000-\u001f\u007f\u202a-\u202e\u2066-\u2069]/;
-const unsafeQuestion = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f\u202a-\u202e\u2066-\u2069]/;
+const unsafeSingleLine = /[\u0000-\u001f\u007f\u061c\u200e-\u200f\u202a-\u202e\u2066-\u2069]/;
+const unsafeQuestion = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f\u061c\u200e-\u200f\u202a-\u202e\u2066-\u2069]/;
 
 function safePageUrl(value: string, origin: string) {
   // Source links open from the staff inbox. Never persist off-site or
