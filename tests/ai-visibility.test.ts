@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { aggregateActualVisibility, analyzeVisibilityResponse, businessContextForVisibility, discoverWebsiteContext, discoverWebsiteIdentityCandidates, generateIntentPrompts, isTechnicalWebsiteVocabulary, runActualVisibility, type DiscoveredSiteContext, type VisibilityEngineRun } from "../lib/ai-visibility";
 import { generateTargetPrompts, parseTargetDiscovery, type AnalysisTarget, type TargetInput } from "../lib/analysis-target";
+import { runLiveReadinessScan } from "../lib/live-readiness";
 import { decodeHtmlEntities, sanitizeProviderAnswer } from "../lib/answer-text";
 import type { EngineAdapter, EngineResponse } from "../lib/ai-engines/engine-adapter";
 import { OpenRouterEngineAdapter } from "../lib/ai-engines/openrouter-engine-adapter";
@@ -626,4 +627,41 @@ test("OpenRouter bounded JSON decoding preserves split Arabic text and real cost
   assert.equal(result.error, null);
   assert.equal(result.responseText, reply);
   assert.equal(result.estimatedCostMicros, 1200);
+});
+
+
+test("readiness canonical scoring rejects unsafe or broken href values but accepts public relative and entity-encoded URLs", async () => {
+  const originalFetch = globalThis.fetch;
+  try {
+    const cases = [
+      { href: "/articles?lang=ar", valid: true, expected: "https://fixture.example/articles?lang=ar" },
+      { href: "https://other.example/page?x=1&amp;y=2", valid: true, expected: "https://other.example/page?x=1&y=2" },
+      { href: "", valid: false },
+      { href: "#section", valid: false },
+      { href: "javascript:alert(1)", valid: false },
+      { href: "https://localhost/private", valid: false },
+      { href: "http://127.0.0.1/private", valid: false },
+      { href: "https://fixture.example:8443/private", valid: false },
+      { href: "https://user:secret@fixture.example/", valid: false },
+      { href: "https://fixture.example/page#fragment", valid: false },
+    ];
+    for (const { href, valid, expected } of cases) {
+      const pageHtml = `<!doctype html><html lang="en"><head><title>Fixture site for canonical testing</title>
+        <link rel="canonical" href="${href}"></head><body><h1>Fixture page</h1></body></html>`;
+      globalThis.fetch = async (input) => {
+        const path = new URL(String(input)).pathname;
+        if (path === "/robots.txt") return new Response("User-agent: *\\nAllow: /", { headers: { "content-type": "text/plain" } });
+        if (path === "/sitemap.xml") return new Response('<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"></urlset>', { headers: { "content-type": "application/xml" } });
+        return new Response(pageHtml, { headers: { "content-type": "text/html; charset=utf-8" } });
+      };
+      const result = await runLiveReadinessScan("https://fixture.example/");
+      const finding = result.findings.find((item) => item.code === "canonical");
+      assert.ok(finding, "canonical readiness finding is required");
+      assert.equal(finding.status, valid ? "pass" : "fail", href);
+      assert.equal(finding.awardedPoints, valid ? 7 : 0, href);
+      if (expected) assert.equal(finding.evidence, expected);
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });
