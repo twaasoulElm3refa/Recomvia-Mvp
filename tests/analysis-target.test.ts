@@ -115,6 +115,38 @@ test("safe source URLs reject credentials and private hosts without rejecting fc
     assert.equal(safeSourceUrl(url), null);
 });
 
+test("crawl input rejects IANA special-use IPv4 addresses before any network access", async () => {
+  const rejected = [
+    "https://192.0.0.8/",        // IETF protocol assignments
+    "https://192.0.2.1/",        // TEST-NET-1
+    "https://192.88.99.2/",      // deprecated anycast
+    "https://198.18.0.1/",       // benchmarking
+    "http://198.19.255.254/",   // second benchmarking /16
+    "https://198.51.100.42/",   // TEST-NET-2
+    "https://203.0.113.5/",     // TEST-NET-3
+    "https://0xc0000201/",      // non-decimal spelling of 192.0.2.1
+  ];
+  const originalFetch = globalThis.fetch;
+  let networkRequests = 0;
+  globalThis.fetch = async () => {
+    networkRequests++;
+    throw new Error("A rejected URL must never reach fetch");
+  };
+  try {
+    for (const address of rejected) {
+      assert.equal(safeSourceUrl(address), null, address);
+      assert.throws(() => parseTargetInput({ input: address }), /not a public website/, address);
+      await assert.rejects(runLiveReadinessScan(address), /not a public website/, address);
+    }
+    assert.equal(networkRequests, 0, "all rejected addresses must fail before any request");
+    // Do not accidentally block ordinary public IPv4 hosts or DNS names.
+    assert.equal(safeSourceUrl("https://93.184.216.34/"), "https://93.184.216.34/");
+    assert.equal(safeSourceUrl("https://public.example/"), "https://public.example/");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("resolution requires citations returned by the API, not invented links in model JSON", () => {
   const good = parseTargetDiscovery(
     response(JSON.stringify({ status: "resolved", candidates: [candidate()] })),
