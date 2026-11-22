@@ -879,7 +879,7 @@ test("homepage X-Robots-Tag blocks a false indexing readiness pass without extra
       assert.equal(finding.status, entry.blocked ? "fail" : "pass", entry.label);
       assert.equal(finding.awardedPoints, entry.blocked ? 0 : 7, entry.label);
       assert.equal(finding.sourceUrl, entry.blocked ? origin + "/" : origin + "/robots.txt", entry.label);
-      if (entry.blocked) assert.match(finding.evidence, /X-Robots-Tag requests noindex\\/none/, entry.label);
+      if (entry.blocked) assert.ok(finding.evidence.includes("X-Robots-Tag requests noindex/none"), entry.label);
       assert.deepEqual(requested, [origin + "/", origin + "/robots.txt", origin + "/sitemap.xml"], entry.label);
       assert.equal(usage.requestCount, 3, entry.label + ": no extra network requests");
     }
