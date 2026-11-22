@@ -552,3 +552,78 @@ test("readiness awards schema scores only for parseable JSON-LD with declared ty
     globalThis.fetch = originalFetch;
   }
 });
+
+test("auxiliary discovery never fetches cross-origin robots or sitemap URLs", async () => {
+  const originalFetch = globalThis.fetch;
+  const origin = "https://auxiliary-fixture.example";
+  const homepage = '<!doctype html><html lang="en"><head><title>Bounded auxiliary crawl</title></head><body><h1>Home</h1></body></html>';
+  const cases: Array<{
+    name: string;
+    robots: string;
+    sitemapPath: string;
+    robotsRedirect?: boolean;
+    sitemapRedirect?: boolean;
+    robotsPass: boolean;
+    sitemapPass: boolean;
+  }> = [
+    {
+      name: "absolute off-origin sitemap hint falls back to default",
+      robots: "User-agent: *\nAllow: /\nSitemap: https://unrelated.example/sitemap.xml",
+      sitemapPath: "/sitemap.xml", robotsPass: true, sitemapPass: true,
+    },
+    {
+      name: "protocol-relative off-origin sitemap hint is also ignored",
+      robots: "User-agent: *\nAllow: /\nSitemap: //unrelated.example/sitemap.xml",
+      sitemapPath: "/sitemap.xml", robotsPass: true, sitemapPass: true,
+    },
+    {
+      name: "relative same-origin sitemap hint is honored",
+      robots: "User-agent: *\nAllow: /\nSitemap: /maps/index.xml",
+      sitemapPath: "/maps/index.xml", robotsPass: true, sitemapPass: true,
+    },
+    {
+      name: "same-origin sitemap redirect cannot escape to an unrelated host",
+      robots: "User-agent: *\nAllow: /\nSitemap: /redirect.xml",
+      sitemapPath: "/redirect.xml", sitemapRedirect: true, robotsPass: true, sitemapPass: false,
+    },
+    {
+      name: "robots redirect cannot escape to an unrelated host",
+      robots: "",
+      sitemapPath: "/sitemap.xml", robotsRedirect: true, robotsPass: false, sitemapPass: true,
+    },
+  ];
+  try {
+    for (const entry of cases) {
+      const fetched: string[] = [];
+      globalThis.fetch = async (input) => {
+        const target = new URL(String(input));
+        fetched.push(target.toString());
+        assert.equal(target.origin, origin, entry.name + ": unexpected external fetch");
+        if (target.pathname === "/") {
+          return new Response(homepage, { headers: { "Content-Type": "text/html" } });
+        }
+        if (target.pathname === "/robots.txt") {
+          if (entry.robotsRedirect) {
+            return new Response(null, { status: 302, headers: { Location: "https://unrelated.example/robots.txt" } });
+          }
+          return new Response(entry.robots, { headers: { "Content-Type": "text/plain" } });
+        }
+        assert.equal(target.pathname, entry.sitemapPath, entry.name);
+        if (entry.sitemapRedirect) {
+          return new Response(null, { status: 302, headers: { Location: "https://unrelated.example/sitemap.xml" } });
+        }
+        return new Response("<urlset></urlset>", { headers: { "Content-Type": "application/xml" } });
+      };
+      const usage = { requestCount: 0, bytesFetched: 0 };
+      const result = await runLiveReadinessScan(origin + "/", undefined, usage);
+      assert.deepEqual(fetched, [origin + "/", origin + "/robots.txt", origin + entry.sitemapPath], entry.name);
+      assert.equal(usage.requestCount, 3, entry.name + ": only the target host should be contacted");
+      assert.equal(result.findings.find((finding) => finding.code === "robots_policy")?.status,
+        entry.robotsPass ? "pass" : "fail", entry.name);
+      assert.equal(result.findings.find((finding) => finding.code === "xml_sitemap")?.status,
+        entry.sitemapPass ? "pass" : "fail", entry.name);
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
