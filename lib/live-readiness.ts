@@ -263,9 +263,36 @@ export async function runLiveReadinessScan(input: string, requiredOrigin?: strin
   const htmlLang = html.match(/<html\b[^>]*\blang\s*=\s*["']?([^\s"'>]+)/i)?.[1] || "";
   const h1Count = (html.match(/<h1\b/gi) || []).length;
   const jsonLdBlocks = html.match(/<script\b[^>]*type\s*=\s*["']application\/ld\+json["'][^>]*>[\s\S]*?<\/script>/gi) || [];
-  const jsonLdText = jsonLdBlocks.join(" ");
-  const hasOrganization = /["']@type["']\s*:\s*(?:["']Organization["']|\[[^\]]*["']Organization["'])/i.test(jsonLdText);
-  const hasFaq = /["']@type["']\s*:\s*["']FAQPage["']/i.test(jsonLdText);
+  // A script tag does not prove valid structured data. Parse each bounded JSON-LD
+  // block independently so malformed markup cannot inflate readiness or entity scores.
+  const parsedJsonLd = jsonLdBlocks.flatMap((block) => {
+    const raw = block.replace(/^<script\b[^>]*>/i, "").replace(/<\/script>$/i, "").trim();
+    try {
+      const data: unknown = JSON.parse(raw);
+      const nodes = Array.isArray(data) ? data : [data];
+      if (nodes.some((node) => node !== null && typeof node === "object" &&
+          !Array.isArray(node) && Object.keys(node).some((key) => key.startsWith("@")))) {
+        return [data];
+      }
+    } catch { /* Ignore malformed JSON-LD instead of counting the tag as evidence. */ }
+    return [];
+  });
+  const hasJsonLdType = (type: string) => {
+    const containsType = (value: unknown, depth = 0): boolean => {
+      if (depth > 16 || !value || typeof value !== "object") return false;
+      if (Array.isArray(value)) return value.some((item) => containsType(item, depth + 1));
+      const node = value as Record<string, unknown>;
+      const declared = Array.isArray(node["@type"]) ? node["@type"] : [node["@type"]];
+      if (declared.some((item) => typeof item === "string" &&
+          (item === type || item === "https://schema.org/" + type || item === "http://schema.org/" + type))) {
+        return true;
+      }
+      return containsType(node["@graph"], depth + 1);
+    };
+    return parsedJsonLd.some((block) => containsType(block));
+  };
+  const hasOrganization = hasJsonLdType("Organization");
+  const hasFaq = hasJsonLdType("FAQPage");
   const hasQuestionHeadings = /<h[2-4]\b[^>]*>[^<]{0,120}(?:what|how|why|when|where|who|can|does|is|are|ما|ماذا|كيف|لماذا|هل|متى|أين|اين)[^<]*<\/h[2-4]>/i.test(html);
   const words = text ? text.split(/\s+/).length : 0;
   const globallyBlocked = robots ? hasWildcardRootDisallow(robots.text) : false;
@@ -287,7 +314,7 @@ export async function runLiveReadinessScan(input: string, requiredOrigin?: strin
   add({ code: "html_language", category: "Technical AEO", severity: "medium", status: htmlLang ? "pass" : "fail", title: "Document language is declared", explanation: "The document language helps systems interpret the content and market context correctly.", evidence: htmlLang ? `lang=${htmlLang}` : "The html element has no lang attribute.", sourceUrl: page.url, weight: 5, awardedPoints: htmlLang ? 5 : 0 });
   const h1Points = h1Count === 1 ? 6 : h1Count > 0 ? 3 : 0;
   add({ code: "primary_heading", category: "Content readiness", severity: "medium", status: h1Points === 6 ? "pass" : h1Points ? "partial" : "fail", title: "A single primary heading frames the page", explanation: "A stable primary heading makes the central subject easier to extract.", evidence: `${h1Count} H1 element${h1Count === 1 ? "" : "s"} found.`, sourceUrl: page.url, weight: 6, awardedPoints: h1Points });
-  add({ code: "structured_data", category: "Technical AEO", severity: "medium", status: jsonLdBlocks.length ? "pass" : "fail", title: "JSON-LD structured data is present", explanation: "Structured data supplies explicit machine-readable facts, but it must match visible content.", evidence: `${jsonLdBlocks.length} JSON-LD block${jsonLdBlocks.length === 1 ? "" : "s"} found.`, sourceUrl: page.url, weight: 8, awardedPoints: jsonLdBlocks.length ? 8 : 0 });
+  add({ code: "structured_data", category: "Technical AEO", severity: "medium", status: parsedJsonLd.length ? "pass" : "fail", title: "Parseable JSON-LD structured data is present", explanation: "Structured data supplies explicit machine-readable facts, but it must match visible content.", evidence: `${parsedJsonLd.length} parseable JSON-LD block${parsedJsonLd.length === 1 ? "" : "s"} found (${jsonLdBlocks.length} inspected).`, sourceUrl: page.url, weight: 8, awardedPoints: parsedJsonLd.length ? 8 : 0 });
   add({ code: "organization_entity", category: "Authority & entity", severity: "high", status: hasOrganization ? "pass" : "fail", title: "Organization entity is declared", explanation: "Organization markup can clarify the primary brand entity and connect consistent identifiers.", evidence: hasOrganization ? "Organization type found in JSON-LD." : "No Organization type was found in JSON-LD.", sourceUrl: page.url, weight: 8, awardedPoints: hasOrganization ? 8 : 0 });
   const answerReady = hasFaq || hasQuestionHeadings;
   add({ code: "answer_structure", category: "Content readiness", severity: "medium", status: answerReady ? "pass" : "fail", title: "Question-and-answer structure is discoverable", explanation: "Direct question headings and self-contained answers improve answer extraction for relevant queries.", evidence: hasFaq ? "FAQPage structured data found." : hasQuestionHeadings ? "Question-led headings found in visible HTML." : "No FAQPage schema or question-led headings were detected.", sourceUrl: page.url, weight: 8, awardedPoints: answerReady ? 8 : 0 });
@@ -309,7 +336,7 @@ export async function runLiveReadinessScan(input: string, requiredOrigin?: strin
   const issueRows = findings.filter((finding) => finding.status !== "pass");
   const requestCount = usage.requestCount;
   const bytesFetched = usage.bytesFetched;
-  const confidence = Math.min(92, 72 + (robots ? 5 : 0) + (sitemap ? 5 : 0) + (jsonLdBlocks.length ? 4 : 0) + (page.status === 200 ? 4 : 0));
+  const confidence = Math.min(92, 72 + (robots ? 5 : 0) + (sitemap ? 5 : 0) + (parsedJsonLd.length ? 4 : 0) + (page.status === 200 ? 4 : 0));
   const discoveredContext = discoverWebsiteContext({
     sourceUrl: source.toString(), finalUrl: page.url, title, description, htmlLang, html, visibleText: text,
   });
