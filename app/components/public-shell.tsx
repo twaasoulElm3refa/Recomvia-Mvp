@@ -8,7 +8,7 @@ import { BrandMark } from "@/app/scan-experience";
 import { KnowledgeAssistant } from "@/app/components/knowledge-assistant";
 import { MobileSiteMenu, type SiteNavItem } from "@/app/components/mobile-site-menu";
 import { Button } from "@/components/ui/button";
-import { publicHrefForLocale, readStoredSiteLocale, SITE_LOCALE_EVENT, storeSiteLocale, type SiteLocale } from "@/lib/site-locale";
+import { pageDisplayLocale, publicHrefForLocale, readStoredSiteLocale, SITE_LOCALE_EVENT, storeSiteLocale, type SiteLocale } from "@/lib/site-locale";
 import { useAccountEntry } from "@/hooks/use-account-entry";
 
 const copy = {
@@ -58,15 +58,11 @@ const localizedPublicPages = new Set([
 ]);
 
 function publicEnglishPath(pathname: string): string | null {
+  // Both home routes have language-specific canonical URLs.
+  if (pathname === "/" || pathname === "/ar") return "/";
   const path = pathname.startsWith("/ar/") ? pathname.slice(3) : pathname;
   const [root] = path.match(/^\/[^/]+/) ?? [];
   return root && localizedPublicPages.has(root) ? path : null;
-}
-
-function routeLocale(pathname: string): SiteLocale | null {
-  if (pathname.startsWith("/ar/") && publicEnglishPath(pathname)) return "ar";
-  if (publicEnglishPath(pathname)) return "en";
-  return null;
 }
 
 export function PublicShell({ children, pageMetadata, initialLocale = "en" }: {
@@ -81,7 +77,7 @@ export function PublicShell({ children, pageMetadata, initialLocale = "en" }: {
   useEffect(() => {
     // Blog languages have distinct canonical paths. Never let stored browser
     // preferences override the URL's server-rendered language.
-    const syncLocale = () => setLocale(routeLocale(window.location.pathname) ?? readStoredSiteLocale("en"));
+    const syncLocale = () => setLocale(pageDisplayLocale(window.location.pathname, readStoredSiteLocale("en")));
     const timer = window.setTimeout(syncLocale, 0);
     window.addEventListener(SITE_LOCALE_EVENT, syncLocale);
     window.addEventListener("storage", syncLocale);
@@ -123,7 +119,7 @@ export function PublicShell({ children, pageMetadata, initialLocale = "en" }: {
     const pathname = window.location.pathname;
     const englishPath = publicEnglishPath(pathname);
     if (englishPath) {
-      const nextPath = nextLocale === "ar" ? `/ar${englishPath}` : englishPath;
+      const nextPath = nextLocale === "ar" ? (englishPath === "/" ? "/ar" : `/ar${englishPath}`) : englishPath;
       router.push(`${nextPath}${window.location.search}${window.location.hash}`);
       return;
     }
