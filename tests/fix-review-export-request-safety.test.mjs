@@ -17,6 +17,8 @@ const reviewReads = [];
 const historyReads = [];
 const ownedFinding = { id: "finding_1", title: "Missing description" };
 const secondOwnedFinding = { id: "finding_2", title: "Missing heading" };
+const additionalReviews = [];
+const additionalProposals = [];
 const loaded = { exports: {} };
 new Function("require", "module", "exports", compiled)((name) => {
   if (name === "@/app/auth") return { getAuthenticatedUser: async () => user };
@@ -39,6 +41,7 @@ new Function("require", "module", "exports", compiled)((name) => {
       return [
         { id: "review_owned", findingId: "finding_1", status: "review_requested", createdAt: "2026-11-21" },
         { id: "review_other", findingId: "finding_other", status: "review_requested", createdAt: "2026-11-21" },
+        ...additionalReviews,
       ];
     },
     listFixProposalHistoryForScan: async (...args) => {
@@ -58,6 +61,7 @@ new Function("require", "module", "exports", compiled)((name) => {
           fixId: "review_other", findingId: "finding_other", proposalId: "proposal_other",
           version: 1, proposedText: "Other finding",
         },
+        ...additionalProposals,
       ];
     },
   };
@@ -150,4 +154,41 @@ test("evidence export excludes mismatched proposals even when both findings are 
   assert.deepEqual(review.proposals.map((item) => item.proposalId), ["proposal_1"]);
   assert.ok(!JSON.stringify(payload).includes("Unrelated owned finding evidence"));
   assert.ok(!JSON.stringify(payload).includes("proposal_cross"));
+});
+
+test("evidence export groups many owned reviews without repeated full-history scans", async () => {
+  // One access to each proposal's review key per export is sufficient; the
+  // previous per-review filter read every proposal key for every review.
+  let reviewKeyReads = 0;
+  for (let index = 0; index < 40; index++) {
+    const reviewId = `review_large_${index}`;
+    additionalReviews.push({
+      id: reviewId, findingId: "finding_1", status: "review_requested", createdAt: "2026-11-21",
+    });
+    const proposal = {
+      findingId: "finding_1", proposalId: `proposal_large_${index}`,
+      version: 1, proposedText: `Evidence ${index}`,
+    };
+    Object.defineProperty(proposal, "fixId", {
+      enumerable: true,
+      get() { reviewKeyReads++; return reviewId; },
+    });
+    additionalProposals.push(proposal);
+  }
+  try {
+    const response = await GET(request("?scan=scan_1"));
+    assert.equal(response.status, 200);
+    privateResponse(response);
+    const payload = await response.json();
+    assert.equal(payload.reviews.length, 41);
+    for (let index = 0; index < 40; index++) {
+      const review = payload.reviews.find((entry) => entry.reviewId === `review_large_${index}`);
+      assert.ok(review, `missing review ${index}`);
+      assert.deepEqual(review.proposals.map((entry) => entry.proposalId), [`proposal_large_${index}`]);
+    }
+    assert.equal(reviewKeyReads, 40, "each proposal key must be read once, not once per review");
+  } finally {
+    additionalReviews.length = 0;
+    additionalProposals.length = 0;
+  }
 });
