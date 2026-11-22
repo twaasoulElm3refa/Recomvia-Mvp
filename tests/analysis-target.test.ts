@@ -906,7 +906,7 @@ test("canonical readiness counts only active head links, not HTML examples or bo
     { label: "head missing closing tag", head: valid, prefix: "<head>" },
     { label: "unsafe scheme", head: '<link rel="canonical" href="javascript:alert(1)">' },
     { label: "fragment-only href", head: '<link rel="canonical" href="#home">' },
-    { label: "fake head inside HTML comment", head: valid, prefix: '<!-- <head><link rel="canonical" href="/fake"></head> -->' },
+    { label: "fake head inside HTML comment", head: valid, prefix: '<!-- <head><link rel="canonical" href="/fake"></head> -->', expected: origin + "/actual" },
   ];
   try {
     for (const entry of cases) {
