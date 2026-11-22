@@ -76,6 +76,34 @@ test("support validates fields and honeypot before writing", async () => {
   assert.equal(created.length, 0);
 });
 
+test("support rejects undeliverable or header-like email addresses before creating tickets", async () => {
+  const before = created.length;
+  const base = { name: "Support Contact", question: "Please clarify the report findings." };
+  for (const email of [
+    "name@example.org,evil", "name;other@example.org", "name@example..org",
+    "name@-example.org", "name@example-.org", "name@exa_mple.org",
+    ".name@example.org", "name.@example.org", "na..me@example.org",
+    "name@example.org.", "name@one@example.org",
+  ]) {
+    const response = await POST(request(JSON.stringify({ ...base, email })));
+    assert.equal(response.status, 400, email);
+    assert.equal(response.headers.get("Cache-Control"), "no-store", email);
+    assert.equal(created.length, before, email);
+  }
+});
+
+test("support preserves valid plus-addressing, subdomains and Arabic names", async () => {
+  const before = created.length;
+  const response = await POST(request(JSON.stringify({
+    name: "عميل عربي",
+    email: "Account+Report@Sub.Example.org",
+    question: "أرجو توضيح نتائج تقريري بالتفصيل",
+  })));
+  assert.equal(response.status, 201);
+  assert.equal(created.length, before + 1);
+  assert.equal(created.at(-1).requesterEmail, "account+report@sub.example.org");
+});
+
 test("support creates one trackable ticket for a valid request", async () => {
   const valid = { name: "Test Sender", email: "SENDER@example.org", question: "I need help with a report", pageUrl: "/contact" };
   const response = await POST(request(JSON.stringify(valid)));
