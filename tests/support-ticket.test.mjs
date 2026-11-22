@@ -196,10 +196,17 @@ test("support rejects invisible controls and bidi overrides before storing user-
     ["name", "Test\u0000 Sender"],
     ["name", "Test\nSender"],
     ["name", "Test\u202eSender"],
+    ["name", "Test\u061cSender"],
+    ["name", "Test\u200eSender"],
+    ["name", "Test\u200fSender"],
     ["email", "sender\u2066@example.org"],
+    ["email", "sender\u200f@example.org"],
     ["question", "Please\u0007 explain the findings."],
     ["question", "Please\u202e explain the findings."],
     ["question", "Please\u2069 explain the findings."],
+    ["question", "Please\u061c explain the findings."],
+    ["question", "Please\u200e explain the findings."],
+    ["question", "Please\u200f explain the findings."],
   ];
   for (const [field, value] of invalid) {
     const response = await POST(request(JSON.stringify({ ...valid, [field]: value })));
