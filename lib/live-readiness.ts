@@ -99,6 +99,9 @@ async function fetchText(startUrl: URL, maxBytes: number, accept: string, requir
         },
       });
       if ([301, 302, 303, 307, 308].includes(response.status)) {
+        // A redirect may carry a streaming body. Cancel it before following the
+        // Location so repeated redirects cannot leave downloads running.
+        await response.body?.cancel().catch(() => undefined);
         const location = response.headers.get("location");
         if (!location) throw new Error("The website returned an incomplete redirect.");
         current = new URL(location, current);

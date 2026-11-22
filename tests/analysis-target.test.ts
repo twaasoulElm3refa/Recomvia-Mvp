@@ -359,3 +359,67 @@ test("bounded crawler preserves UTF-8 across response stream chunks and counts b
     globalThis.fetch = originalFetch;
   }
 });
+
+test("redirect crawl cancels unused response streams before following a safe location", async () => {
+  const originalFetch = globalThis.fetch;
+  const urls: string[] = [];
+  let redirectCancelled = false;
+  let redirectChunks = 0;
+  const usage = { requestCount: 0, bytesFetched: 0 };
+  globalThis.fetch = async (input) => {
+    const url = String(input);
+    urls.push(url);
+    if (url === "https://redirected.example/") {
+      return new Response(new ReadableStream<Uint8Array>({
+        pull(controller) {
+          redirectChunks++;
+          controller.enqueue(new Uint8Array(64_000));
+        },
+        cancel() { redirectCancelled = true; },
+      }), { status: 302, headers: { Location: "/landing" } });
+    }
+    if (url.endsWith("/landing")) {
+      return new Response('<!doctype html><html lang="en"><head><title>Redirect target</title></head><body><h1>Landing</h1></body></html>',
+        { headers: { "Content-Type": "text/html" } });
+    }
+    if (url.endsWith("/robots.txt")) return new Response("User-agent: *\\nAllow: /");
+    if (url.endsWith("/sitemap.xml")) return new Response("<urlset></urlset>");
+    throw new Error("Unexpected crawler destination: " + url);
+  };
+  try {
+    const result = await runLiveReadinessScan("https://redirected.example/", undefined, usage);
+    assert.equal(result.finalUrl, "https://redirected.example/landing");
+    assert.equal(redirectCancelled, true, "discard the redirect body instead of leaving it downloading");
+    assert.ok(redirectChunks <= 2, "must not consume a large redirect body");
+    assert.deepEqual(urls, [
+      "https://redirected.example/",
+      "https://redirected.example/landing",
+      "https://redirected.example/robots.txt",
+      "https://redirected.example/sitemap.xml",
+    ]);
+    assert.equal(usage.requestCount, 4);
+    assert.ok(usage.bytesFetched < 64_000, "discarded redirect bytes are not page evidence");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("malformed redirect without Location also releases its unused body", async () => {
+  const originalFetch = globalThis.fetch;
+  let cancelled = false;
+  let calls = 0;
+  globalThis.fetch = async () => {
+    calls++;
+    return new Response(new ReadableStream<Uint8Array>({
+      start(controller) { controller.enqueue(new Uint8Array(32_000)); },
+      cancel() { cancelled = true; },
+    }), { status: 301 });
+  };
+  try {
+    await assert.rejects(runLiveReadinessScan("https://redirected.example/"), /incomplete redirect/);
+    assert.equal(cancelled, true, "failed redirects must not leave downloads running");
+    assert.equal(calls, 1, "missing redirect targets must never be fetched");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
