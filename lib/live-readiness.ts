@@ -172,6 +172,17 @@ function metaContent(html: string, target: string) {
   return "";
 }
 
+// A homepage can request de-indexing even when robots.txt allows crawling.
+// Check all global robots meta tags; named crawler directives are not site-wide.
+function hasGlobalNoindexMeta(html: string) {
+  return (html.match(/<meta\\b[^>]*>/gi) ?? []).some((tag) => {
+    const attrs = attributes(tag);
+    if ((attrs.name || "").toLowerCase() !== "robots") return false;
+    return decodeHtmlEntities(attrs.content || "").toLowerCase()
+      .split(/[\\s,]+/).some((directive) => directive === "noindex" || directive === "none");
+  });
+}
+
 function linkHref(html: string, rel: string) {
   for (const tag of html.match(/<link\b[^>]*>/gi) ?? []) {
     const attrs = attributes(tag);
@@ -331,7 +342,8 @@ export async function runLiveReadinessScan(input: string, requiredOrigin?: strin
   const hasQuestionHeadings = /<h[2-4]\b[^>]*>[^<]{0,120}(?:what|how|why|when|where|who|can|does|is|are|ما|ماذا|كيف|لماذا|هل|متى|أين|اين)[^<]*<\/h[2-4]>/i.test(html);
   const words = text ? text.split(/\s+/).length : 0;
   const globallyBlocked = robotsReadable && robots ? hasWildcardRootDisallow(robots.text) : false;
-  const robotsHealthy = robotsReadable && !globallyBlocked;
+  const metaNoindex = hasGlobalNoindexMeta(html);
+  const robotsHealthy = robotsReadable && !globallyBlocked && !metaNoindex;
   const sitemapHealthy = Boolean(sitemap && sitemap.status >= 200 && sitemap.status < 300 && hasSitemapRootDocument(sitemap.text));
   const hasIdentityLink = /href\s*=\s*["'][^"']*(?:\/about(?:[-_/]|["'#?])|\/contact(?:[-_/]|["'#?])|\/company(?:[-_/]|["'#?])|عن-?ا|اتصل-?بنا)/i.test(html);
   const hasOpenGraph = Boolean(metaContent(html, "og:title") && metaContent(html, "og:description"));
@@ -355,7 +367,7 @@ export async function runLiveReadinessScan(input: string, requiredOrigin?: strin
   add({ code: "answer_structure", category: "Content readiness", severity: "medium", status: answerReady ? "pass" : "fail", title: "Question-and-answer structure is discoverable", explanation: "Direct question headings and self-contained answers improve answer extraction for relevant queries.", evidence: hasFaq ? "FAQPage structured data found." : hasQuestionHeadings ? "Question-led headings found in visible HTML." : "No FAQPage schema or question-led headings were detected.", sourceUrl: page.url, weight: 8, awardedPoints: answerReady ? 8 : 0 });
   const contentPoints = words >= 300 ? 8 : words >= 100 ? 4 : 0;
   add({ code: "content_depth", category: "Content readiness", severity: "medium", status: contentPoints === 8 ? "pass" : contentPoints ? "partial" : "fail", title: "The page exposes enough readable context", explanation: "Thin pages often lack the facts and distinctions needed for confident understanding.", evidence: `Approximately ${words.toLocaleString("en-US")} visible words detected.`, sourceUrl: page.url, weight: 8, awardedPoints: contentPoints });
-  add({ code: "robots_policy", category: "Technical AEO", severity: "critical", status: robotsHealthy ? "pass" : "fail", title: "Crawler policy is accessible and permits discovery", explanation: "A readable robots policy should not block the entire site from general crawlers.", evidence: robots ? `HTTP ${robots.status}${robotsIsHtml ? " · HTML fallback is not robots.txt" : globallyBlocked ? " · broad Disallow: / detected" : ""}` : "robots.txt could not be retrieved.", sourceUrl: robotsUrl.toString(), weight: 7, awardedPoints: robotsHealthy ? 7 : 0 });
+  add({ code: "robots_policy", category: "Technical AEO", severity: "critical", status: robotsHealthy ? "pass" : "fail", title: "Crawler discovery and indexing are permitted", explanation: "A readable robots policy and homepage indexing directives should permit general search crawlers to discover and index the site.", evidence: metaNoindex ? "Homepage meta robots requests noindex/none." : robots ? `HTTP ${robots.status}${robotsIsHtml ? " · HTML fallback is not robots.txt" : globallyBlocked ? " · broad Disallow: / detected" : ""}` : "robots.txt could not be retrieved.", sourceUrl: metaNoindex ? page.url : robotsUrl.toString(), weight: 7, awardedPoints: robotsHealthy ? 7 : 0 });
   add({ code: "xml_sitemap", category: "Technical AEO", severity: "high", status: sitemapHealthy ? "pass" : "fail", title: "XML sitemap is available", explanation: "A valid sitemap gives crawlers a reliable inventory of canonical content URLs.", evidence: sitemap ? `HTTP ${sitemap.status} · ${sitemapHealthy ? "sitemap root document detected" : "no complete sitemap root document detected"}` : "A sitemap could not be retrieved.", sourceUrl: sitemapUrl.toString(), weight: 7, awardedPoints: sitemapHealthy ? 7 : 0 });
   add({ code: "identity_paths", category: "Authority & entity", severity: "medium", status: hasIdentityLink ? "pass" : "fail", title: "Identity and contact paths are visible", explanation: "Clear company and contact paths help users and systems verify who is responsible for the site.", evidence: hasIdentityLink ? "An About, Company, or Contact path was found." : "No clear About, Company, or Contact path was detected in homepage links.", sourceUrl: page.url, weight: 6, awardedPoints: hasIdentityLink ? 6 : 0 });
   add({ code: "open_graph", category: "Content readiness", severity: "low", status: hasOpenGraph ? "pass" : "fail", title: "Share metadata describes the page", explanation: "Open Graph metadata provides another consistent summary when the page is shared or referenced.", evidence: hasOpenGraph ? "og:title and og:description were found." : "og:title or og:description is missing.", sourceUrl: page.url, weight: 6, awardedPoints: hasOpenGraph ? 6 : 0 });
