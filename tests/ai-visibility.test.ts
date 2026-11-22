@@ -561,3 +561,69 @@ test("cost calculation uses only actual provider cost and returns null when unav
   assert.equal(actualProviderCostMicros(undefined), null);
   assert.equal(actualProviderCostMicros(-1), null);
 });
+
+
+test("OpenRouter rejects oversized declared provider bodies without parsing or retrying", async () => {
+  let cancelled = false;
+  let calls = 0;
+  const fetchImpl: typeof fetch = async () => {
+    calls++;
+    const stream = new ReadableStream<Uint8Array>({
+      pull(controller) { controller.enqueue(new Uint8Array([123])); },
+      cancel() { cancelled = true; },
+    });
+    return new Response(stream, { headers: { "Content-Length": "1048577", "Content-Type": "application/json" } });
+  };
+  const result = await new OpenRouterEngineAdapter({
+    apiKey: "mock-only", model: OPENROUTER_TEST_MODEL, fetchImpl, maxRetries: 2,
+  }).run({ prompt: "Answer briefly", language: "en", country: "Global", useSearch: false });
+  assert.equal(result.error?.code, "response_too_large");
+  assert.equal(result.estimatedCostMicros, null);
+  assert.equal(result.responseText, null);
+  assert.equal(result.retryCount, 0);
+  assert.equal(calls, 1);
+  assert.equal(cancelled, true);
+});
+
+test("OpenRouter stops an undeclared oversized response stream before buffering it", async () => {
+  let chunks = 0;
+  let cancelled = false;
+  const fetchImpl: typeof fetch = async () => new Response(new ReadableStream<Uint8Array>({
+    pull(controller) {
+      chunks++;
+      controller.enqueue(new Uint8Array(131_072).fill(97));
+      if (chunks === 32) controller.close();
+    },
+    cancel() { cancelled = true; },
+  }), { headers: { "Content-Type": "application/json" } });
+  const result = await new OpenRouterEngineAdapter({
+    apiKey: "mock-only", model: OPENROUTER_TEST_MODEL, fetchImpl, maxRetries: 0,
+  }).run({ prompt: "Answer briefly", language: "en", country: "Global", useSearch: false });
+  assert.equal(result.error?.code, "response_too_large");
+  assert.equal(result.estimatedCostMicros, null);
+  assert.equal(result.responseText, null);
+  assert.ok(chunks < 32, "stream cancelled well before full remote payload");
+  assert.equal(cancelled, true);
+});
+
+test("OpenRouter bounded JSON decoding preserves split Arabic text and real cost", async () => {
+  const reply = "مرحبًا بالعالم";
+  const payload = new TextEncoder().encode(JSON.stringify({
+    id: "split-utf8", choices: [{ message: { content: reply } }], usage: { cost: 0.0012 },
+  }));
+  const split = payload.findIndex((byte) => byte >= 0x80);
+  assert.ok(split > 0);
+  const fetchImpl: typeof fetch = async () => new Response(new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.enqueue(payload.slice(0, split + 1));
+      controller.enqueue(payload.slice(split + 1));
+      controller.close();
+    },
+  }), { headers: { "Content-Type": "application/json" } });
+  const result = await new OpenRouterEngineAdapter({
+    apiKey: "mock-only", model: OPENROUTER_TEST_MODEL, fetchImpl,
+  }).run({ prompt: "أجب بالعربية", language: "ar", country: "Global", useSearch: false });
+  assert.equal(result.error, null);
+  assert.equal(result.responseText, reply);
+  assert.equal(result.estimatedCostMicros, 1200);
+});
