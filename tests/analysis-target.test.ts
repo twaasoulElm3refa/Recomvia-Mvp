@@ -887,3 +887,56 @@ test("homepage X-Robots-Tag blocks a false indexing readiness pass without extra
     globalThis.fetch = originalFetch;
   }
 });
+
+
+test("canonical readiness counts only active head links, not HTML examples or body tags", async () => {
+  const originalFetch = globalThis.fetch;
+  const origin = "https://canonical-fixture.example";
+  const valid = '<link rel="canonical" href="/actual">';
+  const cases: Array<{ label: string; head: string; body?: string; expected?: string; prefix?: string }> = [
+    { label: "head relative canonical", head: valid, expected: origin + "/actual" },
+    { label: "absolute canonical", head: '<link href="https://canonical-fixture.example/absolute" rel="alternate canonical">', expected: origin + "/absolute" },
+    { label: "case-insensitive rel", head: '<link REL="CANONICAL" HREF="/case">', expected: origin + "/case" },
+    { label: "commented-out canonical", head: '<!-- ' + valid + ' -->' },
+    { label: "script string example", head: '<script>const example = \'<link rel="canonical" href="/fake">\';</script>' },
+    { label: "style example", head: '<style>/* <link rel="canonical" href="/fake"> */</style>' },
+    { label: "template element", head: '<template><link rel="canonical" href="/fake"></template>' },
+    { label: "noscript example", head: '<noscript><link rel="canonical" href="/fake"></noscript>' },
+    { label: "body-only canonical", head: "", body: valid },
+    { label: "head missing closing tag", head: valid, prefix: "<head>" },
+    { label: "unsafe scheme", head: '<link rel="canonical" href="javascript:alert(1)">' },
+    { label: "fragment-only href", head: '<link rel="canonical" href="#home">' },
+    { label: "fake head inside HTML comment", head: valid, prefix: '<!-- <head><link rel="canonical" href="/fake"></head> -->' },
+  ];
+  try {
+    for (const entry of cases) {
+      const html = '<!doctype html><html lang="en">' + (entry.prefix || "") +
+        (entry.prefix === "<head>" ? "" : "<head>") +
+        '<title>Canonical readiness fixture</title>' + entry.head +
+        (entry.prefix === "<head>" ? "" : "</head>") +
+        '<body><h1>Home</h1>' + (entry.body || "") + '</body></html>';
+      const requested: string[] = [];
+      globalThis.fetch = async (input) => {
+        const url = String(input);
+        requested.push(url);
+        const path = new URL(url).pathname;
+        if (path === "/robots.txt") return new Response("User-agent: *\\nAllow: /");
+        if (path === "/sitemap.xml") return new Response("<urlset></urlset>");
+        assert.equal(path, "/", entry.label);
+        return new Response(html, { headers: { "Content-Type": "text/html" } });
+      };
+      const usage = { requestCount: 0, bytesFetched: 0 };
+      const result = await runLiveReadinessScan(origin + "/", undefined, usage);
+      const finding = result.findings.find((row) => row.code === "canonical");
+      assert.ok(finding, entry.label);
+      assert.equal(finding.status, entry.expected ? "pass" : "fail", entry.label);
+      assert.equal(finding.awardedPoints, entry.expected ? 7 : 0, entry.label);
+      if (entry.expected) assert.equal(finding.evidence, entry.expected, entry.label);
+      else assert.equal(finding.evidence, "Canonical link is missing or invalid.", entry.label);
+      assert.deepEqual(requested, [origin + "/", origin + "/robots.txt", origin + "/sitemap.xml"], entry.label);
+      assert.equal(usage.requestCount, 3, entry.label + ": no extra network requests");
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
