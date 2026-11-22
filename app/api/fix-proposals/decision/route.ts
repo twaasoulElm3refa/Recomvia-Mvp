@@ -65,7 +65,7 @@ export async function POST(request: Request) {
       (decision !== "accepted_for_planning" && decision !== "changes_requested") ||
       typeof comment !== "string" || comment.length > 800 ||
       // Keep ordinary Arabic multiline comments, but reject hidden controls and bidi overrides.
-      /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f\u202a-\u202e\u2066-\u2069]/.test(comment) ||
+      /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f\u061c\u200e-\u200f\u202a-\u202e\u2066-\u2069]/.test(comment) ||
       (decision === "changes_requested" && comment.trim().length < 10)) {
     return json({ code: "invalid_request" }, 400);
   }

@@ -13,7 +13,7 @@ function bounded(value: unknown, min: number, max: number): string | null {
   // Permit ordinary Arabic multiline drafting, but reject invisible controls and
   // bidi overrides that can disguise the approved scope, rationale or rollback plan.
   return text.length >= min && text.length <= max &&
-    !/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f\u202a-\u202e\u2066-\u2069]/.test(text) ? text : null;
+    !/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f\u061c\u200e-\u200f\u202a-\u202e\u2066-\u2069]/.test(text) ? text : null;
 }
 
 export async function POST(request: Request) {
