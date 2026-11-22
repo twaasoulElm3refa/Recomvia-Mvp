@@ -39,3 +39,20 @@ for (const entry of faqEntries) {
     });
   }
 }
+
+test("paid-plan FAQ and assistant do not promise checkout before payment activation", () => {
+  for (const plan of ["starter", "essential", "growth", "pro"]) {
+    const entry = faqEntries.find((item) => item.id === `${plan}-plan`);
+    assert.ok(entry, `Missing ${plan} FAQ`);
+    assert.match(entry.answer, /only after online payments are activated/i);
+    assert.match(entry.answerAr, /إلا بعد تفعيل/);
+    assert.doesNotMatch(entry.answer, /continue to checkout/i);
+    assert.doesNotMatch(entry.answerAr, /للمتابعة إلى الدفع/);
+    const english = searchKnowledge(entry.question);
+    const arabic = searchKnowledge(entry.questionAr);
+    assert.equal(english.answered, true);
+    assert.equal(arabic.answered, true);
+    assert.match(english.answer ?? "", /only after online payments are activated/i);
+    assert.match(arabic.answer ?? "", /إلا بعد تفعيل/);
+  }
+});
