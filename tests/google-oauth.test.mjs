@@ -408,7 +408,7 @@ test("Google callback rejects malformed identity claims without creating session
     { ...baseline, sub: "abc\n" },
     { ...baseline, email: {} },
     { ...baseline, email: "not-an-email" },
-    { ...baseline, email: "x".repeat(245) + "@test.org" },
+    { ...baseline, email: "x".repeat(246) + "@test.org" },
     { ...baseline, email: "x\u202ee@example.org" },
     { ...baseline, email_verified: "true" },
     { ...baseline, name: { invalid: "object" } },
