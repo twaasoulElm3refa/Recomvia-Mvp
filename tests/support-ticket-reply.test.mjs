@@ -148,6 +148,9 @@ test("admin replies reject invisible controls and bidi overrides without writing
     ["RTL override", "Report\u202e.html"],
     ["LTR isolate", "Hello\u2066 there"],
     ["pop directional format", "Hello\u202c there"],
+    ["Arabic letter mark", "Hello\u061c there"],
+    ["left-to-right mark", "Hello\u200e there"],
+    ["right-to-left mark", "Hello\u200f there"],
   ];
   for (const [label, reply] of invalid) {
     const response = await POST(request(JSON.stringify({ reply })), context());
