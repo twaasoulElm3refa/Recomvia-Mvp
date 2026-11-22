@@ -195,7 +195,7 @@ class ProviderResponseTooLargeError extends Error {}
 
 async function readBoundedProviderJson(response: Response): Promise<OpenRouterResponse | null> {
   const length = response.headers.get("content-length");
-  if (length && /^(0|[1-9]\\d*)$/.test(length) && Number(length) > MAX_PROVIDER_RESPONSE_BYTES) {
+  if (length && /^(0|[1-9]\d*)$/.test(length) && Number(length) > MAX_PROVIDER_RESPONSE_BYTES) {
     await response.body?.cancel().catch(() => undefined);
     throw new ProviderResponseTooLargeError();
   }
