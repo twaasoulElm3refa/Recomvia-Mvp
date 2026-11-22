@@ -51,9 +51,16 @@ export async function GET(request: Request) {
     // Checking both IDs independently can attach another owned finding's text
     // to the wrong review in an exported evidence pack.
     const reviewFindingIds = new Map(requested.map((review) => [review.id, review.findingId]));
-    const history = versions.filter((entry) =>
-      reviewFindingIds.get(entry.fixId) === entry.findingId,
-    );
+    // Group only matching review/finding pairs once. Re-filtering all proposal
+    // versions per review makes large account evidence exports quadratic.
+    const historyByReview = new Map<string, typeof versions>();
+    for (const entry of versions) {
+      const fixId = entry.fixId;
+      if (reviewFindingIds.get(fixId) !== entry.findingId) continue;
+      const entries = historyByReview.get(fixId);
+      if (entries) entries.push(entry);
+      else historyByReview.set(fixId, [entry]);
+    }
 
     const payload = {
       schemaVersion: 1,
@@ -70,8 +77,7 @@ export async function GET(request: Request) {
         finding: ownedFindings.get(review.findingId),
         status: review.status,
         createdAt: review.createdAt,
-        proposals: history.filter((entry) => entry.fixId === review.id)
-          .map((entry) => ({
+        proposals: (historyByReview.get(review.id) ?? []).map((entry) => ({
             proposalId: entry.proposalId,
             version: entry.version,
             scope: entry.scope,
