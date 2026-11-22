@@ -659,3 +659,48 @@ test("auxiliary discovery never fetches cross-origin robots or sitemap URLs", as
     globalThis.fetch = originalFetch;
   }
 });
+
+
+test("sitemap readiness rejects embedded tags, truncated XML and error pages", async () => {
+  const originalFetch = globalThis.fetch;
+  const homepage = '<!doctype html><html lang="en"><head><title>Sitemap fixture site</title></head><body><h1>Welcome</h1></body></html>';
+  const cases: Array<{ label: string; xml: string; pass: boolean; status?: number }> = [
+    { label: "basic urlset", xml: "<urlset></urlset>", pass: true },
+    { label: "XML declaration and namespace", xml: '<?xml version="1.0" encoding="UTF-8"?>\n<!-- mapped -->\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"><url></url></urlset>', pass: true },
+    { label: "sitemap index", xml: '<sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"><sitemap></sitemap></sitemapindex>', pass: true },
+    { label: "self-closing empty sitemap", xml: "<urlset/>", pass: true },
+    { label: "XML stylesheet", xml: '<?xml version="1.0"?>\n<?xml-stylesheet type="text/xsl" href="/sitemap.xsl"?>\n<urlset></urlset>', pass: true },
+    { label: "HTML error embeds urlset", xml: "<html><body><urlset></urlset></body></html>", pass: false },
+    { label: "root only in comment", xml: "<!-- <urlset></urlset> -->", pass: false },
+    { label: "text before root", xml: "Bad XML <urlset></urlset>", pass: false },
+    { label: "truncated response", xml: "<urlset><url></url>", pass: false },
+    { label: "wrong closing root", xml: "<urlset></sitemapindex>", pass: false },
+    { label: "trailing HTML", xml: "<urlset></urlset><html></html>", pass: false },
+    { label: "similarly named tag", xml: "<urlsetfake></urlsetfake>", pass: false },
+    { label: "non-successful sitemap HTTP", xml: "<urlset></urlset>", status: 404, pass: false },
+  ];
+  try {
+    for (const entry of cases) {
+      const requests: string[] = [];
+      globalThis.fetch = async (input) => {
+        const pathname = new URL(String(input)).pathname;
+        requests.push(pathname);
+        if (pathname === "/robots.txt") return new Response("User-agent: *\nAllow: /");
+        if (pathname === "/sitemap.xml") return new Response(entry.xml, {
+          status: entry.status ?? 200,
+          headers: { "Content-Type": "application/xml" },
+        });
+        assert.equal(pathname, "/", entry.label);
+        return new Response(homepage, { headers: { "Content-Type": "text/html" } });
+      };
+      const result = await runLiveReadinessScan("https://sitemap-fixture.example/");
+      const finding = result.findings.find((item) => item.code === "xml_sitemap");
+      assert.ok(finding, entry.label);
+      assert.equal(finding.status, entry.pass ? "pass" : "fail", entry.label);
+      assert.equal(finding.awardedPoints, entry.pass ? 7 : 0, entry.label);
+      assert.deepEqual(requests, ["/", "/robots.txt", "/sitemap.xml"], entry.label);
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});

@@ -243,6 +243,22 @@ function makeFinding(input: Omit<ReadinessFinding, "sortOrder">, sortOrder: numb
   return { ...input, sortOrder };
 }
 
+// XML sitemap readiness needs a sitemap document root, not a substring in an
+// HTML error page, a comment, or a truncated response. This is a bounded
+// structural check, not a full XML schema validator.
+function hasSitemapRootDocument(text: string) {
+  const clean = text.replace(/^\uFEFF/, "").trim();
+  const prolog = clean.match(/^(?:(?:<\?[\s\S]*?\?>|<!--[\s\S]*?-->)\s*)*/)?.[0] ?? "";
+  const document = clean.slice(prolog.length);
+  const root = document.match(/^<(urlset|sitemapindex)(?=[\s/>])[^>]*>/i);
+  if (!root) return false;
+  if (root[0].endsWith("/>")) return document === root[0];
+  const closing = root[1].toLowerCase() === "urlset"
+    ? /<\/urlset\s*>\s*(?:<!--[\s\S]*?-->\s*)*$/i
+    : /<\/sitemapindex\s*>\s*(?:<!--[\s\S]*?-->\s*)*$/i;
+  return closing.test(document);
+}
+
 export async function runLiveReadinessScan(input: string, requiredOrigin?: string, usage: CrawlUsage = { requestCount: 0, bytesFetched: 0 }): Promise<LiveReadinessResult> {
   const source = normalizeWebsiteInput(input);
   const page = await fetchText(source, MAX_HTML_BYTES, "text/html,application/xhtml+xml;q=0.9,*/*;q=0.1", requiredOrigin, usage);
@@ -311,7 +327,7 @@ export async function runLiveReadinessScan(input: string, requiredOrigin?: strin
   const words = text ? text.split(/\s+/).length : 0;
   const globallyBlocked = robots ? hasWildcardRootDisallow(robots.text) : false;
   const robotsHealthy = Boolean(robots && robots.status >= 200 && robots.status < 300 && !globallyBlocked);
-  const sitemapHealthy = Boolean(sitemap && sitemap.status >= 200 && sitemap.status < 300 && /<(?:urlset|sitemapindex)\b/i.test(sitemap.text));
+  const sitemapHealthy = Boolean(sitemap && sitemap.status >= 200 && sitemap.status < 300 && hasSitemapRootDocument(sitemap.text));
   const hasIdentityLink = /href\s*=\s*["'][^"']*(?:\/about(?:[-_/]|["'#?])|\/contact(?:[-_/]|["'#?])|\/company(?:[-_/]|["'#?])|عن-?ا|اتصل-?بنا)/i.test(html);
   const hasOpenGraph = Boolean(metaContent(html, "og:title") && metaContent(html, "og:description"));
 
@@ -335,7 +351,7 @@ export async function runLiveReadinessScan(input: string, requiredOrigin?: strin
   const contentPoints = words >= 300 ? 8 : words >= 100 ? 4 : 0;
   add({ code: "content_depth", category: "Content readiness", severity: "medium", status: contentPoints === 8 ? "pass" : contentPoints ? "partial" : "fail", title: "The page exposes enough readable context", explanation: "Thin pages often lack the facts and distinctions needed for confident understanding.", evidence: `Approximately ${words.toLocaleString("en-US")} visible words detected.`, sourceUrl: page.url, weight: 8, awardedPoints: contentPoints });
   add({ code: "robots_policy", category: "Technical AEO", severity: "critical", status: robotsHealthy ? "pass" : "fail", title: "Crawler policy is accessible and permits discovery", explanation: "A readable robots policy should not block the entire site from general crawlers.", evidence: robots ? `HTTP ${robots.status}${globallyBlocked ? " · broad Disallow: / detected" : ""}` : "robots.txt could not be retrieved.", sourceUrl: robotsUrl.toString(), weight: 7, awardedPoints: robotsHealthy ? 7 : 0 });
-  add({ code: "xml_sitemap", category: "Technical AEO", severity: "high", status: sitemapHealthy ? "pass" : "fail", title: "XML sitemap is available", explanation: "A valid sitemap gives crawlers a reliable inventory of canonical content URLs.", evidence: sitemap ? `HTTP ${sitemap.status} · ${sitemapHealthy ? "valid sitemap structure detected" : "no urlset or sitemapindex detected"}` : "A sitemap could not be retrieved.", sourceUrl: sitemapUrl.toString(), weight: 7, awardedPoints: sitemapHealthy ? 7 : 0 });
+  add({ code: "xml_sitemap", category: "Technical AEO", severity: "high", status: sitemapHealthy ? "pass" : "fail", title: "XML sitemap is available", explanation: "A valid sitemap gives crawlers a reliable inventory of canonical content URLs.", evidence: sitemap ? `HTTP ${sitemap.status} · ${sitemapHealthy ? "sitemap root document detected" : "no complete sitemap root document detected"}` : "A sitemap could not be retrieved.", sourceUrl: sitemapUrl.toString(), weight: 7, awardedPoints: sitemapHealthy ? 7 : 0 });
   add({ code: "identity_paths", category: "Authority & entity", severity: "medium", status: hasIdentityLink ? "pass" : "fail", title: "Identity and contact paths are visible", explanation: "Clear company and contact paths help users and systems verify who is responsible for the site.", evidence: hasIdentityLink ? "An About, Company, or Contact path was found." : "No clear About, Company, or Contact path was detected in homepage links.", sourceUrl: page.url, weight: 6, awardedPoints: hasIdentityLink ? 6 : 0 });
   add({ code: "open_graph", category: "Content readiness", severity: "low", status: hasOpenGraph ? "pass" : "fail", title: "Share metadata describes the page", explanation: "Open Graph metadata provides another consistent summary when the page is shared or referenced.", evidence: hasOpenGraph ? "og:title and og:description were found." : "og:title or og:description is missing.", sourceUrl: page.url, weight: 6, awardedPoints: hasOpenGraph ? 6 : 0 });
 
