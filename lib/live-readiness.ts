@@ -206,7 +206,15 @@ function hasGlobalNoindexHeader(header: string) {
 }
 
 function linkHref(html: string, rel: string) {
-  for (const tag of html.match(/<link\b[^>]*>/gi) ?? []) {
+  // Only active link elements in the document head can declare SEO metadata.
+  // Remove comments and inert examples before locating the head, so a fake
+  // canonical inside a script, template or body cannot earn readiness points.
+  const activeMarkup = html.replace(
+    /<!--[\s\S]*?-->|<(script|style|template|noscript)\b[^>]*>[\s\S]*?<\/\1\s*>/gi,
+    "",
+  );
+  const head = activeMarkup.match(/<head\b[^>]*>([\s\S]*?)<\/head>/i)?.[1] ?? "";
+  for (const tag of head.match(/<link\b[^>]*>/gi) ?? []) {
     const attrs = attributes(tag);
     if ((attrs.rel || "").toLowerCase().split(/\s+/).includes(rel.toLowerCase())) return (attrs.href || "").trim();
   }
