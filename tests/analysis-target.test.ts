@@ -511,3 +511,44 @@ test("robots readiness scopes root Disallow to wildcard groups rather than unrel
     globalThis.fetch = originalFetch;
   }
 });
+
+test("readiness awards schema scores only for parseable JSON-LD with declared types", async () => {
+  const originalFetch = globalThis.fetch;
+  const script = (data: string) => '<script type="application/ld+json">' + data + "</script>";
+  const cases: Array<{
+    name: string;
+    markup: string;
+    validBlocks: number;
+    organization: boolean;
+    faq: boolean;
+  }> = [
+    { name: "malformed object", markup: script('{"@type":"Organization",}'), validBlocks: 0, organization: false, faq: false },
+    { name: "schema graph and type array", markup: script('{"@context":"https://schema.org","@graph":[{"@type":["Thing","Organization"]},{"@type":"FAQPage"}]}'), validBlocks: 1, organization: true, faq: true },
+    { name: "only the valid block counts", markup: script('{"@type":"FAQPage",}') + script('[{"@type":"https://schema.org/Organization"},{"@type":"Product"}]'), validBlocks: 1, organization: true, faq: false },
+    { name: "scalar is not structured data", markup: script('"Organization"'), validBlocks: 0, organization: false, faq: false },
+    { name: "generic JSON lacks schema fields", markup: script('{"name":"No schema keywords"}'), validBlocks: 0, organization: false, faq: false },
+    { name: "unrelated JSON script is not JSON-LD", markup: '<script type="application/json">{"@type":"Organization"}</script>', validBlocks: 0, organization: false, faq: false },
+    { name: "type must match exactly", markup: script('{"@type":"OtherOrganization"}'), validBlocks: 1, organization: false, faq: false },
+  ];
+  try {
+    for (const entry of cases) {
+      const html = '<!doctype html><html lang="en"><head><title>Structured data fixture</title>' +
+        entry.markup + '</head><body><h1>Welcome</h1></body></html>';
+      globalThis.fetch = async (input) => {
+        const path = new URL(String(input)).pathname;
+        if (path === "/robots.txt") return new Response("User-agent: *\nAllow: /");
+        if (path === "/sitemap.xml") return new Response("<urlset></urlset>");
+        return new Response(html, { headers: { "Content-Type": "text/html" } });
+      };
+      const result = await runLiveReadinessScan("https://schema-fixture.example/");
+      const findings = new Map(result.findings.map((finding) => [finding.code, finding]));
+      assert.equal(findings.get("structured_data")?.status, entry.validBlocks ? "pass" : "fail", entry.name);
+      assert.equal(findings.get("structured_data")?.awardedPoints, entry.validBlocks ? 8 : 0, entry.name);
+      assert.match(findings.get("structured_data")?.evidence || "", new RegExp("^" + entry.validBlocks + " parseable"), entry.name);
+      assert.equal(findings.get("organization_entity")?.status, entry.organization ? "pass" : "fail", entry.name);
+      assert.equal(findings.get("answer_structure")?.status, entry.faq ? "pass" : "fail", entry.name);
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
