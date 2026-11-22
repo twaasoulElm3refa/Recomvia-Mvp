@@ -60,3 +60,20 @@ test("public navigation keeps Arabic readers on canonical Arabic routes without 
   assert.equal((shell.match(/href=\{localizedHref\("\/"\)\}/g) ?? []).length, 2,
     "brand logo and scan CTA must preserve Arabic homepage routing");
 });
+
+
+test("public shell preserves canonical homepage language and switches by URL", () => {
+  const shell = readFileSync("app/components/public-shell.tsx", "utf8");
+  // This is the actual client hydration/storage-event path, not just the helper.
+  assert.match(shell, /pageDisplayLocale\(window\.location\.pathname,\s*readStoredSiteLocale\("en"\)\)/);
+  // Both homepages must participate in the same route-based language switch as blog pages.
+  assert.match(shell, /pathname === "\/" \|\| pathname === "\/ar"/);
+  assert.match(shell, /englishPath === "\/" \? "\/ar"/);
+  for (const [pathname, preference, expected] of [
+    ["/", "ar", "en"], ["/ar", "en", "ar"], ["/ar/", "en", "ar"],
+    ["/blog/example", "ar", "en"], ["/ar/blog/example", "en", "ar"],
+    ["/dashboard", "ar", "ar"], ["/dashboard", "en", "en"],
+  ] as const) {
+    assert.equal(pageDisplayLocale(pathname, preference), expected, pathname);
+  }
+});
