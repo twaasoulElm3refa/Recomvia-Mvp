@@ -136,6 +136,20 @@ export async function runScanForUser(user: AuthUser, payload: Record<string, unk
     typeof payload.candidateId !== "string" || !/^[a-zA-Z0-9_-]{1,100}$/.test(payload.candidateId)
   )) return json({ code: "invalid_choice" }, 400);
 
+  // Validate new scan targets before touching workspace, entitlements or provider setup.
+  // Identity confirmations still use their stored, owner-scoped target instead.
+  let requestedInput: TargetInput | null = null;
+  if (payload.scanId === undefined) {
+    try {
+      requestedInput = parseTargetInput(payload);
+    } catch {
+      return json({
+        code: "invalid_input",
+        error: "Enter a public URL, name, brand or topic.",
+      }, 400);
+    }
+  }
+
   const workspace = await ensureWorkspace(user);
   const entitlement = await getEntitlementForUser(user);
   if (options.monitoring && !entitlement.canMonitor) return json({ code: "subscription_required" }, 403);
@@ -296,18 +310,7 @@ export async function runScanForUser(user: AuthUser, payload: Record<string, unk
       return await finish(pending.targetInput, target, cacheKey, undefined, candidate);
     }
 
-    let input: TargetInput;
-    try {
-      input = parseTargetInput(payload);
-    } catch {
-      return json(
-        {
-          code: "invalid_input",
-          error: "Enter a public URL, name, brand or topic.",
-        },
-        400,
-      );
-    }
+    const input = requestedInput!;
     if (input.kind !== "website" && !adapter)
       return json(
         {
