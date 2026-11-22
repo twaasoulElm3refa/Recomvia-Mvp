@@ -135,7 +135,7 @@ test("crawl input rejects IANA special-use IPv4 addresses before any network acc
   try {
     for (const address of rejected) {
       assert.equal(safeSourceUrl(address), null, address);
-      assert.throws(() => parseTargetInput({ input: address }), undefined, address);
+      assert.throws(() => parseTargetInput({ input: address }), /not a public website/, address);
       await assert.rejects(runLiveReadinessScan(address), /not a public website/, address);
     }
     assert.equal(networkRequests, 0, "all rejected addresses must fail before any request");
