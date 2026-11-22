@@ -174,6 +174,22 @@ function linkHref(html: string, rel: string) {
   return "";
 }
 
+// A non-empty canonical href is not necessarily an indexable web URL.
+// Resolve legitimate relative canonicals against the final crawl URL, but do
+// not award SEO readiness points for fragments, unsafe schemes or local hosts.
+function validatedCanonicalUrl(html: string, pageUrl: string) {
+  const href = decodeHtmlEntities(linkHref(html, "canonical"));
+  if (!href || href.startsWith("#")) return "";
+  try {
+    const url = new URL(href, pageUrl);
+    if (url.hash) return "";
+    assertPublicUrl(url);
+    return url.toString();
+  } catch {
+    return "";
+  }
+}
+
 function plainText(html: string) {
   return decodeHtmlEntities(
     html
@@ -215,7 +231,7 @@ export async function runLiveReadinessScan(input: string, requiredOrigin?: strin
   const text = plainText(html);
   const title = plainText(html.match(/<title\b[^>]*>([\s\S]*?)<\/title>/i)?.[1] || "");
   const description = metaContent(html, "description");
-  const canonical = linkHref(html, "canonical");
+  const canonical = validatedCanonicalUrl(html, page.url);
   const htmlLang = html.match(/<html\b[^>]*\blang\s*=\s*["']?([^\s"'>]+)/i)?.[1] || "";
   const h1Count = (html.match(/<h1\b/gi) || []).length;
   const jsonLdBlocks = html.match(/<script\b[^>]*type\s*=\s*["']application\/ld\+json["'][^>]*>[\s\S]*?<\/script>/gi) || [];
@@ -239,7 +255,7 @@ export async function runLiveReadinessScan(input: string, requiredOrigin?: strin
   add({ code: "title", category: "Content readiness", severity: "high", status: titlePoints === 7 ? "pass" : titlePoints ? "partial" : "fail", title: "Page title is clear and extractable", explanation: "A concise title helps systems identify the page topic and brand without guessing.", evidence: title ? `${title.length} characters · ${clip(title)}` : "No title element was found.", sourceUrl: page.url, weight: 7, awardedPoints: titlePoints });
   const descriptionPoints = description.length >= 70 && description.length <= 180 ? 7 : description ? 4 : 0;
   add({ code: "meta_description", category: "Content readiness", severity: "medium", status: descriptionPoints === 7 ? "pass" : descriptionPoints ? "partial" : "fail", title: "Meta description summarizes the page", explanation: "A specific description gives retrieval systems a compact statement of the page purpose.", evidence: description ? `${description.length} characters · ${clip(description)}` : "No meta description was found.", sourceUrl: page.url, weight: 7, awardedPoints: descriptionPoints });
-  add({ code: "canonical", category: "Technical AEO", severity: "high", status: canonical ? "pass" : "fail", title: "Canonical URL is declared", explanation: "A canonical reduces ambiguity between duplicate URL variants and consolidates discovery signals.", evidence: canonical ? clip(canonical) : "No canonical link was found.", sourceUrl: page.url, weight: 7, awardedPoints: canonical ? 7 : 0 });
+  add({ code: "canonical", category: "Technical AEO", severity: "high", status: canonical ? "pass" : "fail", title: "Canonical URL is declared", explanation: "A canonical reduces ambiguity between duplicate URL variants and consolidates discovery signals.", evidence: canonical ? clip(canonical) : "Canonical link is missing or invalid.", sourceUrl: page.url, weight: 7, awardedPoints: canonical ? 7 : 0 });
   add({ code: "html_language", category: "Technical AEO", severity: "medium", status: htmlLang ? "pass" : "fail", title: "Document language is declared", explanation: "The document language helps systems interpret the content and market context correctly.", evidence: htmlLang ? `lang=${htmlLang}` : "The html element has no lang attribute.", sourceUrl: page.url, weight: 5, awardedPoints: htmlLang ? 5 : 0 });
   const h1Points = h1Count === 1 ? 6 : h1Count > 0 ? 3 : 0;
   add({ code: "primary_heading", category: "Content readiness", severity: "medium", status: h1Points === 6 ? "pass" : h1Points ? "partial" : "fail", title: "A single primary heading frames the page", explanation: "A stable primary heading makes the central subject easier to extract.", evidence: `${h1Count} H1 element${h1Count === 1 ? "" : "s"} found.`, sourceUrl: page.url, weight: 6, awardedPoints: h1Points });
