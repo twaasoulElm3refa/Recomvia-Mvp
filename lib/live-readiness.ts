@@ -106,15 +106,36 @@ async function fetchText(startUrl: URL, maxBytes: number, accept: string, requir
       }
       const announcedLength = Number(response.headers.get("content-length") || "0");
       if (announcedLength > maxBytes) throw new Error("The response is larger than the scan safety limit.");
-      const bytes = new Uint8Array(await response.arrayBuffer());
-      if (usage) usage.bytesFetched += bytes.byteLength;
-      if (bytes.byteLength > maxBytes) throw new Error("The response is larger than the scan safety limit.");
+      // Content-Length may be absent or false. Never buffer an unbounded crawl
+      // response: enforce the byte cap while reading, then stop the remote stream.
+      const reader = response.body?.getReader();
+      const decoder = new TextDecoder();
+      let bytesRead = 0;
+      let text = "";
+      if (reader) {
+        try {
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            bytesRead += value.byteLength;
+            if (bytesRead > maxBytes) {
+              await reader.cancel().catch(() => undefined);
+              throw new Error("The response is larger than the scan safety limit.");
+            }
+            text += decoder.decode(value, { stream: true });
+          }
+          text += decoder.decode();
+        } finally {
+          reader.releaseLock();
+        }
+      }
+      if (usage) usage.bytesFetched += bytesRead;
       return {
         url: current.toString(),
         status: response.status,
         contentType: response.headers.get("content-type") || "",
-        text: new TextDecoder().decode(bytes),
-        bytes: bytes.byteLength,
+        text,
+        bytes: bytesRead,
       };
     } finally { clearTimeout(timer); }
   }

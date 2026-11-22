@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { runLiveReadinessScan } from "../lib/live-readiness";
 import test from "node:test";
 import {
   contextForTarget,
@@ -300,4 +301,61 @@ test("cache separates kinds, clarification, language, model and URL path case", 
 test("unknown personal-brand specialty cannot generate generic unbranded visibility measurements", () => {
   const prompts = generateTargetPrompts({ kind: "person", input: "Ada Example", name: "Ada Example", aliases: [], category: "", language: "en", country: "Global", websiteUrl: null, identityConfirmed: true }, 12);
   assert.deepEqual(prompts.map((prompt) => prompt.intent), ["identity"]);
+});
+
+
+test("oversized unannounced crawler response is cancelled before the whole body is buffered", async () => {
+  const originalFetch = globalThis.fetch;
+  let chunksProduced = 0;
+  let cancelled = false;
+  globalThis.fetch = async () => new Response(new ReadableStream<Uint8Array>({
+    pull(controller) {
+      chunksProduced++;
+      controller.enqueue(new Uint8Array(256_000));
+      if (chunksProduced === 20) controller.close();
+    },
+    cancel() { cancelled = true; },
+  }), { headers: { "Content-Type": "text/html" } });
+  try {
+    await assert.rejects(
+      runLiveReadinessScan("https://large.example/"),
+      /larger than the scan safety limit/,
+    );
+    assert.equal(cancelled, true, "stream must be cancelled when the cap is reached");
+    assert.ok(chunksProduced < 20, "the crawler must not download the entire response");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("bounded crawler preserves UTF-8 across response stream chunks and counts bytes", async () => {
+  const originalFetch = globalThis.fetch;
+  const html = '<!doctype html><html lang="ar"><head><title>اختبار تقني</title></head><body><h1>مرحبًا بالعالم</h1></body></html>';
+  const robots = "User-agent: *\nAllow: /";
+  const sitemap = "<urlset></urlset>";
+  const encoded = new TextEncoder().encode(html);
+  const firstArabicByte = encoded.findIndex((byte) => byte > 127);
+  assert.ok(firstArabicByte >= 0);
+  const usage = { bytesFetched: 0, requestCount: 0 };
+  globalThis.fetch = async (input) => {
+    const url = String(input);
+    if (url.endsWith("/robots.txt")) return new Response(robots, { headers: { "Content-Type": "text/plain" } });
+    if (url.endsWith("/sitemap.xml")) return new Response(sitemap, { headers: { "Content-Type": "application/xml" } });
+    return new Response(new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(encoded.slice(0, firstArabicByte + 1));
+        controller.enqueue(encoded.slice(firstArabicByte + 1));
+        controller.close();
+      },
+    }), { headers: { "Content-Type": "text/html" } });
+  };
+  try {
+    const result = await runLiveReadinessScan("https://arabic.example/", undefined, usage);
+    assert.match(result.pageText, /مرحبًا بالعالم/);
+    assert.equal(usage.requestCount, 3);
+    assert.equal(usage.bytesFetched,
+      encoded.byteLength + new TextEncoder().encode(robots).byteLength + new TextEncoder().encode(sitemap).byteLength);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });
