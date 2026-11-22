@@ -186,6 +186,48 @@ function safeError(
   };
 }
 
+// A provider response can omit Content-Length or send more bytes than announced.
+// Bound the streamed payload before decoding JSON; provider usage/cost stays unknown
+// instead of being fabricated if the body is too large to trust.
+const MAX_PROVIDER_RESPONSE_BYTES = 1_048_576;
+
+class ProviderResponseTooLargeError extends Error {}
+
+async function readBoundedProviderJson(response: Response): Promise<OpenRouterResponse | null> {
+  const length = response.headers.get("content-length");
+  if (length && /^(0|[1-9]\\d*)$/.test(length) && Number(length) > MAX_PROVIDER_RESPONSE_BYTES) {
+    await response.body?.cancel().catch(() => undefined);
+    throw new ProviderResponseTooLargeError();
+  }
+  const reader = response.body?.getReader();
+  if (!reader) return null;
+  const decoder = new TextDecoder("utf-8", { fatal: true });
+  let totalBytes = 0;
+  let text = "";
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      totalBytes += value.byteLength;
+      if (totalBytes > MAX_PROVIDER_RESPONSE_BYTES) {
+        await reader.cancel().catch(() => undefined);
+        throw new ProviderResponseTooLargeError();
+      }
+      text += decoder.decode(value, { stream: true });
+    }
+    text += decoder.decode();
+  } finally {
+    reader.releaseLock();
+  }
+  try {
+    const parsed: unknown = JSON.parse(text);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? parsed as OpenRouterResponse : null;
+  } catch {
+    return null;
+  }
+}
+
 function emptyUsage(): EngineUsage {
   return {
     inputTokens: null,
@@ -289,9 +331,16 @@ export class OpenRouterEngineAdapter implements EngineAdapter {
             plugins: request.useSearch ? [{ id: "web", max_results: 1 }] : undefined,
           }),
         });
-        const body = (await response
-          .json()
-          .catch(() => null)) as OpenRouterResponse | null;
+        let body: OpenRouterResponse | null;
+        try {
+          body = await readBoundedProviderJson(response);
+        } catch (error) {
+          if (error instanceof ProviderResponseTooLargeError) {
+            lastError = safeError(response.status, null, "OpenRouter response exceeded the safety limit.", "response_too_large");
+            break;
+          }
+          throw error;
+        }
         lastBody = body;
         const attemptCost = actualProviderCostMicros(body?.usage?.cost);
         if (attemptCost !== null) { chargedCostMicros += attemptCost; costKnown = true; }
