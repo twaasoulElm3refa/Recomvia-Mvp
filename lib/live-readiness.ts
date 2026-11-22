@@ -175,11 +175,11 @@ function metaContent(html: string, target: string) {
 // A homepage can request de-indexing even when robots.txt allows crawling.
 // Check all global robots meta tags; named crawler directives are not site-wide.
 function hasGlobalNoindexMeta(html: string) {
-  return (html.match(/<meta\\b[^>]*>/gi) ?? []).some((tag) => {
+  return (html.match(/<meta\b[^>]*>/gi) ?? []).some((tag) => {
     const attrs = attributes(tag);
     if ((attrs.name || "").toLowerCase() !== "robots") return false;
     return decodeHtmlEntities(attrs.content || "").toLowerCase()
-      .split(/[\\s,]+/).some((directive) => directive === "noindex" || directive === "none");
+      .split(/[\s,]+/).some((directive) => directive === "noindex" || directive === "none");
   });
 }
 
