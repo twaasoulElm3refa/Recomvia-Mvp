@@ -43,7 +43,19 @@ function clean(value: unknown) {
 }
 
 function validEmail(value: string) {
-  return value.length <= 254 && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
+  // A syntactically plausible address must be deliverable as a single mailbox,
+  // not a comma-separated header value or a malformed DNS name.
+  if (value.length > 254 || /[\s,;<>()[\]:"\\]/u.test(value)) return false;
+  const at = value.indexOf("@");
+  if (at < 1 || at !== value.lastIndexOf("@")) return false;
+  const local = value.slice(0, at);
+  const labels = value.slice(at + 1).split(".");
+  if (local.length > 64 || local.startsWith(".") || local.endsWith(".") ||
+      local.includes("..") || labels.length < 2) return false;
+  return labels.every((label) =>
+    label.length <= 63 &&
+    /^[\p{L}\p{N}](?:[\p{L}\p{N}-]*[\p{L}\p{N}])?$/u.test(label),
+  );
 }
 
 // Ticket text is untrusted and displayed to support staff. Reject invisible
