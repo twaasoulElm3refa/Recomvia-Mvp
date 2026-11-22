@@ -28,11 +28,13 @@ export async function GET(request: NextRequest) {
     const tokenResponse = await fetch("https://oauth2.googleapis.com/token", {
       method: "POST",
       headers: { "content-type": "application/x-www-form-urlencoded" },
+      // A stalled identity provider must not hold the callback worker indefinitely.
+      signal: AbortSignal.timeout(10_000),
       body: new URLSearchParams({ code, client_id: clientId, client_secret: clientSecret, redirect_uri: getGoogleCallbackUrl(request), grant_type: "authorization_code", code_verifier: verifier }),
     });
     const token = (await tokenResponse.json()) as GoogleTokenResponse;
     if (!tokenResponse.ok || !token.access_token) return authError(appOrigin, "token_exchange_failed");
-    const profileResponse = await fetch("https://openidconnect.googleapis.com/v1/userinfo", { headers: { authorization: `Bearer ${token.access_token}` } });
+    const profileResponse = await fetch("https://openidconnect.googleapis.com/v1/userinfo", { headers: { authorization: `Bearer ${token.access_token}` }, signal: AbortSignal.timeout(10_000) });
     const profile = (await profileResponse.json()) as GoogleProfile;
     if (!profileResponse.ok || !profile.sub || !profile.email || profile.email_verified !== true) return authError(appOrigin, "unverified_google_account");
 
