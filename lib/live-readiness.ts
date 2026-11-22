@@ -175,7 +175,11 @@ function metaContent(html: string, target: string) {
 // A homepage can request de-indexing even when robots.txt allows crawling.
 // Check all global robots meta tags; named crawler directives are not site-wide.
 function hasGlobalNoindexMeta(html: string) {
-  return (html.match(/<meta\b[^>]*>/gi) ?? []).some((tag) => {
+  // Robots meta directives are meaningful only in the document head. Ignore
+  // lookalike tags in a body, HTML comment or embedded script example.
+  const head = html.match(/<head\b[^>]*>([\s\S]*?)<\/head>/i)?.[1]
+    ?.replace(/<!--[\s\S]*?-->|<script\b[\s\S]*?<\/script>/gi, "") ?? "";
+  return (head.match(/<meta\b[^>]*>/gi) ?? []).some((tag) => {
     const attrs = attributes(tag);
     if ((attrs.name || "").toLowerCase() !== "robots") return false;
     return decodeHtmlEntities(attrs.content || "").toLowerCase()
