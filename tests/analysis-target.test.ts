@@ -480,3 +480,34 @@ test("declared oversized robots responses are cancelled without losing homepage 
     globalThis.fetch = originalFetch;
   }
 });
+
+test("robots readiness scopes root Disallow to wildcard groups rather than unrelated bots", async () => {
+  const originalFetch = globalThis.fetch;
+  const html = '<!doctype html><html lang="en"><head><title>Fixture for robots policies</title></head><body><h1>Home</h1></body></html>';
+  const cases: Array<[string, boolean]> = [
+    ["User-agent: *\nAllow: /\n\nUser-agent: BadBot\nDisallow: /", true],
+    ["User-agent: BadBot\nDisallow: /\n\nUser-agent: *\nAllow: /", true],
+    ["User-agent: *\nDisallow: /private\n\nUser-agent: BadBot\nDisallow: /", true],
+    ["User-agent: *\nDisallow: / # site-wide block\n\nUser-agent: BadBot\nAllow: /", false],
+    ["User-agent: ExampleBot\nUser-agent: *\nDisallow: /", false],
+    ["User-agent: *\nDisallow: /\nAllow: /", true],
+    ["User-agent: *\nAllow: /\nUser-agent: BadBot\nDisallow: / # only the named bot", true],
+  ];
+  try {
+    for (const [robots, allowed] of cases) {
+      globalThis.fetch = async (input) => {
+        const path = new URL(String(input)).pathname;
+        if (path === "/robots.txt") return new Response(robots, { headers: { "content-type": "text/plain" } });
+        if (path === "/sitemap.xml") return new Response("<urlset></urlset>", { headers: { "content-type": "application/xml" } });
+        return new Response(html, { headers: { "content-type": "text/html" } });
+      };
+      const result = await runLiveReadinessScan("https://robots-fixture.example/");
+      const finding = result.findings.find((item) => item.code === "robots_policy");
+      assert.ok(finding);
+      assert.equal(finding.status, allowed ? "pass" : "fail", robots);
+      assert.equal(finding.awardedPoints, allowed ? 7 : 0, robots);
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
