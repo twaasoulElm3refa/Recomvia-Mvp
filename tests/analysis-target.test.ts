@@ -839,3 +839,51 @@ test("homepage meta robots noindex prevents a false indexing readiness pass", as
     globalThis.fetch = originalFetch;
   }
 });
+
+test("homepage X-Robots-Tag blocks a false indexing readiness pass without extra requests", async () => {
+  const originalFetch = globalThis.fetch;
+  const origin = "https://header-indexing.example";
+  const html = '<!doctype html><html lang="en"><head><title>Header indexation fixture</title></head><body><h1>Home</h1></body></html>';
+  const cases: Array<{ label: string; header: string; blocked: boolean }> = [
+    { label: "global noindex", header: "noindex", blocked: true },
+    { label: "global none", header: "none", blocked: true },
+    { label: "mixed case and multiple directives", header: "nofollow, NoIndex", blocked: true },
+    { label: "global directive before named crawler", header: "noindex, googlebot: index", blocked: true },
+    { label: "named Googlebot noindex only", header: "googlebot: noindex", blocked: false },
+    { label: "named bot has more than one directive", header: "googlebot: noindex, nofollow", blocked: false },
+    { label: "multiple named bots do not imply global noindex", header: "googlebot: noindex, bingbot: none", blocked: false },
+    { label: "ordinary index and follow", header: "index, follow", blocked: false },
+    { label: "noindex substring is not a directive", header: "noindexing", blocked: false },
+    { label: "none substring is not a directive", header: "nonetheless", blocked: false },
+    { label: "non-indexing directive", header: "noarchive", blocked: false },
+    { label: "empty header", header: "", blocked: false },
+  ];
+  try {
+    for (const entry of cases) {
+      const requested: string[] = [];
+      globalThis.fetch = async (input) => {
+        const url = String(input);
+        requested.push(url);
+        const path = new URL(url).pathname;
+        if (path === "/robots.txt") return new Response("User-agent: *\\nAllow: /");
+        if (path === "/sitemap.xml") return new Response("<urlset></urlset>");
+        assert.equal(path, "/", entry.label);
+        return new Response(html, {
+          headers: { "Content-Type": "text/html", "X-Robots-Tag": entry.header },
+        });
+      };
+      const usage = { requestCount: 0, bytesFetched: 0 };
+      const result = await runLiveReadinessScan(origin + "/", undefined, usage);
+      const finding = result.findings.find((item) => item.code === "robots_policy");
+      assert.ok(finding, entry.label);
+      assert.equal(finding.status, entry.blocked ? "fail" : "pass", entry.label);
+      assert.equal(finding.awardedPoints, entry.blocked ? 0 : 7, entry.label);
+      assert.equal(finding.sourceUrl, entry.blocked ? origin + "/" : origin + "/robots.txt", entry.label);
+      if (entry.blocked) assert.match(finding.evidence, /X-Robots-Tag requests noindex\\/none/, entry.label);
+      assert.deepEqual(requested, [origin + "/", origin + "/robots.txt", origin + "/sitemap.xml"], entry.label);
+      assert.equal(usage.requestCount, 3, entry.label + ": no extra network requests");
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
