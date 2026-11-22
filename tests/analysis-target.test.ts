@@ -704,3 +704,91 @@ test("sitemap readiness rejects embedded tags, truncated XML and error pages", a
     globalThis.fetch = originalFetch;
   }
 });
+
+
+test("robots readiness rejects HTML fallbacks and ignores hints from failed policies", async () => {
+  const originalFetch = globalThis.fetch;
+  const homepage = '<!doctype html><html lang="en"><head><title>Robots fallback fixture</title></head><body><h1>Home</h1></body></html>';
+  const cases: Array<{
+    label: string;
+    robots: string;
+    robotsPass: boolean;
+    sitemapPath: string;
+    status?: number;
+    contentType?: string;
+  }> = [
+    {
+      label: "plain robots with same-origin sitemap",
+      robots: "User-agent: *\nAllow: /\nSitemap: /custom.xml",
+      robotsPass: true, sitemapPath: "/custom.xml",
+    },
+    {
+      label: "valid empty robots resource",
+      robots: "",
+      robotsPass: true, sitemapPath: "/sitemap.xml",
+    },
+    {
+      label: "SPA HTML fallback with spoofed sitemap hint",
+      robots: "<!doctype html>\n<html><body>not robots\nSitemap: /spoof.xml\n</body></html>",
+      robotsPass: false, sitemapPath: "/sitemap.xml",
+      contentType: "text/html",
+    },
+    {
+      label: "HTML response mislabeled as plain text",
+      robots: "  <html><body>\nSitemap: /spoof.xml\n</body></html>",
+      robotsPass: false, sitemapPath: "/sitemap.xml",
+      contentType: "text/plain",
+    },
+    {
+      label: "HTML fallback with a UTF-8 BOM",
+      robots: "\uFEFF\n<body>Missing robots.txt</body>",
+      robotsPass: false, sitemapPath: "/sitemap.xml",
+    },
+    {
+      label: "404 robots body with a misleading directive",
+      robots: "User-agent: *\nAllow: /\nSitemap: /spoof.xml",
+      robotsPass: false, sitemapPath: "/sitemap.xml", status: 404,
+    },
+    {
+      label: "a real plain-text robots body remains valid despite HTML MIME",
+      robots: "User-agent: *\nAllow: /\nSitemap: /custom.xml",
+      robotsPass: true, sitemapPath: "/custom.xml", contentType: "text/html",
+    },
+    {
+      label: "wildcard disallow remains blocked",
+      robots: "User-agent: *\nDisallow: /\nSitemap: /custom.xml",
+      robotsPass: false, sitemapPath: "/custom.xml",
+    },
+  ];
+  try {
+    for (const entry of cases) {
+      const requests: string[] = [];
+      globalThis.fetch = async (input) => {
+        const pathname = new URL(String(input)).pathname;
+        requests.push(pathname);
+        if (pathname === "/robots.txt") {
+          return new Response(entry.robots, {
+            status: entry.status ?? 200,
+            headers: { "Content-Type": entry.contentType ?? "text/plain" },
+          });
+        }
+        if (pathname === entry.sitemapPath) {
+          return new Response("<urlset></urlset>", { headers: { "Content-Type": "application/xml" } });
+        }
+        assert.equal(pathname, "/", entry.label);
+        return new Response(homepage, { headers: { "Content-Type": "text/html" } });
+      };
+      const usage = { requestCount: 0, bytesFetched: 0 };
+      const result = await runLiveReadinessScan("https://robots-fallback.example/", undefined, usage);
+      const finding = result.findings.find((item) => item.code === "robots_policy");
+      assert.ok(finding, entry.label);
+      assert.equal(finding.status, entry.robotsPass ? "pass" : "fail", entry.label);
+      assert.equal(finding.awardedPoints, entry.robotsPass ? 7 : 0, entry.label);
+      assert.deepEqual(requests, ["/", "/robots.txt", entry.sitemapPath], entry.label);
+      assert.equal(usage.requestCount, 3, entry.label + ": no extra network calls");
+      assert.equal(result.findings.find((item) => item.code === "xml_sitemap")?.status, "pass", entry.label);
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});

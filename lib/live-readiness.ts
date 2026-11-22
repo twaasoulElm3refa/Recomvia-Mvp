@@ -274,7 +274,12 @@ export async function runLiveReadinessScan(input: string, requiredOrigin?: strin
   // A robots.txt redirect or Sitemap directive must never trigger a request
   // to a third-party host, even when the primary page allows redirects.
   try { robots = await fetchText(robotsUrl, MAX_AUX_BYTES, "text/plain,*/*;q=0.1", origin, usage); } catch { robots = null; }
-  const sitemapHint = robots?.text.match(/^\s*sitemap:\s*(\S+)/im)?.[1];
+  // Some site routers return their HTML homepage (HTTP 200) for missing
+  // robots.txt files. Neither that page nor an HTTP error is a usable policy
+  // or a trustworthy source for sitemap hints.
+  const robotsIsHtml = Boolean(robots && /^\uFEFF?\s*(?:<!doctype\s+html\b|<html\b|<head\b|<body\b)/i.test(robots.text));
+  const robotsReadable = Boolean(robots && robots.status >= 200 && robots.status < 300 && !robotsIsHtml);
+  const sitemapHint = robotsReadable ? robots?.text.match(/^\s*sitemap:\s*(\S+)/im)?.[1] : undefined;
   let sitemapUrl = new URL("/sitemap.xml", origin);
   if (sitemapHint) {
     try {
@@ -325,8 +330,8 @@ export async function runLiveReadinessScan(input: string, requiredOrigin?: strin
   const hasFaq = hasJsonLdType("FAQPage");
   const hasQuestionHeadings = /<h[2-4]\b[^>]*>[^<]{0,120}(?:what|how|why|when|where|who|can|does|is|are|ما|ماذا|كيف|لماذا|هل|متى|أين|اين)[^<]*<\/h[2-4]>/i.test(html);
   const words = text ? text.split(/\s+/).length : 0;
-  const globallyBlocked = robots ? hasWildcardRootDisallow(robots.text) : false;
-  const robotsHealthy = Boolean(robots && robots.status >= 200 && robots.status < 300 && !globallyBlocked);
+  const globallyBlocked = robotsReadable && robots ? hasWildcardRootDisallow(robots.text) : false;
+  const robotsHealthy = robotsReadable && !globallyBlocked;
   const sitemapHealthy = Boolean(sitemap && sitemap.status >= 200 && sitemap.status < 300 && hasSitemapRootDocument(sitemap.text));
   const hasIdentityLink = /href\s*=\s*["'][^"']*(?:\/about(?:[-_/]|["'#?])|\/contact(?:[-_/]|["'#?])|\/company(?:[-_/]|["'#?])|عن-?ا|اتصل-?بنا)/i.test(html);
   const hasOpenGraph = Boolean(metaContent(html, "og:title") && metaContent(html, "og:description"));
@@ -350,7 +355,7 @@ export async function runLiveReadinessScan(input: string, requiredOrigin?: strin
   add({ code: "answer_structure", category: "Content readiness", severity: "medium", status: answerReady ? "pass" : "fail", title: "Question-and-answer structure is discoverable", explanation: "Direct question headings and self-contained answers improve answer extraction for relevant queries.", evidence: hasFaq ? "FAQPage structured data found." : hasQuestionHeadings ? "Question-led headings found in visible HTML." : "No FAQPage schema or question-led headings were detected.", sourceUrl: page.url, weight: 8, awardedPoints: answerReady ? 8 : 0 });
   const contentPoints = words >= 300 ? 8 : words >= 100 ? 4 : 0;
   add({ code: "content_depth", category: "Content readiness", severity: "medium", status: contentPoints === 8 ? "pass" : contentPoints ? "partial" : "fail", title: "The page exposes enough readable context", explanation: "Thin pages often lack the facts and distinctions needed for confident understanding.", evidence: `Approximately ${words.toLocaleString("en-US")} visible words detected.`, sourceUrl: page.url, weight: 8, awardedPoints: contentPoints });
-  add({ code: "robots_policy", category: "Technical AEO", severity: "critical", status: robotsHealthy ? "pass" : "fail", title: "Crawler policy is accessible and permits discovery", explanation: "A readable robots policy should not block the entire site from general crawlers.", evidence: robots ? `HTTP ${robots.status}${globallyBlocked ? " · broad Disallow: / detected" : ""}` : "robots.txt could not be retrieved.", sourceUrl: robotsUrl.toString(), weight: 7, awardedPoints: robotsHealthy ? 7 : 0 });
+  add({ code: "robots_policy", category: "Technical AEO", severity: "critical", status: robotsHealthy ? "pass" : "fail", title: "Crawler policy is accessible and permits discovery", explanation: "A readable robots policy should not block the entire site from general crawlers.", evidence: robots ? `HTTP ${robots.status}${robotsIsHtml ? " · HTML fallback is not robots.txt" : globallyBlocked ? " · broad Disallow: / detected" : ""}` : "robots.txt could not be retrieved.", sourceUrl: robotsUrl.toString(), weight: 7, awardedPoints: robotsHealthy ? 7 : 0 });
   add({ code: "xml_sitemap", category: "Technical AEO", severity: "high", status: sitemapHealthy ? "pass" : "fail", title: "XML sitemap is available", explanation: "A valid sitemap gives crawlers a reliable inventory of canonical content URLs.", evidence: sitemap ? `HTTP ${sitemap.status} · ${sitemapHealthy ? "sitemap root document detected" : "no complete sitemap root document detected"}` : "A sitemap could not be retrieved.", sourceUrl: sitemapUrl.toString(), weight: 7, awardedPoints: sitemapHealthy ? 7 : 0 });
   add({ code: "identity_paths", category: "Authority & entity", severity: "medium", status: hasIdentityLink ? "pass" : "fail", title: "Identity and contact paths are visible", explanation: "Clear company and contact paths help users and systems verify who is responsible for the site.", evidence: hasIdentityLink ? "An About, Company, or Contact path was found." : "No clear About, Company, or Contact path was detected in homepage links.", sourceUrl: page.url, weight: 6, awardedPoints: hasIdentityLink ? 6 : 0 });
   add({ code: "open_graph", category: "Content readiness", severity: "low", status: hasOpenGraph ? "pass" : "fail", title: "Share metadata describes the page", explanation: "Open Graph metadata provides another consistent summary when the page is shared or referenced.", evidence: hasOpenGraph ? "og:title and og:description were found." : "og:title or og:description is missing.", sourceUrl: page.url, weight: 6, awardedPoints: hasOpenGraph ? 6 : 0 });
@@ -366,7 +371,7 @@ export async function runLiveReadinessScan(input: string, requiredOrigin?: strin
   const issueRows = findings.filter((finding) => finding.status !== "pass");
   const requestCount = usage.requestCount;
   const bytesFetched = usage.bytesFetched;
-  const confidence = Math.min(92, 72 + (robots ? 5 : 0) + (sitemap ? 5 : 0) + (parsedJsonLd.length ? 4 : 0) + (page.status === 200 ? 4 : 0));
+  const confidence = Math.min(92, 72 + (robotsReadable ? 5 : 0) + (sitemap ? 5 : 0) + (parsedJsonLd.length ? 4 : 0) + (page.status === 200 ? 4 : 0));
   const discoveredContext = discoverWebsiteContext({
     sourceUrl: source.toString(), finalUrl: page.url, title, description, htmlLang, html, visibleText: text,
   });
