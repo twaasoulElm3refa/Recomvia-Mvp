@@ -76,9 +76,9 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
   } catch {
     return json({ error: "Invalid request body." }, 400);
   }
-  // Reject invisible control codes and bidi overrides in replies shown to customers.
+  // Reject invisible control codes, direction marks and bidi overrides in replies shown to customers.
   // Keep normal tabs and line breaks for readable Arabic and English responses.
-  const unsafeReply = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f\u202a-\u202e\u2066-\u2069]/;
+  const unsafeReply = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f\u061c\u200e-\u200f\u202a-\u202e\u2066-\u2069]/;
   if (reply.length < 5 || reply.length > 4000 || unsafeReply.test(reply)) {
     return json({ error: "Reply must be between 5 and 4,000 characters." }, 400);
   }
