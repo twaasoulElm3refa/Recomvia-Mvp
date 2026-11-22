@@ -4,8 +4,8 @@ import { OAUTH_STATE_COOKIE, OAUTH_VERIFIER_COOKIE, SESSION_COOKIE, SESSION_MAX_
 export const dynamic = "force-dynamic";
 export const runtime = "edge";
 
-type GoogleTokenResponse = { access_token?: string };
-type GoogleProfile = { sub?: string; email?: string; email_verified?: boolean; name?: string };
+type GoogleTokenResponse = { access_token?: unknown };
+type GoogleProfile = { sub?: unknown; email?: unknown; email_verified?: unknown; name?: unknown };
 
 export async function GET(request: NextRequest) {
   const appOrigin = getAppOrigin(request);
@@ -33,15 +33,30 @@ export async function GET(request: NextRequest) {
       body: new URLSearchParams({ code, client_id: clientId, client_secret: clientSecret, redirect_uri: getGoogleCallbackUrl(request), grant_type: "authorization_code", code_verifier: verifier }),
     });
     const token = (await tokenResponse.json()) as GoogleTokenResponse;
-    if (!tokenResponse.ok || !token.access_token) return authError(appOrigin, "token_exchange_failed");
-    const profileResponse = await fetch("https://openidconnect.googleapis.com/v1/userinfo", { headers: { authorization: `Bearer ${token.access_token}` }, signal: AbortSignal.timeout(10_000) });
+    // Reject malformed tokens before constructing an outbound Authorization header.
+    const accessToken = token.access_token;
+    if (!tokenResponse.ok || typeof accessToken !== "string" ||
+        accessToken.length < 1 || accessToken.length > 4_096 ||
+        !/^[\x21-\x7e]+$/.test(accessToken)) return authError(appOrigin, "token_exchange_failed");
+    const profileResponse = await fetch("https://openidconnect.googleapis.com/v1/userinfo", { headers: { authorization: `Bearer ${accessToken}` }, signal: AbortSignal.timeout(10_000) });
     const profile = (await profileResponse.json()) as GoogleProfile;
-    if (!profileResponse.ok || !profile.sub || !profile.email || profile.email_verified !== true) return authError(appOrigin, "unverified_google_account");
+    // Bound verified identity claims before signing a session or displaying them.
+    // Regular Arabic and Latin display names remain valid; invisible controls do not.
+    const { sub, email, name } = profile;
+    const unsafeText = /[\u0000-\u001f\u007f\u202a-\u202e\u2066-\u2069]/;
+    if (!profileResponse.ok ||
+        typeof sub !== "string" || !/^[A-Za-z0-9_-]{1,255}$/.test(sub) ||
+        typeof email !== "string" || email.length > 254 ||
+        !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || unsafeText.test(email) ||
+        profile.email_verified !== true ||
+        (name != null && (typeof name !== "string" || name.length > 200 || unsafeText.test(name)))) {
+      return authError(appOrigin, "unverified_google_account");
+    }
 
     const response = NextResponse.redirect(`${appOrigin}/dashboard`);
     // Session-bearing authentication redirects must never be cached.
     response.headers.set("Cache-Control", "no-store");
-    response.cookies.set(SESSION_COOKIE, await createSession({ sub: profile.sub, email: profile.email.toLowerCase(), name: profile.name?.trim() || null }), {
+    response.cookies.set(SESSION_COOKIE, await createSession({ sub, email: email.toLowerCase(), name: typeof name === "string" ? name.trim() || null : null }), {
       httpOnly: true, secure: true, sameSite: "lax", path: "/", maxAge: SESSION_MAX_AGE,
     });
     clearOAuthCookies(response);
