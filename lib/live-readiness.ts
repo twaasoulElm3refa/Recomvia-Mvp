@@ -248,12 +248,20 @@ export async function runLiveReadinessScan(input: string, requiredOrigin?: strin
   const origin = finalUrl.origin;
   const robotsUrl = new URL("/robots.txt", origin);
   let robots: Awaited<ReturnType<typeof fetchText>> | null = null;
-  try { robots = await fetchText(robotsUrl, MAX_AUX_BYTES, "text/plain,*/*;q=0.1", requiredOrigin, usage); } catch { robots = null; }
+  // Auxiliary discovery must remain on the crawled site's final origin.
+  // A robots.txt redirect or Sitemap directive must never trigger a request
+  // to a third-party host, even when the primary page allows redirects.
+  try { robots = await fetchText(robotsUrl, MAX_AUX_BYTES, "text/plain,*/*;q=0.1", origin, usage); } catch { robots = null; }
   const sitemapHint = robots?.text.match(/^\s*sitemap:\s*(\S+)/im)?.[1];
-  let sitemapUrl: URL;
-  try { sitemapUrl = sitemapHint ? new URL(sitemapHint, origin) : new URL("/sitemap.xml", origin); } catch { sitemapUrl = new URL("/sitemap.xml", origin); }
+  let sitemapUrl = new URL("/sitemap.xml", origin);
+  if (sitemapHint) {
+    try {
+      const hinted = new URL(sitemapHint, origin);
+      if (hinted.origin === origin) sitemapUrl = hinted;
+    } catch { /* Fall back to the same-origin default for an invalid hint. */ }
+  }
   let sitemap: Awaited<ReturnType<typeof fetchText>> | null = null;
-  try { sitemap = await fetchText(sitemapUrl, MAX_AUX_BYTES, "application/xml,text/xml,text/plain,*/*;q=0.1", requiredOrigin, usage); } catch { sitemap = null; }
+  try { sitemap = await fetchText(sitemapUrl, MAX_AUX_BYTES, "application/xml,text/xml,text/plain,*/*;q=0.1", origin, usage); } catch { sitemap = null; }
 
   const html = page.text;
   const text = plainText(html);
