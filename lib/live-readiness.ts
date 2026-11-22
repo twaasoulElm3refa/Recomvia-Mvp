@@ -108,7 +108,12 @@ async function fetchText(startUrl: URL, maxBytes: number, accept: string, requir
         continue;
       }
       const announcedLength = Number(response.headers.get("content-length") || "0");
-      if (announcedLength > maxBytes) throw new Error("The response is larger than the scan safety limit.");
+      if (announcedLength > maxBytes) {
+        // A rejected Content-Length still has a live response body. Stop it
+        // before failing so oversized sites cannot keep downloads active.
+        await response.body?.cancel().catch(() => undefined);
+        throw new Error("The response is larger than the scan safety limit.");
+      }
       // Content-Length may be absent or false. Never buffer an unbounded crawl
       // response: enforce the byte cap while reading, then stop the remote stream.
       const reader = response.body?.getReader();

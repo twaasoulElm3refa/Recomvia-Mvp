@@ -423,3 +423,60 @@ test("malformed redirect without Location also releases its unused body", async 
     globalThis.fetch = originalFetch;
   }
 });
+
+test("declared oversized homepage responses cancel their body before a download starts", async () => {
+  const originalFetch = globalThis.fetch;
+  let cancelled = false;
+  let produced = 0;
+  const usage = { requestCount: 0, bytesFetched: 0 };
+  globalThis.fetch = async () => new Response(new ReadableStream<Uint8Array>({
+    pull(controller) {
+      produced++;
+      controller.enqueue(new Uint8Array(64_000));
+    },
+    cancel() { cancelled = true; },
+  }), { headers: { "Content-Type": "text/html", "Content-Length": "1500001" } });
+  try {
+    await assert.rejects(
+      runLiveReadinessScan("https://oversized.example/", undefined, usage),
+      /larger than the scan safety limit/,
+    );
+    assert.equal(cancelled, true, "discarded response must release its stream");
+    assert.ok(produced <= 2, "rejected payload must never be downloaded");
+    assert.deepEqual(usage, { requestCount: 1, bytesFetched: 0 });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("declared oversized robots responses are cancelled without losing homepage evidence", async () => {
+  const originalFetch = globalThis.fetch;
+  const html = '<!doctype html><html lang="ar"><head><title>صفحة عربية</title></head><body><h1>مرحبًا</h1></body></html>';
+  const sitemap = "<urlset></urlset>";
+  let cancelled = false;
+  const usage = { requestCount: 0, bytesFetched: 0 };
+  globalThis.fetch = async (input) => {
+    const url = String(input);
+    if (url.endsWith("/robots.txt")) {
+      return new Response(new ReadableStream<Uint8Array>({
+        start(controller) { controller.enqueue(new Uint8Array(8)); },
+        cancel() { cancelled = true; },
+      }), { headers: { "Content-Length": "350001" } });
+    }
+    if (url.endsWith("/sitemap.xml")) return new Response(sitemap);
+    if (url === "https://oversized-robots.example/") return new Response(html, { headers: { "Content-Type": "text/html" } });
+    throw new Error("Unexpected destination: " + url);
+  };
+  try {
+    const result = await runLiveReadinessScan("https://oversized-robots.example/", undefined, usage);
+    assert.equal(cancelled, true, "rejected robots payload must stop downloading");
+    assert.equal(result.findings.find((item) => item.code === "robots_policy")?.status, "fail");
+    assert.match(result.pageText, /مرحبًا/);
+    assert.deepEqual(usage, {
+      requestCount: 3,
+      bytesFetched: new TextEncoder().encode(html + sitemap).byteLength,
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
