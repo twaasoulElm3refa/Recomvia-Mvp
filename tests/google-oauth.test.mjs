@@ -172,7 +172,11 @@ test("signout returns to the request origin", async () => {
   const origin = "https://recomvia-staging.recomvia.workers.dev";
   const response = await signout.GET(request(`${origin}/auth/signout`));
   assert.equal(response.location, origin);
-  assert.equal(response.cookies.get(auth.SESSION_COOKIE).options.maxAge, 0);
+  assert.equal(response.headers.get("Cache-Control"), "private, no-store, max-age=0");
+  assert.equal(response.headers.get("X-Content-Type-Options"), "nosniff");
+  assert.deepEqual(response.cookies.get(auth.SESSION_COOKIE).options, {
+    httpOnly: true, secure: true, sameSite: "lax", path: "/", maxAge: 0,
+  });
 });
 
 test("standalone login entry uses Google without accepting identity headers", async () => {
@@ -201,7 +205,12 @@ test("Sites login preserves the authenticated platform user and redirects safely
     });
     assert.equal(auth.signInPath("//outside.example"), "/signin-with-chatgpt?return_to=%2F");
     assert.equal((await authStart.GET(request(`${origin}/auth/start`))).location, `${origin}/signin-with-chatgpt?return_to=%2Fdashboard`);
-    assert.equal((await signout.GET(request(`${origin}/auth/signout`))).location, `${origin}/signout-with-chatgpt?return_to=%2F`);
+    const chatgptSignout = await signout.GET(request(`${origin}/auth/signout`));
+    assert.equal(chatgptSignout.location, `${origin}/signout-with-chatgpt?return_to=%2F`);
+    assert.equal(chatgptSignout.headers.get("Cache-Control"), "private, no-store, max-age=0");
+    assert.equal(chatgptSignout.headers.get("X-Content-Type-Options"), "nosniff");
+    assert.equal(chatgptSignout.cookies.get(auth.SESSION_COOKIE), undefined,
+      "The hosted ChatGPT identity provider, not the standalone cookie, handles its own sign-out");
   } finally {
     credentials.AUTH_PROVIDER = "google";
     mockIdentityHeaders = new Headers();
