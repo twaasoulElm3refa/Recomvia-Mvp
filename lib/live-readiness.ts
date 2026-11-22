@@ -190,6 +190,34 @@ function validatedCanonicalUrl(html: string, pageUrl: string) {
   }
 }
 
+// A Disallow in a named crawler's group must not be attributed to the
+// wildcard group. Keep consecutive User-agent lines in the same group and
+// let an equally specific Allow: / take precedence over Disallow: /.
+function hasWildcardRootDisallow(robotsText: string) {
+  let agents: string[] = [];
+  let hasRule = false;
+  let rootDisallow = false;
+  let rootAllow = false;
+  for (const rawLine of robotsText.split(/\r?\n/)) {
+    const line = rawLine.replace(/#.*/, "").trim();
+    const directive = line.match(/^([a-z-]+)\s*:\s*(.*?)\s*$/i);
+    if (!directive) continue;
+    const key = directive[1].toLowerCase();
+    const value = directive[2].trim().toLowerCase();
+    if (key === "user-agent") {
+      if (hasRule) { agents = []; hasRule = false; }
+      if (value) agents.push(value);
+      continue;
+    }
+    if (key !== "allow" && key !== "disallow") continue;
+    hasRule = true;
+    if (!agents.includes("*") || value !== "/") continue;
+    if (key === "allow") rootAllow = true;
+    else rootDisallow = true;
+  }
+  return rootDisallow && !rootAllow;
+}
+
 function plainText(html: string) {
   return decodeHtmlEntities(
     html
@@ -240,7 +268,7 @@ export async function runLiveReadinessScan(input: string, requiredOrigin?: strin
   const hasFaq = /["']@type["']\s*:\s*["']FAQPage["']/i.test(jsonLdText);
   const hasQuestionHeadings = /<h[2-4]\b[^>]*>[^<]{0,120}(?:what|how|why|when|where|who|can|does|is|are|ما|ماذا|كيف|لماذا|هل|متى|أين|اين)[^<]*<\/h[2-4]>/i.test(html);
   const words = text ? text.split(/\s+/).length : 0;
-  const globallyBlocked = Boolean(robots?.text.match(/user-agent:\s*\*[\s\S]{0,500}?disallow:\s*\/\s*(?:\r?\n|$)/i));
+  const globallyBlocked = robots ? hasWildcardRootDisallow(robots.text) : false;
   const robotsHealthy = Boolean(robots && robots.status >= 200 && robots.status < 300 && !globallyBlocked);
   const sitemapHealthy = Boolean(sitemap && sitemap.status >= 200 && sitemap.status < 300 && /<(?:urlset|sitemapindex)\b/i.test(sitemap.text));
   const hasIdentityLink = /href\s*=\s*["'][^"']*(?:\/about(?:[-_/]|["'#?])|\/contact(?:[-_/]|["'#?])|\/company(?:[-_/]|["'#?])|عن-?ا|اتصل-?بنا)/i.test(html);
