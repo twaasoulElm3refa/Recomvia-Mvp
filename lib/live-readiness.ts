@@ -210,33 +210,36 @@ function metaContent(html: string, target: string) {
   return singleContent ?? "";
 }
 
-// A homepage can request de-indexing even when robots.txt allows crawling.
-// Check all global robots meta tags; named crawler directives are not site-wide.
-function hasGlobalNoindexMeta(html: string) {
+// A crawler-specific noindex is a real indexing block for that crawler, even
+// when generic robots directives allow everyone else to index the page.
+// Check only the bots whose indexing readiness this score claims to measure.
+const INDEXING_CRAWLER_NAMES = new Set(["robots", "googlebot", "bingbot", "recomviabot"]);
+
+function hasRelevantNoindexMeta(html: string) {
   // Robots meta directives are meaningful only in the document head. Ignore
   // lookalike tags in a body, HTML comment or embedded script example.
   const head = activeHeadHtml(html);
   return (head.match(/<meta\b[^>]*>/gi) ?? []).some((tag) => {
     const attrs = attributes(tag);
-    if ((attrs.name || "").toLowerCase() !== "robots") return false;
+    if (!INDEXING_CRAWLER_NAMES.has((attrs.name || "").trim().toLowerCase())) return false;
     return decodeHtmlEntities(attrs.content || "").toLowerCase()
       .split(/[\s,]+/).some((directive) => directive === "noindex" || directive === "none");
   });
 }
 
-// X-Robots-Tag can block indexing even without HTML meta directives. Header
-// rules prefixed with a crawler name (for example googlebot:) are not global;
-// subsequent comma-separated directives in that rule remain crawler-specific.
-function hasGlobalNoindexHeader(header: string) {
-  let crawlerSpecific = false;
+// X-Robots-Tag directives apply globally until a crawler prefix appears.
+// Subsequent comma-separated directives inherit that prefix. A noindex for
+// any major indexing bot or RecomviaBot must not receive crawler-ready points.
+function hasRelevantNoindexHeader(header: string) {
+  let crawler = "robots";
   for (const part of header.split(",")) {
     let directive = part.trim().toLowerCase();
-    const scoped = directive.match(/^[a-z][a-z0-9_-]*\s*:\s*(.*)$/);
+    const scoped = directive.match(/^([a-z][a-z0-9_-]*)\s*:\s*(.*)$/);
     if (scoped) {
-      crawlerSpecific = true;
-      directive = scoped[1].trim();
+      crawler = scoped[1];
+      directive = scoped[2].trim();
     }
-    if (!crawlerSpecific && /^(?:noindex|none)$/.test(directive)) return true;
+    if (INDEXING_CRAWLER_NAMES.has(crawler) && /^(?:noindex|none)$/.test(directive)) return true;
   }
   return false;
 }
@@ -518,8 +521,8 @@ export async function runLiveReadinessScan(input: string, requiredOrigin?: strin
   const hasQuestionHeadings = /<h[2-4]\b[^>]*>[^<]{0,120}(?:what|how|why|when|where|who|can|does|is|are|ما|ماذا|كيف|لماذا|هل|متى|أين|اين)[^<]*<\/h[2-4]>/i.test(visibleBody);
   const words = text ? text.split(/\s+/).length : 0;
   const globallyBlocked = robotsReadable && robots ? hasRelevantCrawlerPathDisallow(robots.text, finalUrl.pathname + finalUrl.search) : false;
-  const metaNoindex = hasGlobalNoindexMeta(html);
-  const headerNoindex = hasGlobalNoindexHeader(page.robotsTag);
+  const metaNoindex = hasRelevantNoindexMeta(html);
+  const headerNoindex = hasRelevantNoindexHeader(page.robotsTag);
   const robotsHealthy = robotsReadable && !globallyBlocked && !metaNoindex && !headerNoindex;
   // Only a complete successful sitemap response can establish discovery readiness.
   const sitemapHealthy = Boolean(sitemap && sitemap.status === 200 && hasSitemapRootDocument(sitemap.text));
