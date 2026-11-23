@@ -399,7 +399,8 @@ export async function runLiveReadinessScan(input: string, requiredOrigin?: strin
   // robots.txt files. Neither that page nor an HTTP error is a usable policy
   // or a trustworthy source for sitemap hints.
   const robotsIsHtml = Boolean(robots && /^\uFEFF?\s*(?:<!doctype\s+html\b|<html\b|<head\b|<body\b)/i.test(robots.text));
-  const robotsReadable = Boolean(robots && robots.status >= 200 && robots.status < 300 && !robotsIsHtml);
+  // A partial/empty or asynchronous 2xx response cannot establish a complete robots policy.
+  const robotsReadable = Boolean(robots && robots.status === 200 && !robotsIsHtml);
   const sitemapHint = robotsReadable ? robots?.text.match(/^\s*sitemap:\s*(\S+)/im)?.[1] : undefined;
   let sitemapUrl = new URL("/sitemap.xml", origin);
   if (sitemapHint) {
@@ -464,7 +465,8 @@ export async function runLiveReadinessScan(input: string, requiredOrigin?: strin
   const metaNoindex = hasGlobalNoindexMeta(html);
   const headerNoindex = hasGlobalNoindexHeader(page.robotsTag);
   const robotsHealthy = robotsReadable && !globallyBlocked && !metaNoindex && !headerNoindex;
-  const sitemapHealthy = Boolean(sitemap && sitemap.status >= 200 && sitemap.status < 300 && hasSitemapRootDocument(sitemap.text));
+  // Only a complete successful sitemap response can establish discovery readiness.
+  const sitemapHealthy = Boolean(sitemap && sitemap.status === 200 && hasSitemapRootDocument(sitemap.text));
   // Identity signals and extra-page crawl candidates must come from actual
   // body anchors, not commented-out links, scripts, templates or page examples.
   const bodyAnchors = visibleBody.match(/<a\b[^>]*>/gi) ?? [];

@@ -1186,3 +1186,54 @@ test("robots readiness evaluates the scanned URL path, with specific Allow rules
     globalThis.fetch = originalFetch;
   }
 });
+
+test("partial auxiliary documents cannot earn robots or sitemap readiness points", async () => {
+  const originalFetch = globalThis.fetch;
+  const origin = "https://partial-auxiliary.example";
+  const homepage = '<!doctype html><html lang="en"><head><title>Auxiliary response fixture</title></head><body><h1>Welcome</h1></body></html>';
+  const robots = "User-agent: *\nAllow: /";
+  const sitemap = "<urlset><url><loc>https://partial-auxiliary.example/</loc></url></urlset>";
+  const cases = [
+    { label: "complete documents", robotsStatus: 200, sitemapStatus: 200, robotsPass: true, sitemapPass: true },
+    { label: "partial robots policy", robotsStatus: 206, sitemapStatus: 200, robotsPass: false, sitemapPass: true },
+    { label: "empty no-content robots policy", robotsStatus: 204, sitemapStatus: 200, robotsPass: false, sitemapPass: true },
+    { label: "partial sitemap with a syntactically complete XML fragment", robotsStatus: 200, sitemapStatus: 206, robotsPass: true, sitemapPass: false },
+    { label: "asynchronous sitemap is not a completed document", robotsStatus: 200, sitemapStatus: 202, robotsPass: true, sitemapPass: false },
+    { label: "both auxiliary documents partial", robotsStatus: 206, sitemapStatus: 206, robotsPass: false, sitemapPass: false },
+  ];
+  try {
+    for (const entry of cases) {
+      const requested: string[] = [];
+      globalThis.fetch = async (input) => {
+        const url = new URL(String(input));
+        requested.push(url.pathname);
+        if (url.pathname === "/robots.txt") {
+          return new Response(entry.robotsStatus === 204 ? null : robots, {
+            status: entry.robotsStatus,
+            headers: { "Content-Type": "text/plain" },
+          });
+        }
+        if (url.pathname === "/sitemap.xml") {
+          return new Response(sitemap, {
+            status: entry.sitemapStatus,
+            headers: { "Content-Type": "application/xml" },
+          });
+        }
+        assert.equal(url.pathname, "/", entry.label);
+        return new Response(homepage, { headers: { "Content-Type": "text/html" } });
+      };
+      const usage = { requestCount: 0, bytesFetched: 0 };
+      const result = await runLiveReadinessScan(origin + "/", undefined, usage);
+      const robotsFinding = result.findings.find((finding) => finding.code === "robots_policy");
+      const sitemapFinding = result.findings.find((finding) => finding.code === "xml_sitemap");
+      assert.equal(robotsFinding?.status, entry.robotsPass ? "pass" : "fail", entry.label);
+      assert.equal(robotsFinding?.awardedPoints, entry.robotsPass ? 7 : 0, entry.label);
+      assert.equal(sitemapFinding?.status, entry.sitemapPass ? "pass" : "fail", entry.label);
+      assert.equal(sitemapFinding?.awardedPoints, entry.sitemapPass ? 7 : 0, entry.label);
+      assert.deepEqual(requested, ["/", "/robots.txt", "/sitemap.xml"], entry.label);
+      assert.equal(usage.requestCount, 3, entry.label + ": no extra requests");
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
