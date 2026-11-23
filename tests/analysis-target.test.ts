@@ -659,15 +659,15 @@ test("robots readiness rejects named search and scan crawler blocks without misr
   const origin = "https://named-robots.example";
   const html = '<!doctype html><html lang="en"><head><title>Named robots fixture</title></head><body><h1>Home</h1></body></html>';
   const cases: Array<{ label: string; path: string; policy: string; blocked: boolean }> = [
-    { label: "Googlebot blocked despite wildcard allow", path: "/", policy: "User-agent: *\\nAllow: /\\n\\nUser-agent: Googlebot\\nDisallow: /", blocked: true },
-    { label: "Bingbot blocked despite wildcard allow", path: "/", policy: "User-agent: Bingbot\\nDisallow: /\\n\\nUser-agent: *\\nAllow: /", blocked: true },
-    { label: "RecomviaBot blocked despite wildcard allow", path: "/", policy: "User-agent: *\\nAllow: /\\n\\nUser-agent: RECOMVIABOT\\nDisallow: /", blocked: true },
-    { label: "named path block applies to scanned path", path: "/private/report", policy: "User-agent: Googlebot\\nDisallow: /private\\n\\nUser-agent: *\\nAllow: /", blocked: true },
-    { label: "named path exception overrides a broader block", path: "/private/open", policy: "User-agent: Googlebot\\nDisallow: /private\\nAllow: /private/open\\n\\nUser-agent: *\\nAllow: /", blocked: false },
-    { label: "named bot allow does not override wildcard denial of others", path: "/", policy: "User-agent: *\\nDisallow: /\\n\\nUser-agent: Googlebot\\nAllow: /", blocked: true },
-    { label: "unrelated bot denied while major crawlers are permitted", path: "/", policy: "User-agent: BadBot\\nDisallow: /\\n\\nUser-agent: *\\nAllow: /", blocked: false },
-    { label: "Googlebot-Image policy does not apply to Googlebot", path: "/", policy: "User-agent: Googlebot-Image\\nDisallow: /\\n\\nUser-agent: *\\nAllow: /", blocked: false },
-    { label: "named agent with no rules does not inherit wildcard denial", path: "/", policy: "User-agent: Googlebot\\nAllow: /\\n\\nUser-agent: Bingbot\\nAllow: /\\n\\nUser-agent: RecomviaBot\\nAllow: /\\n\\nUser-agent: *\\nDisallow: /", blocked: false },
+    { label: "Googlebot blocked despite wildcard allow", path: "/", policy: "User-agent: *\nAllow: /\n\nUser-agent: Googlebot\nDisallow: /", blocked: true },
+    { label: "Bingbot blocked despite wildcard allow", path: "/", policy: "User-agent: Bingbot\nDisallow: /\n\nUser-agent: *\nAllow: /", blocked: true },
+    { label: "RecomviaBot blocked despite wildcard allow", path: "/", policy: "User-agent: *\nAllow: /\n\nUser-agent: RECOMVIABOT\nDisallow: /", blocked: true },
+    { label: "named path block applies to scanned path", path: "/private/report", policy: "User-agent: Googlebot\nDisallow: /private\n\nUser-agent: *\nAllow: /", blocked: true },
+    { label: "named path exception overrides a broader block", path: "/private/open", policy: "User-agent: Googlebot\nDisallow: /private\nAllow: /private/open\n\nUser-agent: *\nAllow: /", blocked: false },
+    { label: "named bot allow does not override wildcard denial of others", path: "/", policy: "User-agent: *\nDisallow: /\n\nUser-agent: Googlebot\nAllow: /", blocked: true },
+    { label: "unrelated bot denied while major crawlers are permitted", path: "/", policy: "User-agent: BadBot\nDisallow: /\n\nUser-agent: *\nAllow: /", blocked: false },
+    { label: "Googlebot-Image policy does not apply to Googlebot", path: "/", policy: "User-agent: Googlebot-Image\nDisallow: /\n\nUser-agent: *\nAllow: /", blocked: false },
+    { label: "named agent with no rules does not inherit wildcard denial", path: "/", policy: "User-agent: Googlebot\nAllow: /\n\nUser-agent: Bingbot\nAllow: /\n\nUser-agent: RecomviaBot\nAllow: /\n\nUser-agent: *\nDisallow: /", blocked: false },
   ];
   try {
     for (const entry of cases) {
