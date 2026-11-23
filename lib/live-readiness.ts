@@ -289,32 +289,54 @@ function activeJsonLdScripts(html: string) {
     });
 }
 
-// A Disallow in a named crawler's group must not be attributed to the
-// wildcard group. Keep consecutive User-agent lines in the same group and
-// let an equally specific Allow: / take precedence over Disallow: /.
-function hasWildcardRootDisallow(robotsText: string) {
+// Evaluate the crawled page's own URL against wildcard robots rules, not
+// just a site-wide "Disallow: /". Specific Allow rules win longer matches and
+// ties, as they do for major search crawlers. No extra requests are needed.
+function robotsRuleMatches(rule: string, path: string) {
+  const anchored = rule.endsWith("$");
+  const pattern = anchored ? rule.slice(0, -1) : rule;
+  if (!pattern.startsWith("/") && !pattern.startsWith("*")) return false;
+  const segments = pattern.split("*");
+  if (!path.startsWith(segments[0])) return false;
+  let cursor = segments[0].length;
+  for (let index = 1; index < segments.length; index += 1) {
+    const segment = segments[index];
+    if (anchored && index === segments.length - 1) {
+      return path.endsWith(segment) && path.length - segment.length >= cursor;
+    }
+    const found = path.indexOf(segment, cursor);
+    if (found < 0) return false;
+    cursor = found + segment.length;
+  }
+  return !anchored || cursor === path.length;
+}
+
+function hasWildcardPathDisallow(robotsText: string, path: string) {
   let agents: string[] = [];
   let hasRule = false;
-  let rootDisallow = false;
-  let rootAllow = false;
+  let bestSpecificity = -1;
+  let blocked = false;
   for (const rawLine of robotsText.split(/\r?\n/)) {
     const line = rawLine.replace(/#.*/, "").trim();
     const directive = line.match(/^([a-z-]+)\s*:\s*(.*?)\s*$/i);
     if (!directive) continue;
     const key = directive[1].toLowerCase();
-    const value = directive[2].trim().toLowerCase();
+    const value = directive[2].trim();
     if (key === "user-agent") {
       if (hasRule) { agents = []; hasRule = false; }
-      if (value) agents.push(value);
+      if (value) agents.push(value.toLowerCase());
       continue;
     }
     if (key !== "allow" && key !== "disallow") continue;
     hasRule = true;
-    if (!agents.includes("*") || value !== "/") continue;
-    if (key === "allow") rootAllow = true;
-    else rootDisallow = true;
+    if (!agents.includes("*") || !value || !robotsRuleMatches(value, path)) continue;
+    const specificity = value.replace(/[*$]/g, "").length;
+    if (specificity > bestSpecificity || (specificity === bestSpecificity && key === "allow")) {
+      bestSpecificity = specificity;
+      blocked = key === "disallow";
+    }
   }
-  return rootDisallow && !rootAllow;
+  return blocked;
 }
 
 function plainText(html: string) {
@@ -438,7 +460,7 @@ export async function runLiveReadinessScan(input: string, requiredOrigin?: strin
   const hasFaq = hasJsonLdType("FAQPage");
   const hasQuestionHeadings = /<h[2-4]\b[^>]*>[^<]{0,120}(?:what|how|why|when|where|who|can|does|is|are|ما|ماذا|كيف|لماذا|هل|متى|أين|اين)[^<]*<\/h[2-4]>/i.test(visibleBody);
   const words = text ? text.split(/\s+/).length : 0;
-  const globallyBlocked = robotsReadable && robots ? hasWildcardRootDisallow(robots.text) : false;
+  const globallyBlocked = robotsReadable && robots ? hasWildcardPathDisallow(robots.text, finalUrl.pathname + finalUrl.search) : false;
   const metaNoindex = hasGlobalNoindexMeta(html);
   const headerNoindex = hasGlobalNoindexHeader(page.robotsTag);
   const robotsHealthy = robotsReadable && !globallyBlocked && !metaNoindex && !headerNoindex;
@@ -477,7 +499,7 @@ export async function runLiveReadinessScan(input: string, requiredOrigin?: strin
   add({ code: "answer_structure", category: "Content readiness", severity: "medium", status: answerReady ? "pass" : "fail", title: "Question-and-answer structure is discoverable", explanation: "Direct question headings and self-contained answers improve answer extraction for relevant queries.", evidence: hasFaq ? "FAQPage structured data found." : hasQuestionHeadings ? "Question-led headings found in visible HTML." : "No FAQPage schema or question-led headings were detected.", sourceUrl: page.url, weight: 8, awardedPoints: answerReady ? 8 : 0 });
   const contentPoints = words >= 300 ? 8 : words >= 100 ? 4 : 0;
   add({ code: "content_depth", category: "Content readiness", severity: "medium", status: contentPoints === 8 ? "pass" : contentPoints ? "partial" : "fail", title: "The page exposes enough readable context", explanation: "Thin pages often lack the facts and distinctions needed for confident understanding.", evidence: `Approximately ${words.toLocaleString("en-US")} visible words detected.`, sourceUrl: page.url, weight: 8, awardedPoints: contentPoints });
-  add({ code: "robots_policy", category: "Technical AEO", severity: "critical", status: robotsHealthy ? "pass" : "fail", title: "Crawler discovery and indexing are permitted", explanation: "A readable robots policy and homepage indexing directives should permit general search crawlers to discover and index the site.", evidence: metaNoindex ? "Homepage meta robots requests noindex/none." : headerNoindex ? "Homepage X-Robots-Tag requests noindex/none." : robots ? `HTTP ${robots.status}${robotsIsHtml ? " · HTML fallback is not robots.txt" : globallyBlocked ? " · broad Disallow: / detected" : ""}` : "robots.txt could not be retrieved.", sourceUrl: metaNoindex || headerNoindex ? page.url : robotsUrl.toString(), weight: 7, awardedPoints: robotsHealthy ? 7 : 0 });
+  add({ code: "robots_policy", category: "Technical AEO", severity: "critical", status: robotsHealthy ? "pass" : "fail", title: "Crawler discovery and indexing are permitted", explanation: "A readable robots policy and homepage indexing directives should permit general search crawlers to discover and index the site.", evidence: metaNoindex ? "Homepage meta robots requests noindex/none." : headerNoindex ? "Homepage X-Robots-Tag requests noindex/none." : robots ? `HTTP ${robots.status}${robotsIsHtml ? " · HTML fallback is not robots.txt" : globallyBlocked ? " · target path blocked by wildcard robots rules" : ""}` : "robots.txt could not be retrieved.", sourceUrl: metaNoindex || headerNoindex ? page.url : robotsUrl.toString(), weight: 7, awardedPoints: robotsHealthy ? 7 : 0 });
   add({ code: "xml_sitemap", category: "Technical AEO", severity: "high", status: sitemapHealthy ? "pass" : "fail", title: "XML sitemap is available", explanation: "A valid sitemap gives crawlers a reliable inventory of canonical content URLs.", evidence: sitemap ? `HTTP ${sitemap.status} · ${sitemapHealthy ? "sitemap root document detected" : "no complete sitemap root document detected"}` : "A sitemap could not be retrieved.", sourceUrl: sitemapUrl.toString(), weight: 7, awardedPoints: sitemapHealthy ? 7 : 0 });
   add({ code: "identity_paths", category: "Authority & entity", severity: "medium", status: hasIdentityLink ? "pass" : "fail", title: "Identity and contact paths are visible", explanation: "Clear company and contact paths help users and systems verify who is responsible for the site.", evidence: hasIdentityLink ? "An About, Company, or Contact path was found." : "No clear About, Company, or Contact path was detected in homepage links.", sourceUrl: page.url, weight: 6, awardedPoints: hasIdentityLink ? 6 : 0 });
   add({ code: "open_graph", category: "Content readiness", severity: "low", status: hasOpenGraph ? "pass" : "fail", title: "Share metadata describes the page", explanation: "Open Graph metadata provides another consistent summary when the page is shared or referenced.", evidence: hasOpenGraph ? "og:title and og:description were found." : "og:title or og:description is missing.", sourceUrl: page.url, weight: 6, awardedPoints: hasOpenGraph ? 6 : 0 });
