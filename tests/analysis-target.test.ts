@@ -1275,3 +1275,58 @@ test("partial auxiliary documents cannot earn robots or sitemap readiness points
     globalThis.fetch = originalFetch;
   }
 });
+
+
+test("HTTP 200 HTML placeholders cannot earn readiness points or trigger auxiliary requests", async () => {
+  const originalFetch = globalThis.fetch;
+  const validPage = '<!doctype html><html lang="en"><head><title>Actual homepage</title></head><body><h1>Real content</h1></body></html>';
+  const cases = [
+    { label: "empty HTML body", html: "", valid: false },
+    { label: "whitespace HTML body", html: " \n\t ", valid: false },
+    { label: "plain text mislabeled HTML", html: "Service is temporarily unavailable", valid: false },
+    { label: "doctype without a document", html: "<!doctype html>", valid: false },
+    { label: "commented-out fake document", html: "<!-- " + validPage + " -->", valid: false },
+    { label: "inert script containing fake document", html: "<script>const demo = " + JSON.stringify(validPage) + ";</script>", valid: false },
+    { label: "inert template containing fake document", html: "<template>" + validPage + "</template>", valid: false },
+    { label: "real HTML document", html: validPage, valid: true },
+    { label: "valid optional html root omitted", html: "<head><title>Valid page</title></head><body><h1>Valid content</h1></body>", valid: true },
+  ];
+  try {
+    for (const entry of cases) {
+      const requested: string[] = [];
+      globalThis.fetch = async (input) => {
+        const url = new URL(String(input));
+        requested.push(url.pathname);
+        if (url.pathname === "/robots.txt") return new Response("User-agent: *\nAllow: /");
+        if (url.pathname === "/sitemap.xml") return new Response("<urlset></urlset>");
+        assert.equal(url.pathname, "/", entry.label);
+        return new Response(entry.html, { status: 200, headers: { "Content-Type": "text/html" } });
+      };
+      const usage = { requestCount: 0, bytesFetched: 0 };
+      if (entry.valid) {
+        const result = await runLiveReadinessScan("https://html-status.example/", undefined, usage);
+        assert.equal(result.findings.find((row) => row.code === "page_access")?.awardedPoints, 15, entry.label);
+        assert.deepEqual(requested, ["/", "/robots.txt", "/sitemap.xml"], entry.label);
+        assert.equal(usage.requestCount, 3, entry.label);
+      } else {
+        await assert.rejects(
+          runLiveReadinessScan("https://html-status.example/", undefined, usage),
+          /did not return an HTML webpage/,
+          entry.label,
+        );
+        assert.deepEqual(requested, ["/"], entry.label);
+        assert.equal(usage.requestCount, 1, entry.label);
+      }
+    }
+    globalThis.fetch = async (input) => {
+      const pathname = new URL(String(input)).pathname;
+      if (pathname === "/robots.txt") return new Response("User-agent: *\nAllow: /");
+      if (pathname === "/sitemap.xml") return new Response("<urlset></urlset>");
+      return new Response(validPage, { headers: { "Content-Type": "text/plain" } });
+    };
+    const realMarkupWithoutHtmlMime = await runLiveReadinessScan("https://html-status.example/");
+    assert.equal(realMarkupWithoutHtmlMime.findings.find((row) => row.code === "page_access")?.awardedPoints, 15);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
