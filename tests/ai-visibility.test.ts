@@ -635,7 +635,8 @@ test("readiness canonical scoring rejects unsafe or broken href values but accep
   try {
     const cases = [
       { href: "/articles?lang=ar", valid: true, expected: "https://fixture.example/articles?lang=ar" },
-      { href: "https://other.example/page?x=1&amp;y=2", valid: true, expected: "https://other.example/page?x=1&y=2" },
+      { href: "https://fixture.example/page?x=1&amp;y=2", valid: true, expected: "https://fixture.example/page?x=1&y=2" },
+      { href: "https://other.example/page?x=1&amp;y=2", valid: false },
       { href: "", valid: false },
       { href: "#section", valid: false },
       { href: "javascript:alert(1)", valid: false },
