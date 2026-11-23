@@ -713,3 +713,46 @@ test("readiness trusts only live head metadata, not comments, inert examples, or
     globalThis.fetch = originalFetch;
   }
 });
+
+test("readiness ignores inert JSON-LD examples but accepts genuine head and body scripts", async () => {
+  const originalFetch = globalThis.fetch;
+  const organization = '<script type="application/ld+json">{"@context":"https://schema.org","@type":"Organization","name":"Northstar"}</script>';
+  const faq = '<script type="application/ld+json">{"@context":"https://schema.org","@type":"FAQPage"}</script>';
+  const cases: Array<{ label: string; head?: string; body?: string; points: [number, number, number]; inspected: number }> = [
+    { label: "HTML comment", body: "<!-- " + organization + faq + " -->", points: [0, 0, 0], inspected: 0 },
+    { label: "template", body: "<template>" + organization + faq + "</template>", points: [0, 0, 0], inspected: 0 },
+    { label: "noscript", body: "<noscript>" + organization + faq + "</noscript>", points: [0, 0, 0], inspected: 0 },
+    { label: "textarea", body: "<textarea>" + organization + faq + "</textarea>", points: [0, 0, 0], inspected: 0 },
+    { label: "style example", head: "<style>" + organization + "</style>", points: [0, 0, 0], inspected: 0 },
+    { label: "other script type", body: '<script type="text/plain">' + organization + "</script>", points: [0, 0, 0], inspected: 0 },
+    { label: "malformed JSON-LD", head: '<script type="application/ld+json">{invalid}</script>', points: [0, 0, 0], inspected: 1 },
+    { label: "active head scripts", head: organization + faq, points: [8, 8, 8], inspected: 2 },
+    { label: "active body, attribute order, unquoted mixed-case type", body: '<script data-test="yes" TYPE=APPLICATION/LD+JSON>{"@type":"Organization"}</script>', points: [8, 8, 0], inspected: 1 },
+    { label: "active body closing-tag whitespace", body: '<script type="application/ld+json">{"@type":"Organization"}</script >', points: [8, 8, 0], inspected: 1 },
+    { label: "mixed inactive FAQ and active Organization", body: "<template>" + faq + "</template>" + organization, points: [8, 8, 0], inspected: 1 },
+  ];
+  try {
+    for (const entry of cases) {
+      const html = '<!doctype html><html lang="en"><head><title>Northstar structured data fixture</title>' +
+        (entry.head || "") + '</head><body><h1>Northstar</h1>' + (entry.body || "") + "</body></html>";
+      globalThis.fetch = async (input) => {
+        const path = new URL(String(input)).pathname;
+        if (path === "/robots.txt") return new Response("User-agent: *\nAllow: /", { headers: { "content-type": "text/plain" } });
+        if (path === "/sitemap.xml") return new Response("<urlset></urlset>", { headers: { "content-type": "application/xml" } });
+        return new Response(html, { headers: { "content-type": "text/html" } });
+      };
+      const result = await runLiveReadinessScan("https://fixture.example/");
+      const codes = ["structured_data", "organization_entity", "answer_structure"];
+      for (const [index, code] of codes.entries()) {
+        const finding = result.findings.find((item) => item.code === code);
+        assert.ok(finding, entry.label + ": missing " + code);
+        assert.equal(finding.awardedPoints, entry.points[index], entry.label + ": " + code);
+      }
+      assert.match(result.findings.find((item) => item.code === "structured_data")!.evidence,
+        new RegExp("\\(" + entry.inspected + " inspected\\)"), entry.label);
+      assert.equal(result.requestCount, 3, entry.label);
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
