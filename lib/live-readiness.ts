@@ -184,6 +184,18 @@ function activeBodyHtml(html: string) {
   return activeMarkup.match(/<body\b[^>]*>([\s\S]*?)<\/body\s*>/i)?.[1] ?? "";
 }
 
+// Language is declared on the active document root, not in a copied HTML
+// example, commented markup or a tag inside the document body.
+function activeDocumentLanguage(html: string) {
+  const markup = html.replace(
+    /<!--[\s\S]*?-->|<(script|style|template|noscript|textarea)\b[^>]*>[\s\S]*?<\/\1\s*>/gi,
+    "",
+  );
+  const beforeContent = markup.split(/<(?:head|body)\b/i, 1)[0];
+  const rootTag = beforeContent.match(/<html\b[^>]*>/i)?.[0] ?? "";
+  return decodeHtmlEntities((attributes(rootTag).lang || "").trim());
+}
+
 function metaContent(html: string, target: string) {
   for (const tag of activeHeadHtml(html).match(/<meta\b[^>]*>/gi) ?? []) {
     const attrs = attributes(tag);
@@ -379,7 +391,7 @@ export async function runLiveReadinessScan(input: string, requiredOrigin?: strin
     : "";
   const description = metaContent(html, "description");
   const canonical = validatedCanonicalUrl(html, page.url);
-  const htmlLang = html.match(/<html\b[^>]*\blang\s*=\s*["']?([^\s"'>]+)/i)?.[1] || "";
+  const htmlLang = activeDocumentLanguage(html);
   const visibleBody = activeBodyHtml(html);
   const h1Count = (visibleBody.match(/<h1\b/gi) || []).length;
   const jsonLdBlocks = activeJsonLdScripts(html);
