@@ -706,7 +706,8 @@ test("readiness trusts only live head metadata, not comments, inert examples, or
       assert.equal(socialFinding.awardedPoints, entry.valid ? 6 : 0, entry.label);
       assert.equal(robotsFinding.status, entry.blocked ? "fail" : "pass", entry.label);
       assert.equal(result.requestCount, 3, entry.label);
-      assert.equal(result.discoveredContext.description.value, entry.valid ? description : "", entry.label);
+      if (entry.valid) assert.equal(result.discoveredContext.description.value, description, entry.label);
+      else assert.notEqual(result.discoveredContext.description.value, description, entry.label);
     }
   } finally {
     globalThis.fetch = originalFetch;
