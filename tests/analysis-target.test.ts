@@ -985,3 +985,58 @@ test("canonical readiness rejects duplicate active head hints without counting i
     globalThis.fetch = originalFetch;
   }
 });
+
+test("readiness accepts only one active title in the document head", async () => {
+  const originalFetch = globalThis.fetch;
+  const origin = "https://title-readiness.example";
+  const realTitle = "Northstar analytics and demand planning";
+  const titleTag = "<title>" + realTitle + "</title>";
+  const page = (head: string, body = "<h1>Northstar</h1>") =>
+    '<!doctype html><html lang="en"><head>' + head + "</head><body>" + body + "</body></html>";
+  const cases: Array<{ label: string; html: string; points: number; title?: string }> = [
+    { label: "one active head title", html: page(titleTag), points: 7, title: realTitle },
+    { label: "case-insensitive title tag", html: page("<TITLE>" + realTitle + "</TITLE>"), points: 7, title: realTitle },
+    { label: "HTML entities decoded", html: page("<title>Northstar &amp; partners official website</title>"), points: 7, title: "Northstar & partners" },
+    { label: "short active title stays partial", html: page("<title>Short</title>"), points: 4, title: "Short" },
+    { label: "overlong active title stays partial", html: page("<title>" + "A".repeat(75) + "</title>"), points: 4 },
+    { label: "HTML comment is not a title", html: page("<!-- " + titleTag + " -->"), points: 0 },
+    { label: "title in script example is ignored", html: page("<script>const example = '" + titleTag + "';</script>"), points: 0 },
+    { label: "title in style example is ignored", html: page("<style>" + titleTag + "</style>"), points: 0 },
+    { label: "template example is ignored", html: page("<template>" + titleTag + "</template>"), points: 0 },
+    { label: "noscript example is ignored", html: page("<noscript>" + titleTag + "</noscript>"), points: 0 },
+    { label: "body-only title is ignored", html: page("", titleTag + "<h1>Northstar</h1>"), points: 0 },
+    { label: "title before document head is ignored", html: titleTag + page(""), points: 0 },
+    { label: "commented fake head is ignored", html: "<!-- <head>" + titleTag + "</head> -->" + page(""), points: 0 },
+    { label: "unclosed head does not earn title points", html: '<!doctype html><html><head>' + titleTag + "<body>Hi</body></html>", points: 0 },
+    { label: "identical duplicate titles are ambiguous", html: page(titleTag + titleTag), points: 0 },
+    { label: "conflicting duplicate titles are ambiguous", html: page(titleTag + "<title>Other legitimate-looking title</title>"), points: 0 },
+    { label: "inert duplicate is harmless", html: page(titleTag + "<!-- " + titleTag + " -->"), points: 7, title: realTitle },
+    { label: "body title does not override active head", html: page(titleTag, titleTag), points: 7, title: realTitle },
+  ];
+  try {
+    for (const entry of cases) {
+      const requested: string[] = [];
+      globalThis.fetch = async (input) => {
+        const url = String(input);
+        requested.push(url);
+        const path = new URL(url).pathname;
+        if (path === "/robots.txt") return new Response("User-agent: *\nAllow: /");
+        if (path === "/sitemap.xml") return new Response("<urlset></urlset>");
+        assert.equal(path, "/", entry.label);
+        return new Response(entry.html, { headers: { "Content-Type": "text/html" } });
+      };
+      const usage = { requestCount: 0, bytesFetched: 0 };
+      const result = await runLiveReadinessScan(origin + "/", undefined, usage);
+      const finding = result.findings.find((row) => row.code === "title");
+      assert.ok(finding, entry.label);
+      assert.equal(finding.awardedPoints, entry.points, entry.label);
+      assert.equal(finding.status, entry.points === 7 ? "pass" : entry.points === 4 ? "partial" : "fail", entry.label);
+      if (entry.title) assert.ok(finding.evidence.includes(entry.title), entry.label);
+      else if (entry.points === 0) assert.equal(finding.evidence, "No title element was found.", entry.label);
+      assert.deepEqual(requested, [origin + "/", origin + "/robots.txt", origin + "/sitemap.xml"], entry.label);
+      assert.equal(usage.requestCount, 3, entry.label + ": no additional network requests");
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
