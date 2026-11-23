@@ -434,15 +434,22 @@ export async function runLiveReadinessScan(input: string, requiredOrigin?: strin
   const jsonLdBlocks = activeJsonLdScripts(html);
   // A script tag does not prove valid structured data. Parse each bounded JSON-LD
   // block independently so malformed markup cannot inflate readiness or entity scores.
+  // A JSON object carrying only @context or @id is not evidence of a typed
+  // structured-data entity. Require a nonempty @type on a top-level node or
+  // inside its @graph, including supported arrays, before awarding readiness.
+  const hasTypedJsonLdNode = (value: unknown, depth = 0): boolean => {
+    if (depth > 16 || !value || typeof value !== "object") return false;
+    if (Array.isArray(value)) return value.some((item) => hasTypedJsonLdNode(item, depth + 1));
+    const node = value as Record<string, unknown>;
+    const declared = Array.isArray(node["@type"]) ? node["@type"] : [node["@type"]];
+    if (declared.some((type) => typeof type === "string" && type.trim().length > 0)) return true;
+    return hasTypedJsonLdNode(node["@graph"], depth + 1);
+  };
   const parsedJsonLd = jsonLdBlocks.flatMap((block) => {
     const raw = block.replace(/^<script\b[^>]*>/i, "").replace(/<\/script\s*>$/i, "").trim();
     try {
       const data: unknown = JSON.parse(raw);
-      const nodes = Array.isArray(data) ? data : [data];
-      if (nodes.some((node) => node !== null && typeof node === "object" &&
-          !Array.isArray(node) && Object.keys(node).some((key) => key.startsWith("@")))) {
-        return [data];
-      }
+      if (hasTypedJsonLdNode(data)) return [data];
     } catch { /* Ignore malformed JSON-LD instead of counting the tag as evidence. */ }
     return [];
   });
