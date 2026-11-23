@@ -174,6 +174,16 @@ function activeHeadHtml(html: string) {
   return activeMarkup.match(/<head\b[^>]*>([\s\S]*?)<\/head>/i)?.[1] ?? "";
 }
 
+// A heading contributes to readiness only if it appears in the rendered body.
+// Ignore HTML comments and inert containers (including markup used as examples).
+function activeBodyHtml(html: string) {
+  const activeMarkup = html.replace(
+    /<!--[\s\S]*?-->|<(script|style|template|noscript|textarea)\b[^>]*>[\s\S]*?<\/\1\s*>/gi,
+    "",
+  );
+  return activeMarkup.match(/<body\b[^>]*>([\s\S]*?)<\/body\s*>/i)?.[1] ?? "";
+}
+
 function metaContent(html: string, target: string) {
   for (const tag of activeHeadHtml(html).match(/<meta\b[^>]*>/gi) ?? []) {
     const attrs = attributes(tag);
@@ -368,7 +378,8 @@ export async function runLiveReadinessScan(input: string, requiredOrigin?: strin
   const description = metaContent(html, "description");
   const canonical = validatedCanonicalUrl(html, page.url);
   const htmlLang = html.match(/<html\b[^>]*\blang\s*=\s*["']?([^\s"'>]+)/i)?.[1] || "";
-  const h1Count = (html.match(/<h1\b/gi) || []).length;
+  const visibleBody = activeBodyHtml(html);
+  const h1Count = (visibleBody.match(/<h1\b/gi) || []).length;
   const jsonLdBlocks = activeJsonLdScripts(html);
   // A script tag does not prove valid structured data. Parse each bounded JSON-LD
   // block independently so malformed markup cannot inflate readiness or entity scores.
@@ -400,7 +411,7 @@ export async function runLiveReadinessScan(input: string, requiredOrigin?: strin
   };
   const hasOrganization = hasJsonLdType("Organization");
   const hasFaq = hasJsonLdType("FAQPage");
-  const hasQuestionHeadings = /<h[2-4]\b[^>]*>[^<]{0,120}(?:what|how|why|when|where|who|can|does|is|are|ما|ماذا|كيف|لماذا|هل|متى|أين|اين)[^<]*<\/h[2-4]>/i.test(html);
+  const hasQuestionHeadings = /<h[2-4]\b[^>]*>[^<]{0,120}(?:what|how|why|when|where|who|can|does|is|are|ما|ماذا|كيف|لماذا|هل|متى|أين|اين)[^<]*<\/h[2-4]>/i.test(visibleBody);
   const words = text ? text.split(/\s+/).length : 0;
   const globallyBlocked = robotsReadable && robots ? hasWildcardRootDisallow(robots.text) : false;
   const metaNoindex = hasGlobalNoindexMeta(html);
