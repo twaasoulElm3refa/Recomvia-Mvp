@@ -343,7 +343,13 @@ export async function runLiveReadinessScan(input: string, requiredOrigin?: strin
 
   const html = page.text;
   const text = plainText(html);
-  const title = plainText(html.match(/<title\b[^>]*>([\s\S]*?)<\/title>/i)?.[1] || "");
+  // Only a single title in the active document head is an extractable SEO
+  // signal. Body tags, commented examples and duplicate titles must not
+  // inflate the score or influence discovered business context.
+  const titleTags = activeHeadHtml(html).match(/<title\b[^>]*>[\s\S]*?<\/title\s*>/gi) ?? [];
+  const title = titleTags.length === 1
+    ? plainText(titleTags[0].replace(/^<title\b[^>]*>/i, "").replace(/<\/title\s*>$/i, ""))
+    : "";
   const description = metaContent(html, "description");
   const canonical = validatedCanonicalUrl(html, page.url);
   const htmlLang = html.match(/<html\b[^>]*\blang\s*=\s*["']?([^\s"'>]+)/i)?.[1] || "";
