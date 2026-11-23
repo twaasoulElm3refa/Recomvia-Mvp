@@ -173,7 +173,7 @@ test("readiness rejects HTTP error and partial homepages before auxiliary crawli
     globalThis.fetch = async (input) => {
       const url = String(input);
       requests.push(url);
-      if (url.endsWith("/robots.txt")) return new Response("User-agent: *\\nAllow: /", { headers: { "Content-Type": "text/plain" } });
+      if (url.endsWith("/robots.txt")) return new Response("User-agent: *\nAllow: /", { headers: { "Content-Type": "text/plain" } });
       if (url.endsWith("/sitemap.xml")) return new Response("<urlset></urlset>", { headers: { "Content-Type": "application/xml" } });
       return new Response(homepage, { status: 200, headers: { "Content-Type": "text/html" } });
     };
