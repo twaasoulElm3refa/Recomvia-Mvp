@@ -1415,3 +1415,55 @@ test("HTTP 200 HTML placeholders cannot earn readiness points or trigger auxilia
     globalThis.fetch = originalFetch;
   }
 });
+
+test("unusable HTTP homepage responses cancel their streams before reading", async () => {
+  const originalFetch = globalThis.fetch;
+  try {
+    for (const status of [202, 206, 403, 429, 503]) {
+      let cancelled = false;
+      const usage = { requestCount: 0, bytesFetched: 0 };
+      globalThis.fetch = async () => new Response(new ReadableStream<Uint8Array>({
+        pull(controller) { controller.enqueue(new Uint8Array(64_000)); },
+        cancel() { cancelled = true; },
+      }), { status, headers: { "Content-Type": "text/html", "Content-Length": "9000000" } });
+      await assert.rejects(
+        runLiveReadinessScan("https://status-fixture.example/", undefined, usage),
+        new RegExp("HTTP " + status + ";"),
+      );
+      assert.equal(cancelled, true, String(status));
+      assert.deepEqual(usage, { requestCount: 1, bytesFetched: 0 }, String(status));
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("unusable auxiliary bodies are cancelled while HTTP evidence is retained", async () => {
+  const originalFetch = globalThis.fetch;
+  const html = '<!doctype html><html lang="en"><head><title>HTTP fixture</title></head><body><h1>Home</h1></body></html>';
+  const cancelled: string[] = [];
+  const usage = { requestCount: 0, bytesFetched: 0 };
+  globalThis.fetch = async (input) => {
+    const path = new URL(String(input)).pathname;
+    if (path === "/") return new Response(html, { headers: { "Content-Type": "text/html" } });
+    assert.ok(path === "/robots.txt" || path === "/sitemap.xml");
+    return new Response(new ReadableStream<Uint8Array>({
+      pull(controller) { controller.enqueue(new Uint8Array(64_000)); },
+      cancel() { cancelled.push(path); },
+    }), { status: path === "/robots.txt" ? 403 : 206 });
+  };
+  try {
+    const result = await runLiveReadinessScan("https://status-fixture.example/", undefined, usage);
+    assert.deepEqual(cancelled, ["/robots.txt", "/sitemap.xml"]);
+    for (const [code, status] of [["robots_policy", 403], ["xml_sitemap", 206]] as const) {
+      const finding = result.findings.find((row) => row.code === code);
+      assert.equal(finding?.status, "fail");
+      assert.equal(finding?.awardedPoints, 0);
+      assert.match(finding?.evidence ?? "", new RegExp("HTTP " + status));
+    }
+    assert.deepEqual(usage, { requestCount: 3, bytesFetched: new TextEncoder().encode(html).byteLength });
+    assert.equal(result.bytesFetched, usage.bytesFetched);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
