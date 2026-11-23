@@ -214,11 +214,16 @@ function linkHref(html: string, rel: string) {
     "",
   );
   const head = activeMarkup.match(/<head\b[^>]*>([\s\S]*?)<\/head>/i)?.[1] ?? "";
+  let singleHref: string | null = null;
   for (const tag of head.match(/<link\b[^>]*>/gi) ?? []) {
     const attrs = attributes(tag);
-    if ((attrs.rel || "").toLowerCase().split(/\s+/).includes(rel.toLowerCase())) return (attrs.href || "").trim();
+    if (!(attrs.rel || "").toLowerCase().split(/\s+/).includes(rel.toLowerCase())) continue;
+    // Multiple canonical declarations, even identical ones, should not earn
+    // a clean SEO signal: crawlers may ignore conflicting canonical hints.
+    if (singleHref !== null) return "";
+    singleHref = (attrs.href || "").trim();
   }
-  return "";
+  return singleHref || "";
 }
 
 // A non-empty canonical href is not necessarily an indexable web URL.
