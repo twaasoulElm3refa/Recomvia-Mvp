@@ -321,15 +321,15 @@ function hasWildcardPathDisallow(robotsText: string, path: string) {
     const directive = line.match(/^([a-z-]+)\s*:\s*(.*?)\s*$/i);
     if (!directive) continue;
     const key = directive[1].toLowerCase();
-    const value = directive[2].trim().toLowerCase();
+    const value = directive[2].trim();
     if (key === "user-agent") {
       if (hasRule) { agents = []; hasRule = false; }
-      if (value) agents.push(value);
+      if (value) agents.push(value.toLowerCase());
       continue;
     }
     if (key !== "allow" && key !== "disallow") continue;
     hasRule = true;
-    if (!agents.includes("*") || !value || !robotsRuleMatches(value, path.toLowerCase())) continue;
+    if (!agents.includes("*") || !value || !robotsRuleMatches(value, path)) continue;
     const specificity = value.replace(/[*$]/g, "").length;
     if (specificity > bestSpecificity || (specificity === bestSpecificity && key === "allow")) {
       bestSpecificity = specificity;
