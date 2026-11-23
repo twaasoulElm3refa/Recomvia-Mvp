@@ -665,3 +665,51 @@ test("readiness canonical scoring rejects unsafe or broken href values but accep
     globalThis.fetch = originalFetch;
   }
 });
+
+
+test("readiness trusts only live head metadata, not comments, inert examples, or body tags", async () => {
+  const originalFetch = globalThis.fetch;
+  const description = "Northstar provides reliable retail analytics, inventory planning, and demand forecasting for merchants.";
+  const metadata = '<meta name="description" content="' + description + '">' +
+    '<meta property="og:title" content="Northstar retail analytics">' +
+    '<meta property="og:description" content="Demand forecasting for merchants">';
+  const noindex = '<meta name="robots" content="noindex">';
+  const html = (head: string, body = "<h1>Northstar</h1>") =>
+    '<!doctype html><html lang="en"><head><title>Northstar analytics</title>' + head + '</head><body>' + body + '</body></html>';
+  const cases = [
+    { label: "HTML comment", markup: html("<!-- " + metadata + noindex + " -->"), valid: false, blocked: false },
+    { label: "script text", markup: html('<script type="text/plain">' + metadata + noindex + '</script>'), valid: false, blocked: false },
+    { label: "style example", markup: html("<style>" + metadata + noindex + "</style>"), valid: false, blocked: false },
+    { label: "template content", markup: html("<template>" + metadata + noindex + "</template>"), valid: false, blocked: false },
+    { label: "noscript example", markup: html("<noscript>" + metadata + noindex + "</noscript>"), valid: false, blocked: false },
+    { label: "body meta", markup: html("", metadata + noindex + "<h1>Northstar</h1>"), valid: false, blocked: false },
+    { label: "commented fake head", markup: "<!-- <head>" + metadata + noindex + "</head> -->" + html(""), valid: false, blocked: false },
+    { label: "no document head", markup: "<!doctype html><html><body>" + metadata + noindex + "</body></html>", valid: false, blocked: false },
+    { label: "real document head", markup: html(metadata), valid: true, blocked: false },
+    { label: "mixed-case live tags", markup: html('<META PROPERTY="og:title" CONTENT="Northstar"><META CONTENT="Merchants" PROPERTY="og:description"><META CONTENT="' + description + '" NAME="description">'), valid: true, blocked: false },
+    { label: "real global noindex", markup: html(metadata + noindex), valid: true, blocked: true },
+  ];
+  try {
+    for (const entry of cases) {
+      globalThis.fetch = async (input) => {
+        const path = new URL(String(input)).pathname;
+        if (path === "/robots.txt") return new Response("User-agent: *\nAllow: /", { headers: { "content-type": "text/plain" } });
+        if (path === "/sitemap.xml") return new Response("<urlset></urlset>", { headers: { "content-type": "application/xml" } });
+        return new Response(entry.markup, { headers: { "content-type": "text/html" } });
+      };
+      const result = await runLiveReadinessScan("https://fixture.example/");
+      const descriptionFinding = result.findings.find((finding) => finding.code === "meta_description");
+      const socialFinding = result.findings.find((finding) => finding.code === "open_graph");
+      const robotsFinding = result.findings.find((finding) => finding.code === "robots_policy");
+      assert.ok(descriptionFinding && socialFinding && robotsFinding, entry.label);
+      assert.equal(descriptionFinding.awardedPoints, entry.valid ? 7 : 0, entry.label);
+      assert.equal(socialFinding.awardedPoints, entry.valid ? 6 : 0, entry.label);
+      assert.equal(robotsFinding.status, entry.blocked ? "fail" : "pass", entry.label);
+      assert.equal(result.requestCount, 3, entry.label);
+      if (entry.valid) assert.equal(result.discoveredContext.description.value, description, entry.label);
+      else assert.notEqual(result.discoveredContext.description.value, description, entry.label);
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});

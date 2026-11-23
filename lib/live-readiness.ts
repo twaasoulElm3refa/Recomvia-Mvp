@@ -164,8 +164,18 @@ function attributes(tag: string) {
   return output;
 }
 
+// SEO meta tags count only when they are active elements in the real document
+// head. Comments and inert markup may contain examples that browsers ignore.
+function activeHeadHtml(html: string) {
+  const activeMarkup = html.replace(
+    /<!--[\s\S]*?-->|<(script|style|template|noscript)\b[^>]*>[\s\S]*?<\/\1\s*>/gi,
+    "",
+  );
+  return activeMarkup.match(/<head\b[^>]*>([\s\S]*?)<\/head>/i)?.[1] ?? "";
+}
+
 function metaContent(html: string, target: string) {
-  for (const tag of html.match(/<meta\b[^>]*>/gi) ?? []) {
+  for (const tag of activeHeadHtml(html).match(/<meta\b[^>]*>/gi) ?? []) {
     const attrs = attributes(tag);
     if ((attrs.name || attrs.property || "").toLowerCase() === target.toLowerCase())
       return decodeHtmlEntities((attrs.content || "").trim());
@@ -178,8 +188,7 @@ function metaContent(html: string, target: string) {
 function hasGlobalNoindexMeta(html: string) {
   // Robots meta directives are meaningful only in the document head. Ignore
   // lookalike tags in a body, HTML comment or embedded script example.
-  const head = html.match(/<head\b[^>]*>([\s\S]*?)<\/head>/i)?.[1]
-    ?.replace(/<!--[\s\S]*?-->|<script\b[\s\S]*?<\/script>/gi, "") ?? "";
+  const head = activeHeadHtml(html);
   return (head.match(/<meta\b[^>]*>/gi) ?? []).some((tag) => {
     const attrs = attributes(tag);
     if ((attrs.name || "").toLowerCase() !== "robots") return false;
@@ -209,11 +218,7 @@ function linkHref(html: string, rel: string) {
   // Only active link elements in the document head can declare SEO metadata.
   // Remove comments and inert examples before locating the head, so a fake
   // canonical inside a script, template or body cannot earn readiness points.
-  const activeMarkup = html.replace(
-    /<!--[\s\S]*?-->|<(script|style|template|noscript)\b[^>]*>[\s\S]*?<\/\1\s*>/gi,
-    "",
-  );
-  const head = activeMarkup.match(/<head\b[^>]*>([\s\S]*?)<\/head>/i)?.[1] ?? "";
+  const head = activeHeadHtml(html);
   let singleHref: string | null = null;
   for (const tag of head.match(/<link\b[^>]*>/gi) ?? []) {
     const attrs = attributes(tag);
