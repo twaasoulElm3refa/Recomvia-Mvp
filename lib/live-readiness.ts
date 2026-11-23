@@ -196,13 +196,18 @@ function activeDocumentLanguage(html: string) {
   return decodeHtmlEntities((attributes(rootTag).lang || "").trim());
 }
 
+// A meta description or Open Graph field is unambiguous only when a single
+// active head tag declares it. Duplicate declarations (including empty or
+// identical copies) should not earn readiness points or seed site context.
 function metaContent(html: string, target: string) {
+  let singleContent: string | null = null;
   for (const tag of activeHeadHtml(html).match(/<meta\b[^>]*>/gi) ?? []) {
     const attrs = attributes(tag);
-    if ((attrs.name || attrs.property || "").toLowerCase() === target.toLowerCase())
-      return decodeHtmlEntities((attrs.content || "").trim());
+    if ((attrs.name || attrs.property || "").toLowerCase() !== target.toLowerCase()) continue;
+    if (singleContent !== null) return "";
+    singleContent = decodeHtmlEntities((attrs.content || "").trim());
   }
-  return "";
+  return singleContent ?? "";
 }
 
 // A homepage can request de-indexing even when robots.txt allows crawling.
