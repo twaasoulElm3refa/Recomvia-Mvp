@@ -1101,7 +1101,7 @@ test("readiness rejects duplicate active SEO meta and Open Graph declarations", 
     { label: "short single description remains partial", head: '<meta name="description" content="Short">' + ogTags, descriptionPoints: 4, ogPoints: 6 },
     { label: "commented duplicate is inert", head: descTag + '<!-- ' + descTag + ' -->' + ogTags, descriptionPoints: 7, ogPoints: 6 },
     { label: "template duplicate is inert", head: descTag + '<template>' + descTag + '</template>' + ogTags, descriptionPoints: 7, ogPoints: 6 },
-    { label: "script example is inert", head: descTag + '<script>const example = \\'' + descTag + '\\';</script>' + ogTags, descriptionPoints: 7, ogPoints: 6 },
+    { label: "script example is inert", head: descTag + '<script>const example = "' + descTag + '";</script>' + ogTags, descriptionPoints: 7, ogPoints: 6 },
     { label: "body-only duplicate does not count", head: descTag + ogTags, body: descTag + ogTitle, descriptionPoints: 7, ogPoints: 6 },
     { label: "different meta key is harmless", head: descTag + ogTags + '<meta name="keywords" content="analytics">', descriptionPoints: 7, ogPoints: 6 },
   ];
@@ -1111,7 +1111,7 @@ test("readiness rejects duplicate active SEO meta and Open Graph declarations", 
       globalThis.fetch = async (input) => {
         const url = new URL(String(input));
         fetched.push(url.pathname);
-        if (url.pathname === "/robots.txt") return new Response("User-agent: *\\nAllow: /");
+        if (url.pathname === "/robots.txt") return new Response("User-agent: *\nAllow: /");
         if (url.pathname === "/sitemap.xml") return new Response("<urlset></urlset>");
         assert.equal(url.pathname, "/", entry.label);
         return new Response(
