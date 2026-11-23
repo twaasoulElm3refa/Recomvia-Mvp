@@ -185,6 +185,37 @@ test("readiness rejects HTTP error and partial homepages before auxiliary crawli
   }
 });
 
+test("readiness rejects non-200 success statuses before auxiliary requests", async () => {
+  const homepage = '<!doctype html><html lang="en"><head><title>Valid-looking placeholder</title></head><body><h1>Placeholder</h1></body></html>';
+  const originalFetch = globalThis.fetch;
+  const requests: string[] = [];
+  try {
+    for (const status of [201, 202, 203, 204, 205, 207, 208, 226]) {
+      requests.length = 0;
+      globalThis.fetch = async (url) => {
+        requests.push(String(url));
+        // The Fetch API forbids response bodies for 204 and 205.
+        return new Response(status === 204 || status === 205 ? null : homepage, {
+          status,
+          headers: { "Content-Type": "text/html" },
+        });
+      };
+      await assert.rejects(
+        runLiveReadinessScan("https://pending.example/"),
+        new RegExp(`HTTP ${status}; a complete HTTP 200 page is required`),
+        `status ${status} must not produce a readiness score`,
+      );
+      assert.deepEqual(
+        requests,
+        ["https://pending.example/"],
+        `status ${status} must not crawl robots.txt or sitemap.xml`,
+      );
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("resolution requires citations returned by the API, not invented links in model JSON", () => {
   const good = parseTargetDiscovery(
     response(JSON.stringify({ status: "resolved", candidates: [candidate()] })),
