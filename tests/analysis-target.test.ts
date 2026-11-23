@@ -1146,6 +1146,8 @@ test("robots readiness evaluates the scanned URL path, with specific Allow rules
     { label: "specific path blocked", path: "/private/report", robots: "User-agent: *\nDisallow: /private", blocked: true },
     { label: "prefix matching follows robots conventions", path: "/private2", robots: "User-agent: *\nDisallow: /private", blocked: true },
     { label: "unrelated path remains allowed", path: "/public", robots: "User-agent: *\nDisallow: /private", blocked: false },
+    { label: "robots paths are case-sensitive", path: "/Private", robots: "User-agent: *\nDisallow: /private", blocked: false },
+    { label: "matching uppercase path is blocked", path: "/Private", robots: "User-agent: *\nDisallow: /Private", blocked: true },
     { label: "more-specific allow wins", path: "/private/open", robots: "User-agent: *\nDisallow: /private\nAllow: /private/open", blocked: false },
     { label: "more-specific disallow wins", path: "/private/open", robots: "User-agent: *\nAllow: /private\nDisallow: /private/open", blocked: true },
     { label: "equal specificity allow wins", path: "/private", robots: "User-agent: *\nDisallow: /private\nAllow: /private", blocked: false },
