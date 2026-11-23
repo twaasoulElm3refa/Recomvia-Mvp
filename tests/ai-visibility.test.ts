@@ -874,7 +874,7 @@ test("readiness counts visible body copy without inert content or markup example
       const html = `<!doctype html><html lang="en"><head><title>Fixture content depth</title>${entry.head ?? ""}</head>${entry.preceding ?? ""}${entry.noBody ? "" : `<body>${entry.body}</body>`}</html>`;
       globalThis.fetch = async (input) => {
         const path = new URL(String(input)).pathname;
-        if (path === "/robots.txt") return new Response("User-agent: *\\nAllow: /", { headers: { "content-type": "text/plain" } });
+        if (path === "/robots.txt") return new Response("User-agent: *\nAllow: /", { headers: { "content-type": "text/plain" } });
         if (path === "/sitemap.xml") return new Response("<urlset></urlset>", { headers: { "content-type": "application/xml" } });
         return new Response(html, { headers: { "content-type": "text/html" } });
       };
