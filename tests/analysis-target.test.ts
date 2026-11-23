@@ -409,6 +409,7 @@ test("oversized unannounced crawler response is cancelled before the whole body 
   const originalFetch = globalThis.fetch;
   let chunksProduced = 0;
   let cancelled = false;
+  const usage = { requestCount: 0, bytesFetched: 0 };
   globalThis.fetch = async () => new Response(new ReadableStream<Uint8Array>({
     pull(controller) {
       chunksProduced++;
@@ -419,11 +420,47 @@ test("oversized unannounced crawler response is cancelled before the whole body 
   }), { headers: { "Content-Type": "text/html" } });
   try {
     await assert.rejects(
-      runLiveReadinessScan("https://large.example/"),
+      runLiveReadinessScan("https://large.example/", undefined, usage),
       /larger than the scan safety limit/,
     );
     assert.equal(cancelled, true, "stream must be cancelled when the cap is reached");
+    assert.deepEqual(usage, { requestCount: 1, bytesFetched: 6 * 256_000 });
     assert.ok(chunksProduced < 20, "the crawler must not download the entire response");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("failed auxiliary streams still account for delivered bytes without extra requests", async () => {
+  const originalFetch = globalThis.fetch;
+  const html = '<!doctype html><html lang="en"><head><title>Usage fixture</title></head><body><h1>Home</h1></body></html>';
+  const encoder = new TextEncoder();
+  const usage = { requestCount: 0, bytesFetched: 0 };
+  let robotsCancelled = false;
+  let sitemapReads = 0;
+  globalThis.fetch = async (input) => {
+    const path = new URL(String(input)).pathname;
+    if (path === "/") return new Response(html, { headers: { "Content-Type": "text/html" } });
+    if (path === "/robots.txt") return new Response(new ReadableStream<Uint8Array>({
+      pull(controller) { controller.enqueue(new Uint8Array(200_000)); },
+      cancel() { robotsCancelled = true; },
+    }));
+    if (path === "/sitemap.xml") return new Response(new ReadableStream<Uint8Array>({
+      pull(controller) {
+        if (sitemapReads++ === 0) controller.enqueue(new Uint8Array(123));
+        else controller.error(new Error("fixture stream interrupted"));
+      },
+    }));
+    throw new Error("Unexpected fixture path: " + path);
+  };
+  try {
+    const result = await runLiveReadinessScan("https://usage-fixture.example/", undefined, usage);
+    assert.equal(robotsCancelled, true);
+    assert.equal(result.findings.find((item) => item.code === "robots_policy")?.status, "fail");
+    assert.equal(result.findings.find((item) => item.code === "xml_sitemap")?.status, "fail");
+    assert.deepEqual(usage, { requestCount: 3, bytesFetched: encoder.encode(html).byteLength + 400_000 + 123 });
+    assert.equal(result.bytesFetched, usage.bytesFetched);
+    assert.equal(result.requestCount, usage.requestCount);
   } finally {
     globalThis.fetch = originalFetch;
   }
