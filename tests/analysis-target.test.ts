@@ -147,6 +147,44 @@ test("crawl input rejects IANA special-use IPv4 addresses before any network acc
   }
 });
 
+test("readiness rejects HTTP error and partial homepages before auxiliary crawling", async () => {
+  const homepage = '<!doctype html><html lang="en"><head><title>Example</title></head><body><h1>Example</h1></body></html>';
+  const originalFetch = globalThis.fetch;
+  const requests: string[] = [];
+  try {
+    for (const status of [206, 403, 404, 410, 429, 500, 503]) {
+      requests.length = 0;
+      globalThis.fetch = async (input) => {
+        requests.push(String(input));
+        return new Response(homepage, {
+          status,
+          headers: { "Content-Type": "text/html" },
+        });
+      };
+      await assert.rejects(
+        runLiveReadinessScan("https://status.example/"),
+        new RegExp(`HTTP ${status}`),
+        `a ${status} HTML response must never produce a readiness score`,
+      );
+      assert.deepEqual(requests, ["https://status.example/"], `status ${status} must not trigger auxiliary requests`);
+    }
+
+    requests.length = 0;
+    globalThis.fetch = async (input) => {
+      const url = String(input);
+      requests.push(url);
+      if (url.endsWith("/robots.txt")) return new Response("User-agent: *\nAllow: /", { headers: { "Content-Type": "text/plain" } });
+      if (url.endsWith("/sitemap.xml")) return new Response("<urlset></urlset>", { headers: { "Content-Type": "application/xml" } });
+      return new Response(homepage, { status: 200, headers: { "Content-Type": "text/html" } });
+    };
+    const result = await runLiveReadinessScan("https://status.example/");
+    assert.equal(result.httpStatus, 200);
+    assert.equal(requests.length, 3, "a valid homepage still performs the normal bounded crawl");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("resolution requires citations returned by the API, not invented links in model JSON", () => {
   const good = parseTargetDiscovery(
     response(JSON.stringify({ status: "resolved", candidates: [candidate()] })),
