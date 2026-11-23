@@ -848,3 +848,46 @@ test("readiness uses only active same-origin body anchors for identity and page 
     globalThis.fetch = originalFetch;
   }
 });
+
+test("readiness counts visible body copy without inert content or markup examples", async () => {
+  const originalFetch = globalThis.fetch;
+  const fakeWords = Array(350).fill("phantomexample").join(" ");
+  const realWords = Array(105).fill("realcontent").join(" ");
+  const richWords = Array(305).fill("realcontent").join(" ");
+  const cases: Array<{ label: string; body: string; expectedPoints: number; expectedCount: number; head?: string; preceding?: string; noBody?: boolean }> = [
+    { label: "HTML comment", body: `<!-- ${fakeWords} -->`, expectedPoints: 0, expectedCount: 0 },
+    { label: "script block", body: `<script type="text/plain">${fakeWords}</script>`, expectedPoints: 0, expectedCount: 0 },
+    { label: "style block", body: `<style>${fakeWords}</style>`, expectedPoints: 0, expectedCount: 0 },
+    { label: "template block", body: `<template>${fakeWords}</template>`, expectedPoints: 0, expectedCount: 0 },
+    { label: "noscript example", body: `<noscript>${fakeWords}</noscript>`, expectedPoints: 0, expectedCount: 0 },
+    { label: "textarea example", body: `<textarea>${fakeWords}</textarea>`, expectedPoints: 0, expectedCount: 0 },
+    { label: "head-only copy", head: `<script type="text/plain">${fakeWords}</script>`, body: "", expectedPoints: 0, expectedCount: 0 },
+    { label: "text outside body", preceding: `<p>${fakeWords}</p>`, body: "", expectedPoints: 0, expectedCount: 0 },
+    { label: "missing body", noBody: true, body: "", preceding: `<p>${fakeWords}</p>`, expectedPoints: 0, expectedCount: 0 },
+    { label: "visible paragraph", body: `<main><p>${realWords}</p></main>`, expectedPoints: 4, expectedCount: 105 },
+    { label: "visible substantial content", body: `<article><p>${richWords}</p></article>`, expectedPoints: 8, expectedCount: 305 },
+    { label: "inert words cannot boost a short body", body: `<p>${realWords}</p><!-- ${fakeWords} --><template>${fakeWords}</template>`, expectedPoints: 4, expectedCount: 105 },
+    { label: "mixed visible and scripted text", body: `<p>${realWords}</p><script>${fakeWords}</script><style>${fakeWords}</style>`, expectedPoints: 4, expectedCount: 105 },
+  ];
+  try {
+    for (const entry of cases) {
+      const html = `<!doctype html><html lang="en"><head><title>Fixture content depth</title>${entry.head ?? ""}</head>${entry.preceding ?? ""}${entry.noBody ? "" : `<body>${entry.body}</body>`}</html>`;
+      globalThis.fetch = async (input) => {
+        const path = new URL(String(input)).pathname;
+        if (path === "/robots.txt") return new Response("User-agent: *\nAllow: /", { headers: { "content-type": "text/plain" } });
+        if (path === "/sitemap.xml") return new Response("<urlset></urlset>", { headers: { "content-type": "application/xml" } });
+        return new Response(html, { headers: { "content-type": "text/html" } });
+      };
+      const result = await runLiveReadinessScan("https://fixture.example/");
+      const depth = result.findings.find((item) => item.code === "content_depth");
+      assert.ok(depth, entry.label + ": missing content finding");
+      assert.equal(depth.awardedPoints, entry.expectedPoints, entry.label + ": readiness points");
+      assert.match(depth.evidence, new RegExp(`\\b${entry.expectedCount} visible words\\b`), entry.label + ": reported word count");
+      assert.equal(result.pageText.includes("phantomexample"), false, entry.label + ": inert text leaked into sampled content");
+      assert.equal(result.pageText.includes("realcontent"), entry.expectedCount > 0, entry.label + ": real content missing");
+      assert.equal(result.requestCount, 3, entry.label + ": extra HTTP requests");
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});

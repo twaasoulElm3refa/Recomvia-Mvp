@@ -367,7 +367,9 @@ export async function runLiveReadinessScan(input: string, requiredOrigin?: strin
   try { sitemap = await fetchText(sitemapUrl, MAX_AUX_BYTES, "application/xml,text/xml,text/plain,*/*;q=0.1", origin, usage); } catch { sitemap = null; }
 
   const html = page.text;
-  const text = plainText(html);
+  // Count and analyze rendered body copy only. Head markup, commented examples,
+  // and inert script/template content are not visible evidence of page depth.
+  const text = plainText(activeBodyHtml(html));
   // Only a single title in the active document head is an extractable SEO
   // signal. Body tags, commented examples and duplicate titles must not
   // inflate the score or influence discovered business context.
