@@ -113,6 +113,19 @@ async function fetchText(startUrl: URL, maxBytes: number, accept: string, requir
         current = new URL(location, current);
         continue;
       }
+      // Only HTTP 200 documents can contribute evidence. Retain the status
+      // for diagnostics, but do not read an unusable error or partial body.
+      if (response.status !== 200) {
+        await response.body?.cancel().catch(() => undefined);
+        return {
+          url: current.toString(),
+          status: response.status,
+          contentType: response.headers.get("content-type") || "",
+          robotsTag: response.headers.get("x-robots-tag") || "",
+          text: "",
+          bytes: 0,
+        };
+      }
       const announcedLength = Number(response.headers.get("content-length") || "0");
       if (announcedLength > maxBytes) {
         // A rejected Content-Length still has a live response body. Stop it
