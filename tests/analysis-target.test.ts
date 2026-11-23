@@ -1191,7 +1191,7 @@ test("partial auxiliary documents cannot earn robots or sitemap readiness points
   const originalFetch = globalThis.fetch;
   const origin = "https://partial-auxiliary.example";
   const homepage = '<!doctype html><html lang="en"><head><title>Auxiliary response fixture</title></head><body><h1>Welcome</h1></body></html>';
-  const robots = "User-agent: *\\nAllow: /";
+  const robots = "User-agent: *\nAllow: /";
   const sitemap = "<urlset><url><loc>https://partial-auxiliary.example/</loc></url></urlset>";
   const cases = [
     { label: "complete documents", robotsStatus: 200, sitemapStatus: 200, robotsPass: true, sitemapPass: true },
