@@ -132,6 +132,9 @@ async function fetchText(startUrl: URL, maxBytes: number, accept: string, requir
             const { done, value } = await reader.read();
             if (done) break;
             bytesRead += value.byteLength;
+            // Account for every delivered chunk, including the chunk that
+            // exceeds the cap and bytes received before a stream failure.
+            if (usage) usage.bytesFetched += value.byteLength;
             if (bytesRead > maxBytes) {
               await reader.cancel().catch(() => undefined);
               throw new Error("The response is larger than the scan safety limit.");
@@ -143,7 +146,6 @@ async function fetchText(startUrl: URL, maxBytes: number, accept: string, requir
           reader.releaseLock();
         }
       }
-      if (usage) usage.bytesFetched += bytesRead;
       return {
         url: current.toString(),
         status: response.status,
