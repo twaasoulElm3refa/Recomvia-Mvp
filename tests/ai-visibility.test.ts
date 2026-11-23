@@ -740,7 +740,7 @@ test("readiness requires an actual typed JSON-LD node before awarding schema poi
         '</head><body><h1>Northstar</h1></body></html>';
       globalThis.fetch = async (input) => {
         const path = new URL(String(input)).pathname;
-        if (path === "/robots.txt") return new Response("User-agent: *\\nAllow: /", { headers: { "content-type": "text/plain" } });
+        if (path === "/robots.txt") return new Response("User-agent: *\nAllow: /", { headers: { "content-type": "text/plain" } });
         if (path === "/sitemap.xml") return new Response("<urlset></urlset>", { headers: { "content-type": "application/xml" } });
         return new Response(html, { headers: { "content-type": "text/html" } });
       };
@@ -751,7 +751,7 @@ test("readiness requires an actual typed JSON-LD node before awarding schema poi
         assert.equal(finding.awardedPoints, entry.points[index], entry.label + ": " + code);
       }
       assert.match(result.findings.find((item) => item.code === "structured_data")!.evidence,
-        /\\(1 inspected\\)/, entry.label);
+        /\(1 inspected\)/, entry.label);
       assert.equal(result.requestCount, 3, entry.label);
     }
   } finally {
