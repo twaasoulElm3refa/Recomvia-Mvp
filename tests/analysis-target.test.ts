@@ -1136,3 +1136,51 @@ test("readiness rejects duplicate active SEO meta and Open Graph declarations", 
     globalThis.fetch = originalFetch;
   }
 });
+
+
+test("robots readiness evaluates the scanned URL path, with specific Allow rules taking precedence", async () => {
+  const originalFetch = globalThis.fetch;
+  const origin = "https://robots-path.example";
+  const page = '<!doctype html><html lang="en"><head><title>Robots path example</title></head><body><h1>Page</h1></body></html>';
+  const cases: Array<{ label: string; path: string; robots: string; blocked: boolean }> = [
+    { label: "specific path blocked", path: "/private/report", robots: "User-agent: *\\nDisallow: /private", blocked: true },
+    { label: "prefix matching follows robots conventions", path: "/private2", robots: "User-agent: *\\nDisallow: /private", blocked: true },
+    { label: "unrelated path remains allowed", path: "/public", robots: "User-agent: *\\nDisallow: /private", blocked: false },
+    { label: "more-specific allow wins", path: "/private/open", robots: "User-agent: *\\nDisallow: /private\\nAllow: /private/open", blocked: false },
+    { label: "more-specific disallow wins", path: "/private/open", robots: "User-agent: *\\nAllow: /private\\nDisallow: /private/open", blocked: true },
+    { label: "equal specificity allow wins", path: "/private", robots: "User-agent: *\\nDisallow: /private\\nAllow: /private", blocked: false },
+    { label: "root disallow remains enforced", path: "/anything", robots: "User-agent: *\\nDisallow: /\\nAllow: /special", blocked: true },
+    { label: "root exception is allowed", path: "/special", robots: "User-agent: *\\nDisallow: /\\nAllow: /special", blocked: false },
+    { label: "end-anchored rule matches exact path", path: "/private", robots: "User-agent: *\\nDisallow: /private$", blocked: true },
+    { label: "end-anchored rule does not match descendants", path: "/private/page", robots: "User-agent: *\\nDisallow: /private$", blocked: false },
+    { label: "wildcard pattern blocks matching path", path: "/articles/private/info", robots: "User-agent: *\\nDisallow: /*/private/", blocked: true },
+    { label: "wildcard pattern leaves other paths accessible", path: "/articles/public/info", robots: "User-agent: *\\nDisallow: /*/private/", blocked: false },
+    { label: "named bot rule cannot block general crawler", path: "/private", robots: "User-agent: ExampleBot\\nDisallow: /private\\nUser-agent: *\\nAllow: /", blocked: false },
+    { label: "consecutive wildcard group agents respected", path: "/private", robots: "User-agent: ExampleBot\\nUser-agent: *\\nDisallow: /private", blocked: true },
+    { label: "path query can be blocked by robots", path: "/search?q=private", robots: "User-agent: *\\nDisallow: /search?*", blocked: true },
+    { label: "empty Disallow is not a ban", path: "/public", robots: "User-agent: *\\nDisallow:", blocked: false },
+  ];
+  try {
+    for (const entry of cases) {
+      const fetched: string[] = [];
+      globalThis.fetch = async (input) => {
+        const url = new URL(String(input));
+        fetched.push(url.pathname);
+        if (url.pathname === "/robots.txt") return new Response(entry.robots, { headers: { "Content-Type": "text/plain" } });
+        if (url.pathname === "/sitemap.xml") return new Response("<urlset></urlset>", { headers: { "Content-Type": "application/xml" } });
+        assert.equal(url.pathname + url.search, entry.path, entry.label);
+        return new Response(page, { headers: { "Content-Type": "text/html" } });
+      };
+      const usage = { requestCount: 0, bytesFetched: 0 };
+      const result = await runLiveReadinessScan(origin + entry.path, undefined, usage);
+      const finding = result.findings.find((item) => item.code === "robots_policy");
+      assert.ok(finding, entry.label);
+      assert.equal(finding.status, entry.blocked ? "fail" : "pass", entry.label);
+      assert.equal(finding.awardedPoints, entry.blocked ? 0 : 7, entry.label);
+      assert.deepEqual(fetched, [new URL(origin + entry.path).pathname, "/robots.txt", "/sitemap.xml"], entry.label);
+      assert.equal(usage.requestCount, 3, entry.label + ": unchanged bounded network budget");
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
