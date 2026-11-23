@@ -386,7 +386,16 @@ export async function runLiveReadinessScan(input: string, requiredOrigin?: strin
   if (page.status !== 200) {
     throw new Error(`The website returned HTTP ${page.status}; a complete HTTP 200 page is required.`);
   }
-  if (!page.contentType.toLowerCase().includes("text/html") && !page.text.match(/<!doctype html|<html\b/i)) {
+  // A successful status and an HTML Content-Type do not prove that the
+  // homepage contains a document. Reject empty/plain-text placeholders before
+  // spending requests on robots.txt or sitemap.xml. Keep support for documents
+  // with omitted optional <html> tags, but ignore inert markup examples.
+  const documentMarkup = page.text.replace(
+    /<!--[\s\S]*?-->|<(script|style|template|noscript|textarea)\b[^>]*>[\s\S]*?<\/\1\s*>/gi,
+    "",
+  );
+  if (!/<(?:html|head|body)\b/i.test(documentMarkup) ||
+      (!page.contentType.toLowerCase().includes("text/html") && !page.text.match(/<!doctype html|<html\b/i))) {
     throw new Error("The address did not return an HTML webpage.");
   }
 
