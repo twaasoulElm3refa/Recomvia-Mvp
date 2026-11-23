@@ -467,13 +467,21 @@ export async function runLiveReadinessScan(input: string, requiredOrigin?: strin
   const robotsIsHtml = Boolean(robots && /^\uFEFF?\s*(?:<!doctype\s+html\b|<html\b|<head\b|<body\b)/i.test(robots.text));
   // A partial/empty or asynchronous 2xx response cannot establish a complete robots policy.
   const robotsReadable = Boolean(robots && robots.status === 200 && !robotsIsHtml);
-  const sitemapHint = robotsReadable ? robots?.text.match(/^\s*sitemap:\s*(\S+)/im)?.[1] : undefined;
   let sitemapUrl = new URL("/sitemap.xml", origin);
-  if (sitemapHint) {
-    try {
-      const hinted = new URL(sitemapHint, origin);
-      if (hinted.origin === origin) sitemapUrl = hinted;
-    } catch { /* Fall back to the same-origin default for an invalid hint. */ }
+  if (robotsReadable && robots) {
+    // Sitemap directives are line-scoped. Ignore empty/commented values and
+    // continue past unusable hints to the first safe same-origin candidate.
+    for (const rawLine of robots.text.split(/\r\n|\n|\r/)) {
+      const hint = rawLine.replace(/#.*/, "").trim().match(/^sitemap:\s*(\S+)$/i)?.[1];
+      if (!hint) continue;
+      try {
+        const hinted = new URL(hint, origin);
+        assertPublicUrl(hinted);
+        if (hinted.origin !== origin) continue;
+        sitemapUrl = hinted;
+        break;
+      } catch { /* Try the next hint, or use the default. */ }
+    }
   }
   let sitemap: Awaited<ReturnType<typeof fetchText>> | null = null;
   try { sitemap = await fetchText(sitemapUrl, MAX_AUX_BYTES, "application/xml,text/xml,text/plain,*/*;q=0.1", origin, usage); } catch { sitemap = null; }

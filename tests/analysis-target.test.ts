@@ -867,6 +867,41 @@ test("robots readiness rejects HTML fallbacks and ignores hints from failed poli
       robotsPass: true, sitemapPath: "/custom.xml",
     },
     {
+      label: "empty sitemap directive must not consume the next line",
+      robots: "User-agent: *\nSitemap:\nAllow: /",
+      robotsPass: true, sitemapPath: "/sitemap.xml",
+    },
+    {
+      label: "comment-only sitemap hint is ignored",
+      robots: "User-agent: *\nAllow: /\nSitemap: # not configured",
+      robotsPass: true, sitemapPath: "/sitemap.xml",
+    },
+    {
+      label: "later valid same-origin hint follows an off-origin hint",
+      robots: "User-agent: *\nAllow: /\nSitemap: https://external.example/sitemap.xml\nSitemap: /custom.xml",
+      robotsPass: true, sitemapPath: "/custom.xml",
+    },
+    {
+      label: "credential-bearing hint is skipped",
+      robots: "User-agent: *\nAllow: /\nSitemap: https://user:pass@robots-fallback.example/private.xml\nSitemap: /custom.xml",
+      robotsPass: true, sitemapPath: "/custom.xml",
+    },
+    {
+      label: "malformed multi-token hint is skipped",
+      robots: "User-agent: *\nAllow: /\nSitemap: /broken.xml extra\nSitemap: /custom.xml",
+      robotsPass: true, sitemapPath: "/custom.xml",
+    },
+    {
+      label: "case, CRLF and trailing comments are accepted",
+      robots: "User-agent: *\r\nAllow: /\r\n  SITEMAP: /custom.xml # preferred",
+      robotsPass: true, sitemapPath: "/custom.xml",
+    },
+    {
+      label: "first safe hint wins without extra requests",
+      robots: "User-agent: *\nAllow: /\nSitemap: /custom.xml\nSitemap: /later.xml",
+      robotsPass: true, sitemapPath: "/custom.xml",
+    },
+    {
       label: "valid empty robots resource",
       robots: "",
       robotsPass: true, sitemapPath: "/sitemap.xml",
