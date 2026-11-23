@@ -756,3 +756,52 @@ test("readiness ignores inert JSON-LD examples but accepts genuine head and body
     globalThis.fetch = originalFetch;
   }
 });
+
+test("readiness counts only active body headings for H1 and question structure", async () => {
+  const originalFetch = globalThis.fetch;
+  const fake = "<h1>Sample fake heading</h1><h2>How does it work?</h2>";
+  const cases: Array<{
+    label: string; body: string; h1: number; answer: number;
+    head?: string; preceding?: string; noBody?: boolean;
+  }> = [
+    { label: "commented example", body: "<!-- " + fake + " -->", h1: 0, answer: 0 },
+    { label: "JavaScript example", body: "<script>const example = '" + fake + "';</script>", h1: 0, answer: 0 },
+    { label: "CSS example", body: "<style>" + fake + "</style>", h1: 0, answer: 0 },
+    { label: "template example", body: "<template>" + fake + "</template>", h1: 0, answer: 0 },
+    { label: "noscript example", body: "<noscript>" + fake + "</noscript>", h1: 0, answer: 0 },
+    { label: "textarea example", body: "<textarea>" + fake + "</textarea>", h1: 0, answer: 0 },
+    { label: "head-only headings", head: fake, body: "", h1: 0, answer: 0 },
+    { label: "headings outside body", preceding: fake, body: "", h1: 0, answer: 0 },
+    { label: "missing body", noBody: true, body: "", head: fake, h1: 0, answer: 0 },
+    { label: "visible H1", body: "<h1>Northstar analytics</h1>", h1: 6, answer: 0 },
+    { label: "visible question heading", body: "<h2>How does Northstar work?</h2>", h1: 0, answer: 8 },
+    { label: "visible H1 and question", body: "<h1>Northstar</h1><h2>How does it work?</h2>", h1: 6, answer: 8 },
+    { label: "two visible H1s", body: "<h1>First</h1><h1>Second</h1>", h1: 3, answer: 0 },
+    { label: "real H1 with commented duplicate", body: "<h1>Northstar</h1><!-- " + fake + " -->", h1: 6, answer: 0 },
+    { label: "real question with scripted H1", body: "<h2>How does it work?</h2><script>" + fake + "</script>", h1: 0, answer: 8 },
+  ];
+  try {
+    for (const entry of cases) {
+      const head = "<!doctype html><html lang=\"en\"><head><title>Northstar heading fixture</title>" +
+        (entry.head || "") + "</head>";
+      const markup = head + (entry.preceding || "") +
+        (entry.noBody ? "" : "<body>" + entry.body + "</body>") + "</html>";
+      globalThis.fetch = async (input) => {
+        const path = new URL(String(input)).pathname;
+        if (path === "/robots.txt") return new Response("User-agent: *\nAllow: /", { headers: { "content-type": "text/plain" } });
+        if (path === "/sitemap.xml") return new Response("<urlset></urlset>", { headers: { "content-type": "application/xml" } });
+        return new Response(markup, { headers: { "content-type": "text/html" } });
+      };
+      const result = await runLiveReadinessScan("https://fixture.example/");
+      const primary = result.findings.find((finding) => finding.code === "primary_heading");
+      const answer = result.findings.find((finding) => finding.code === "answer_structure");
+      assert.ok(primary, entry.label + ": primary heading finding missing");
+      assert.ok(answer, entry.label + ": answer structure finding missing");
+      assert.equal(primary.awardedPoints, entry.h1, entry.label + ": H1");
+      assert.equal(answer.awardedPoints, entry.answer, entry.label + ": question heading");
+      assert.equal(result.requestCount, 3, entry.label + ": unexpected network requests");
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
