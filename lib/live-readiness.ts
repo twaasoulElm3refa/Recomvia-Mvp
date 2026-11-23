@@ -268,6 +268,9 @@ function validatedCanonicalUrl(html: string, pageUrl: string) {
     const url = new URL(href, pageUrl);
     if (url.hash) return "";
     assertPublicUrl(url);
+    // An off-origin canonical credits another site's URL for indexing. It is
+    // a valid syndication hint, but not a positive readiness signal for this site.
+    if (url.origin !== new URL(pageUrl).origin) return "";
     return url.toString();
   } catch {
     return "";
