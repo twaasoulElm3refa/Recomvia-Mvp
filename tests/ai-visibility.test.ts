@@ -715,6 +715,50 @@ test("readiness trusts only live head metadata, not comments, inert examples, or
   }
 });
 
+test("readiness requires an actual typed JSON-LD node before awarding schema points", async () => {
+  const originalFetch = globalThis.fetch;
+  const cases: Array<{ label: string; data: unknown; points: [number, number, number] }> = [
+    { label: "context only", data: { "@context": "https://schema.org" }, points: [0, 0, 0] },
+    { label: "id only", data: { "@id": "https://fixture.example/#entity" }, points: [0, 0, 0] },
+    { label: "empty type", data: { "@type": "" }, points: [0, 0, 0] },
+    { label: "whitespace type", data: { "@type": "  " }, points: [0, 0, 0] },
+    { label: "empty type array", data: { "@type": [] }, points: [0, 0, 0] },
+    { label: "non-string type", data: { "@type": { value: "Organization" } }, points: [0, 0, 0] },
+    { label: "invalid type array", data: { "@type": [null, 42, ""] }, points: [0, 0, 0] },
+    { label: "graph without types", data: { "@graph": [{ "@id": "#entity" }] }, points: [0, 0, 0] },
+    { label: "untyped array", data: [{ "@context": "https://schema.org" }, { "@id": "#entity" }], points: [0, 0, 0] },
+    { label: "typed organization", data: { "@type": "Organization", name: "Northstar" }, points: [8, 8, 0] },
+    { label: "typed array", data: [{ "@id": "#entity" }, { "@type": "FAQPage" }], points: [8, 0, 8] },
+    { label: "typed graph", data: { "@context": "https://schema.org", "@graph": [{ "@id": "#a" }, { "@type": "Organization" }] }, points: [8, 8, 0] },
+    { label: "nonempty type in array", data: { "@type": ["", "Organization"] }, points: [8, 8, 0] },
+    { label: "generic typed item", data: { "@type": "Thing" }, points: [8, 0, 0] },
+  ];
+  try {
+    for (const entry of cases) {
+      const html = '<!doctype html><html lang="en"><head><title>Northstar structured data test</title>' +
+        '<script type="application/ld+json">' + JSON.stringify(entry.data) + '</script>' +
+        '</head><body><h1>Northstar</h1></body></html>';
+      globalThis.fetch = async (input) => {
+        const path = new URL(String(input)).pathname;
+        if (path === "/robots.txt") return new Response("User-agent: *\\nAllow: /", { headers: { "content-type": "text/plain" } });
+        if (path === "/sitemap.xml") return new Response("<urlset></urlset>", { headers: { "content-type": "application/xml" } });
+        return new Response(html, { headers: { "content-type": "text/html" } });
+      };
+      const result = await runLiveReadinessScan("https://fixture.example/");
+      for (const [index, code] of ["structured_data", "organization_entity", "answer_structure"].entries()) {
+        const finding = result.findings.find((item) => item.code === code);
+        assert.ok(finding, entry.label + ": missing " + code);
+        assert.equal(finding.awardedPoints, entry.points[index], entry.label + ": " + code);
+      }
+      assert.match(result.findings.find((item) => item.code === "structured_data")!.evidence,
+        /\\(1 inspected\\)/, entry.label);
+      assert.equal(result.requestCount, 3, entry.label);
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("readiness ignores inert JSON-LD examples but accepts genuine head and body scripts", async () => {
   const originalFetch = globalThis.fetch;
   const organization = '<script type="application/ld+json">{"@context":"https://schema.org","@type":"Organization","name":"Northstar"}</script>';
