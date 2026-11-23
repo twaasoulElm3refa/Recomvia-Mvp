@@ -351,10 +351,9 @@ function hasRelevantCrawlerPathDisallow(robotsText: string, path: string) {
 
   for (const rawLine of robotsText.split(/\r?\n/)) {
     const line = rawLine.replace(/#.*/, "").trim();
-    if (!line) {
-      if (group.agents.length) finishGroup();
-      continue;
-    }
+    // Blank and comment-only lines are permitted within a robots group.
+    // Only a new user-agent after rules starts a new group.
+    if (!line) continue;
     const directive = line.match(/^([a-z-]+)\s*:\s*(.*?)\s*$/i);
     if (!directive) continue;
     const key = directive[1].toLowerCase();

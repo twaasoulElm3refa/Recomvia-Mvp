@@ -1284,6 +1284,13 @@ test("robots readiness evaluates the scanned URL path, with specific Allow rules
     { label: "consecutive wildcard group agents respected", path: "/private", robots: "User-agent: ExampleBot\nUser-agent: *\nDisallow: /private", blocked: true },
     { label: "path query can be blocked by robots", path: "/search?q=private", robots: "User-agent: *\nDisallow: /search?*", blocked: true },
     { label: "empty Disallow is not a ban", path: "/public", robots: "User-agent: *\nDisallow:", blocked: false },
+    { label: "blank line before rule does not discard the agent", path: "/private", robots: "User-agent: *\n\nDisallow: /private", blocked: true },
+    { label: "comment before named rule preserves the agent", path: "/private", robots: "User-agent: Googlebot\n# Private content\nDisallow: /private", blocked: true },
+    { label: "comment between rules preserves a specific allow", path: "/private/open", robots: "User-agent: *\nDisallow: /private\n# Public exception\nAllow: /private/open", blocked: false },
+    { label: "blank line between rules preserves a specific denial", path: "/private/open", robots: "User-agent: *\nAllow: /private\n\nDisallow: /private/open", blocked: true },
+    { label: "blank line between agents preserves shared rules", path: "/private", robots: "User-agent: Googlebot\n\nUser-agent: ExampleBot\nDisallow: /private", blocked: true },
+    { label: "CRLF and whitespace-only lines preserve rules", path: "/private", robots: "User-agent: Bingbot\r\n \t\r\nDisallow: /private", blocked: true },
+    { label: "new agent after a rule still begins a distinct group", path: "/private", robots: "User-agent: ExampleBot\nDisallow: /private\n\n# Public policy\nUser-agent: *\nAllow: /", blocked: false },
   ];
   try {
     for (const entry of cases) {
