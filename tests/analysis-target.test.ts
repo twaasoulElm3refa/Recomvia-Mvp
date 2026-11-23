@@ -654,6 +654,44 @@ test("readiness awards schema scores only for parseable JSON-LD with declared ty
   }
 });
 
+test("robots readiness rejects named search and scan crawler blocks without misreading unrelated bots", async () => {
+  const originalFetch = globalThis.fetch;
+  const origin = "https://named-robots.example";
+  const html = '<!doctype html><html lang="en"><head><title>Named robots fixture</title></head><body><h1>Home</h1></body></html>';
+  const cases: Array<{ label: string; path: string; policy: string; blocked: boolean }> = [
+    { label: "Googlebot blocked despite wildcard allow", path: "/", policy: "User-agent: *\\nAllow: /\\n\\nUser-agent: Googlebot\\nDisallow: /", blocked: true },
+    { label: "Bingbot blocked despite wildcard allow", path: "/", policy: "User-agent: Bingbot\\nDisallow: /\\n\\nUser-agent: *\\nAllow: /", blocked: true },
+    { label: "RecomviaBot blocked despite wildcard allow", path: "/", policy: "User-agent: *\\nAllow: /\\n\\nUser-agent: RECOMVIABOT\\nDisallow: /", blocked: true },
+    { label: "named path block applies to scanned path", path: "/private/report", policy: "User-agent: Googlebot\\nDisallow: /private\\n\\nUser-agent: *\\nAllow: /", blocked: true },
+    { label: "named path exception overrides a broader block", path: "/private/open", policy: "User-agent: Googlebot\\nDisallow: /private\\nAllow: /private/open\\n\\nUser-agent: *\\nAllow: /", blocked: false },
+    { label: "named bot allow does not override wildcard denial of others", path: "/", policy: "User-agent: *\\nDisallow: /\\n\\nUser-agent: Googlebot\\nAllow: /", blocked: true },
+    { label: "unrelated bot denied while major crawlers are permitted", path: "/", policy: "User-agent: BadBot\\nDisallow: /\\n\\nUser-agent: *\\nAllow: /", blocked: false },
+    { label: "Googlebot-Image policy does not apply to Googlebot", path: "/", policy: "User-agent: Googlebot-Image\\nDisallow: /\\n\\nUser-agent: *\\nAllow: /", blocked: false },
+    { label: "named agent with no rules does not inherit wildcard denial", path: "/", policy: "User-agent: Googlebot\\nAllow: /\\n\\nUser-agent: Bingbot\\nAllow: /\\n\\nUser-agent: RecomviaBot\\nAllow: /\\n\\nUser-agent: *\\nDisallow: /", blocked: false },
+  ];
+  try {
+    for (const entry of cases) {
+      const requested: string[] = [];
+      globalThis.fetch = async (input) => {
+        const pathname = new URL(String(input)).pathname;
+        requested.push(pathname);
+        if (pathname === "/robots.txt") return new Response(entry.policy, { headers: { "Content-Type": "text/plain" } });
+        if (pathname === "/sitemap.xml") return new Response("<urlset></urlset>", { headers: { "Content-Type": "application/xml" } });
+        return new Response(html, { headers: { "Content-Type": "text/html" } });
+      };
+      const result = await runLiveReadinessScan(origin + entry.path);
+      const finding = result.findings.find((row) => row.code === "robots_policy");
+      assert.ok(finding, entry.label);
+      assert.equal(finding.awardedPoints, entry.blocked ? 0 : 7, entry.label);
+      assert.equal(finding.status, entry.blocked ? "fail" : "pass", entry.label);
+      assert.deepEqual(requested, [entry.path, "/robots.txt", "/sitemap.xml"], entry.label);
+      assert.equal(result.requestCount, 3, entry.label + ": no additional HTTP requests");
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("auxiliary discovery never fetches cross-origin robots or sitemap URLs", async () => {
   const originalFetch = globalThis.fetch;
   const origin = "https://auxiliary-fixture.example";
