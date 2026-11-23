@@ -940,3 +940,48 @@ test("canonical readiness counts only active head links, not HTML examples or bo
     globalThis.fetch = originalFetch;
   }
 });
+
+test("canonical readiness rejects duplicate active head hints without counting inert examples", async () => {
+  const originalFetch = globalThis.fetch;
+  const origin = "https://canonical-duplicates.example";
+  const valid = '<link rel="canonical" href="/primary">';
+  const cases = [
+    { label: "one valid canonical", head: valid, pass: true },
+    { label: "conflicting canonical", head: valid + '<link rel="canonical" href="/other">', pass: false },
+    { label: "identical duplicate canonical", head: valid + valid, pass: false },
+    { label: "invalid second canonical", head: valid + '<link rel="canonical" href="javascript:alert(1)">', pass: false },
+    { label: "empty first canonical", head: '<link rel="canonical" href="">' + valid, pass: false },
+    { label: "canonical combined with alternate rel", head: valid + '<link rel="alternate canonical" href="/other">', pass: false },
+    { label: "different noncanonical link is harmless", head: valid + '<link rel="alternate" href="/ar">', pass: true },
+    { label: "commented-out duplicate is inert", head: valid + '<!-- ' + valid + ' -->', pass: true },
+    { label: "template duplicate is inert", head: valid + '<template>' + valid + '</template>', pass: true },
+  ];
+  try {
+    for (const entry of cases) {
+      const requested: string[] = [];
+      globalThis.fetch = async (input) => {
+        const url = new URL(String(input));
+        requested.push(url.pathname);
+        if (url.pathname === "/robots.txt") return new Response("User-agent: *\\nAllow: /");
+        if (url.pathname === "/sitemap.xml") return new Response("<urlset></urlset>");
+        assert.equal(url.pathname, "/", entry.label);
+        return new Response(
+          '<!doctype html><html lang="en"><head><title>Duplicate canonical fixture</title>' +
+            entry.head + '</head><body><h1>Home</h1></body></html>',
+          { headers: { "content-type": "text/html" } },
+        );
+      };
+      const usage = { requestCount: 0, bytesFetched: 0 };
+      const result = await runLiveReadinessScan(origin + "/", undefined, usage);
+      const finding = result.findings.find((row) => row.code === "canonical");
+      assert.ok(finding, entry.label);
+      assert.equal(finding.status, entry.pass ? "pass" : "fail", entry.label);
+      assert.equal(finding.awardedPoints, entry.pass ? 7 : 0, entry.label);
+      if (entry.pass) assert.equal(finding.evidence, origin + "/primary", entry.label);
+      assert.deepEqual(requested, ["/", "/robots.txt", "/sitemap.xml"], entry.label);
+      assert.equal(usage.requestCount, 3, entry.label + ": no extra network requests");
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
