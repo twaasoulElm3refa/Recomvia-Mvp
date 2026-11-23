@@ -418,7 +418,19 @@ export async function runLiveReadinessScan(input: string, requiredOrigin?: strin
   const headerNoindex = hasGlobalNoindexHeader(page.robotsTag);
   const robotsHealthy = robotsReadable && !globallyBlocked && !metaNoindex && !headerNoindex;
   const sitemapHealthy = Boolean(sitemap && sitemap.status >= 200 && sitemap.status < 300 && hasSitemapRootDocument(sitemap.text));
-  const hasIdentityLink = /href\s*=\s*["'][^"']*(?:\/about(?:[-_/]|["'#?])|\/contact(?:[-_/]|["'#?])|\/company(?:[-_/]|["'#?])|عن-?ا|اتصل-?بنا)/i.test(html);
+  // Identity signals and extra-page crawl candidates must come from actual
+  // body anchors, not commented-out links, scripts, templates or page examples.
+  const bodyAnchors = visibleBody.match(/<a\b[^>]*>/gi) ?? [];
+  const hasIdentityLink = bodyAnchors.some((tag) => {
+    const href = decodeHtmlEntities(attributes(tag).href || "");
+    if (!href) return false;
+    try {
+      const target = new URL(href, page.url);
+      // An external company's About page does not identify this website.
+      return target.origin === origin &&
+        /(?:\/about(?:[-_/]|$)|\/contact(?:[-_/]|$)|\/company(?:[-_/]|$)|عن-?ا|اتصل-?بنا)/i.test(target.pathname);
+    } catch { return false; }
+  });
   const hasOpenGraph = Boolean(metaContent(html, "og:title") && metaContent(html, "og:description"));
 
   const findings: ReadinessFinding[] = [];
@@ -467,7 +479,7 @@ export async function runLiveReadinessScan(input: string, requiredOrigin?: strin
   });
 
   const internalLinks: string[] = [];
-  for (const tag of html.match(/<a\b[^>]*>/gi) || []) {
+  for (const tag of bodyAnchors) {
     try {
       const raw = attributes(tag).href;
       if (!raw || /^(?:mailto|tel|javascript|data):/i.test(raw)) continue;

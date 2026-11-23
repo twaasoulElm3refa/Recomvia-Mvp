@@ -805,3 +805,46 @@ test("readiness counts only active body headings for H1 and question structure",
     globalThis.fetch = originalFetch;
   }
 });
+
+
+test("readiness uses only active same-origin body anchors for identity and page sampling", async () => {
+  const originalFetch = globalThis.fetch;
+  const fakeAbout = '<a href="/about">About this site</a>';
+  const cases: Array<{ label: string; head?: string; body: string; identity: number; links: string[] }> = [
+    { label: "HTML comment", body: "<!-- " + fakeAbout + " -->", identity: 0, links: [] },
+    { label: "script string", body: "<script>const example = '" + fakeAbout + "';</script>", identity: 0, links: [] },
+    { label: "template content", body: "<template>" + fakeAbout + "</template>", identity: 0, links: [] },
+    { label: "noscript content", body: "<noscript>" + fakeAbout + "</noscript>", identity: 0, links: [] },
+    { label: "textarea example", body: "<textarea>" + fakeAbout + "</textarea>", identity: 0, links: [] },
+    { label: "style example", body: "<style>" + fakeAbout + "</style>", identity: 0, links: [] },
+    { label: "head-only anchor", head: fakeAbout, body: "", identity: 0, links: [] },
+    { label: "plain text imitating an href", body: '<p>href="/about"</p>', identity: 0, links: [] },
+    { label: "external About", body: '<a href="https://other.example/about">Other company</a>', identity: 0, links: [] },
+    { label: "different-origin similar domain", body: '<a href="https://fixture.example.evil/about">Other site</a>', identity: 0, links: [] },
+    { label: "real About", body: fakeAbout, identity: 6, links: ["https://fixture.example/about"] },
+    { label: "relative Company", body: '<a href="./company/">Company</a>', identity: 6, links: ["https://fixture.example/company/"] },
+    { label: "real Contact", body: '<a href="/contact">Contact</a>', identity: 6, links: ["https://fixture.example/contact"] },
+    { label: "real unrelated internal page", body: '<a href="/services">Services</a>', identity: 0, links: ["https://fixture.example/services"] },
+    { label: "fake About plus real Services", body: "<!-- " + fakeAbout + ' --><a href="/services">Services</a>', identity: 0, links: ["https://fixture.example/services"] },
+  ];
+  try {
+    for (const entry of cases) {
+      const html = '<!doctype html><html lang="en"><head><title>Fixture company</title>' +
+        (entry.head || "") + "</head><body>" + entry.body + "</body></html>";
+      globalThis.fetch = async (input) => {
+        const pathname = new URL(String(input)).pathname;
+        if (pathname === "/robots.txt") return new Response("User-agent: *\nAllow: /", { headers: { "content-type": "text/plain" } });
+        if (pathname === "/sitemap.xml") return new Response("<urlset></urlset>", { headers: { "content-type": "application/xml" } });
+        return new Response(html, { headers: { "content-type": "text/html" } });
+      };
+      const result = await runLiveReadinessScan("https://fixture.example/");
+      const identity = result.findings.find((finding) => finding.code === "identity_paths");
+      assert.ok(identity, entry.label + ": identity finding missing");
+      assert.equal(identity.awardedPoints, entry.identity, entry.label + ": identity score");
+      assert.deepEqual(result.internalLinks, entry.links, entry.label + ": sampled links");
+      assert.equal(result.requestCount, 3, entry.label + ": unexpected network requests");
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
