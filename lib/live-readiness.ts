@@ -377,11 +377,11 @@ function hasSitemapRootDocument(text: string) {
 export async function runLiveReadinessScan(input: string, requiredOrigin?: string, usage: CrawlUsage = { requestCount: 0, bytesFetched: 0 }): Promise<LiveReadinessResult> {
   const source = normalizeWebsiteInput(input);
   const page = await fetchText(source, MAX_HTML_BYTES, "text/html,application/xhtml+xml;q=0.9,*/*;q=0.1", requiredOrigin, usage);
-  // A branded 404/500 error document is HTML, but not a successful homepage.
-  // Partial HTTP 206 responses are not sufficient evidence for page readiness.
-  // Stop before requesting robots.txt or sitemap.xml for such responses.
-  if (page.status < 200 || page.status >= 300 || page.status === 206) {
-    throw new Error(`The website returned HTTP ${page.status}; a successful full page is required.`);
+  // Only a complete HTTP 200 document is valid homepage evidence. Other 2xx
+  // statuses may describe accepted/pending work, no content or a partial reply,
+  // even when they carry a branded HTML placeholder. Do not crawl auxiliaries.
+  if (page.status !== 200) {
+    throw new Error(`The website returned HTTP ${page.status}; a complete HTTP 200 page is required.`);
   }
   if (!page.contentType.toLowerCase().includes("text/html") && !page.text.match(/<!doctype html|<html\b/i)) {
     throw new Error("The address did not return an HTML webpage.");
