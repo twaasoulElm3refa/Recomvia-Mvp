@@ -965,6 +965,13 @@ test("canonical readiness counts only active head links, not HTML examples or bo
   const cases: Array<{ label: string; head: string; body?: string; expected?: string; prefix?: string }> = [
     { label: "head relative canonical", head: valid, expected: origin + "/actual" },
     { label: "absolute canonical", head: '<link href="https://canonical-fixture.example/absolute" rel="alternate canonical">', expected: origin + "/absolute" },
+    { label: "same-origin query canonical", head: '<link rel="canonical" href="/article?lang=ar">', expected: origin + "/article?lang=ar" },
+    { label: "same-origin protocol-relative canonical", head: '<link rel="canonical" href="//canonical-fixture.example/article">', expected: origin + "/article" },
+    { label: "external syndication canonical does not credit the local site", head: '<link rel="canonical" href="https://original-publisher.example/article">' },
+    { label: "external protocol-relative canonical", head: '<link rel="canonical" href="//other.example/page">' },
+    { label: "lookalike subdomain is another origin", head: '<link rel="canonical" href="https://blog.canonical-fixture.example/">' },
+    { label: "http canonical downgrades the https origin", head: '<link rel="canonical" href="http://canonical-fixture.example/article">' },
+    { label: "external canonical with matching path", head: '<link rel="canonical" href="https://other.example/">' },
     { label: "case-insensitive rel", head: '<link REL="CANONICAL" HREF="/case">', expected: origin + "/case" },
     { label: "commented-out canonical", head: '<!-- ' + valid + ' -->' },
     { label: "script string example", head: '<script>const example = \'<link rel="canonical" href="/fake">\';</script>' },
