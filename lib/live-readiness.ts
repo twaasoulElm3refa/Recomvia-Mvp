@@ -247,6 +247,21 @@ function validatedCanonicalUrl(html: string, pageUrl: string) {
   }
 }
 
+// Count only JSON-LD scripts present in the active HTML document. Comments
+// and inert containers may include copyable examples which crawlers never see
+// as structured data; searching raw HTML would award false SEO/entity points.
+function activeJsonLdScripts(html: string) {
+  const activeMarkup = html.replace(
+    /<!--[\s\S]*?-->|<(template|noscript|textarea|style)\b[^>]*>[\s\S]*?<\/\1\s*>/gi,
+    "",
+  );
+  return (activeMarkup.match(/<script\b[^>]*>[\s\S]*?<\/script\s*>/gi) ?? [])
+    .filter((script) => {
+      const opening = script.match(/^<script\b[^>]*>/i)?.[0] ?? "";
+      return (attributes(opening).type || "").trim().toLowerCase() === "application/ld+json";
+    });
+}
+
 // A Disallow in a named crawler's group must not be attributed to the
 // wildcard group. Keep consecutive User-agent lines in the same group and
 // let an equally specific Allow: / take precedence over Disallow: /.
@@ -354,11 +369,11 @@ export async function runLiveReadinessScan(input: string, requiredOrigin?: strin
   const canonical = validatedCanonicalUrl(html, page.url);
   const htmlLang = html.match(/<html\b[^>]*\blang\s*=\s*["']?([^\s"'>]+)/i)?.[1] || "";
   const h1Count = (html.match(/<h1\b/gi) || []).length;
-  const jsonLdBlocks = html.match(/<script\b[^>]*type\s*=\s*["']application\/ld\+json["'][^>]*>[\s\S]*?<\/script>/gi) || [];
+  const jsonLdBlocks = activeJsonLdScripts(html);
   // A script tag does not prove valid structured data. Parse each bounded JSON-LD
   // block independently so malformed markup cannot inflate readiness or entity scores.
   const parsedJsonLd = jsonLdBlocks.flatMap((block) => {
-    const raw = block.replace(/^<script\b[^>]*>/i, "").replace(/<\/script>$/i, "").trim();
+    const raw = block.replace(/^<script\b[^>]*>/i, "").replace(/<\/script\s*>$/i, "").trim();
     try {
       const data: unknown = JSON.parse(raw);
       const nodes = Array.isArray(data) ? data : [data];
