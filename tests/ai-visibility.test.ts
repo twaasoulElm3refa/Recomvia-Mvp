@@ -891,3 +891,48 @@ test("readiness counts visible body copy without inert content or markup example
     globalThis.fetch = originalFetch;
   }
 });
+
+
+test("readiness document-language scoring ignores inert and non-root html tags", async () => {
+  const originalFetch = globalThis.fetch;
+  const page = (opening: string, prefix = "", suffix = "") =>
+    '<!doctype html>' + prefix + opening +
+    "<head><title>Document language fixture</title></head><body><h1>Fixture page</h1>" +
+    suffix + "</body></html>";
+  const cases: Array<{ label: string; html: string; language: string }> = [
+    { label: "valid double-quoted language", html: page('<html lang="ar">'), language: "ar" },
+    { label: "valid single-quoted mixed-case root", html: page("<HTML dir='ltr' LANG='en-GB'>"), language: "en-GB" },
+    { label: "valid unquoted language", html: page("<html lang=fr>"), language: "fr" },
+    { label: "empty language", html: page('<html lang="">'), language: "" },
+    { label: "missing language", html: page("<html>"), language: "" },
+    { label: "data-lang is not a language declaration", html: page('<html data-lang="ar">'), language: "" },
+    { label: "fake root in HTML comment", html: page("<html>", '<!-- <html lang="fr"> -->'), language: "" },
+    { label: "fake root in script", html: page("<html>", '<script type="text/plain"><html lang="fr"></script>'), language: "" },
+    { label: "fake root in template", html: page("<html>", '<template><html lang="fr"></template>'), language: "" },
+    { label: "fake root in noscript", html: page("<html>", '<noscript><html lang="fr"></noscript>'), language: "" },
+    { label: "fake root in textarea", html: page("<html>", '<textarea><html lang="fr"></textarea>'), language: "" },
+    { label: "fake root in body", html: page("<html>", "", '<html lang="fr">'), language: "" },
+    { label: "no root, fake html inside body", html: '<!doctype html><body><html lang="fr"></body>', language: "" },
+    { label: "comment before real root", html: page('<html lang="ar">', '<!-- <html lang="fr"> -->'), language: "ar" },
+    { label: "script before real root", html: page('<html lang="ar">', '<script><html lang="fr"></script>'), language: "ar" },
+  ];
+  try {
+    for (const entry of cases) {
+      globalThis.fetch = async (input) => {
+        const path = new URL(String(input)).pathname;
+        if (path === "/robots.txt") return new Response("User-agent: *\nAllow: /", { headers: { "content-type": "text/plain" } });
+        if (path === "/sitemap.xml") return new Response("<urlset></urlset>", { headers: { "content-type": "application/xml" } });
+        return new Response(entry.html, { headers: { "content-type": "text/html" } });
+      };
+      const result = await runLiveReadinessScan("https://fixture.example/");
+      const finding = result.findings.find((item) => item.code === "html_language");
+      assert.ok(finding, entry.label + ": missing document-language finding");
+      assert.equal(finding.awardedPoints, entry.language ? 5 : 0, entry.label);
+      assert.equal(finding.status, entry.language ? "pass" : "fail", entry.label);
+      assert.equal(finding.evidence, entry.language ? "lang=" + entry.language : "The html element has no lang attribute.", entry.label);
+      assert.equal(result.requestCount, 3, entry.label + ": unexpected HTTP requests");
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
