@@ -464,7 +464,10 @@ export async function runLiveReadinessScan(input: string, requiredOrigin?: strin
   // Some site routers return their HTML homepage (HTTP 200) for missing
   // robots.txt files. Neither that page nor an HTTP error is a usable policy
   // or a trustworthy source for sitemap hints.
-  const robotsIsHtml = Boolean(robots && /^\uFEFF?\s*(?:<!doctype\s+html\b|<html\b|<head\b|<body\b)/i.test(robots.text));
+  // A fallback may start with an HTML comment or an ordinary HTML fragment
+  // instead of a document root. Plain robots comments start with "#"; keep
+  // accepting genuine text policies even if a server mislabels their MIME.
+  const robotsIsHtml = Boolean(robots && /^\s*(?:<!--|<!doctype\s+html\b|<(?:html|head|body|title|meta|link|script|style|div|main|section|p|h[1-6])\b)/i.test(robots.text));
   // A partial/empty or asynchronous 2xx response cannot establish a complete robots policy.
   const robotsReadable = Boolean(robots && robots.status === 200 && !robotsIsHtml);
   let sitemapUrl = new URL("/sitemap.xml", origin);
