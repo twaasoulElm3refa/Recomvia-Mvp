@@ -936,3 +936,52 @@ test("readiness document-language scoring ignores inert and non-root html tags",
     globalThis.fetch = originalFetch;
   }
 });
+
+
+test("website identity discovery ignores inert markup but preserves active JSON-LD and visible offerings", async () => {
+  const originalFetch = globalThis.fetch;
+  const fakeSchema = '<script type="application/ld+json">{"@type":"Organization","name":"Ghost Corp","url":"https://fixture.example/"}</script>';
+  const fakeMeta = '<meta property="og:site_name" content="Ghost Corp">';
+  const fakeOffering = '<a href="/services/ghost">Ghost Offering</a>';
+  const realSchema = '<script type="application/ld+json">{"@context":"https://schema.org","@type":"Organization","name":"Northstar","url":"https://fixture.example/"}</script>';
+  const cases: Array<{ label: string; head?: string; body?: string; realSchema?: boolean }> = [
+    { label: "commented schema and metadata", head: "<!-- " + fakeSchema + fakeMeta + " -->" },
+    { label: "template schema and fake offering", body: "<template>" + fakeSchema + fakeMeta + fakeOffering + "</template>" },
+    { label: "JavaScript string containing copyable markup", body: "<script>const example = " + JSON.stringify(fakeSchema + fakeMeta + fakeOffering) + ";</script>" },
+    { label: "textarea examples", body: "<textarea>" + fakeSchema + fakeMeta + fakeOffering + "</textarea>" },
+    { label: "body-only Open Graph tag", body: fakeMeta + "<p>Real website services.</p>" },
+    { label: "active organization schema and real service", head: '<meta property="og:site_name" content="Northstar">' + realSchema,
+      body: '<a href="/services/analytics">Forecasting analytics</a>', realSchema: true },
+    { label: "active JSON-LD with embedded HTML example", head:
+      '<script type="application/ld+json">{"@type":"Organization","name":"Northstar","url":"https://fixture.example/","description":"<meta property=\u0027og:site_name\u0027 content=\u0027Ghost Corp\u0027>"}</script>',
+      realSchema: true },
+  ];
+  try {
+    for (const entry of cases) {
+      const html = '<!doctype html><html lang="en"><head><title>Northstar | Business analytics</title>' +
+        (entry.head ?? "") + '</head><body><h1>Northstar analytics</h1><p>Northstar provides business analytics.</p>' +
+        (entry.body ?? "") + "</body></html>";
+      globalThis.fetch = async (input) => {
+        const path = new URL(String(input)).pathname;
+        if (path === "/robots.txt")
+          return new Response("User-agent: *\nAllow: /", { headers: { "content-type": "text/plain" } });
+        if (path === "/sitemap.xml")
+          return new Response("<urlset></urlset>", { headers: { "content-type": "application/xml" } });
+        return new Response(html, { headers: { "content-type": "text/html" } });
+      };
+      const result = await runLiveReadinessScan("https://fixture.example/");
+      assert.deepEqual(result.identityCandidates.map((item) => item.name), ["Northstar"], entry.label);
+      assert.equal(result.discoveredContext.brand.value, "Northstar", entry.label);
+      assert.ok(!result.discoveredContext.offerings.value.includes("Ghost Offering"), entry.label);
+      assert.equal(result.discoveredContext.offerings.value.includes("Forecasting analytics"),
+        entry.label === "active organization schema and real service", entry.label);
+      if (entry.realSchema) {
+        assert.ok(result.identityCandidates[0].evidence.some((e) => e.includes("Organization structured data")),
+          entry.label + ": active JSON-LD lost");
+      }
+      assert.equal(result.requestCount, 3, entry.label + ": unexpected network request");
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});

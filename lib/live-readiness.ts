@@ -518,13 +518,25 @@ export async function runLiveReadinessScan(input: string, requiredOrigin?: strin
   const requestCount = usage.requestCount;
   const bytesFetched = usage.bytesFetched;
   const confidence = Math.min(92, 72 + (robotsReadable ? 5 : 0) + (sitemap ? 5 : 0) + (parsedJsonLd.length ? 4 : 0) + (page.status === 200 ? 4 : 0));
+  // Discovery must use the same active head/body evidence as readiness scoring.
+  // Comments, code samples and inert containers cannot identify a business.
+  const discoveryHead = activeHeadHtml(html);
+  const discoveryBody = activeBodyHtml(html).replace(/<(?:meta|link)\b[^>]*>/gi, "");
+  const discoveryJsonLd = activeJsonLdScripts(html).map((script) => {
+    const opening = script.match(/^<script\b[^>]*>/i)?.[0] ?? "";
+    const payload = script.slice(opening.length).replace(/<\/script\s*>$/i, "");
+    // Preserve JSON-LD while preventing embedded HTML examples from looking
+    // like active metadata or navigation to downstream string extractors.
+    return opening + payload.replace(/</g, "\\u003c").replace(/>/g, "\\u003e") + "</script>";
+  }).join("");
+  const discoveryHtml = "<head>" + discoveryHead + "</head><body>" + discoveryBody + "</body>" + discoveryJsonLd;
   const discoveredContext = discoverWebsiteContext({
-    sourceUrl: source.toString(), finalUrl: page.url, title, description, htmlLang, html, visibleText: text,
+    sourceUrl: source.toString(), finalUrl: page.url, title, description, htmlLang, html: discoveryHtml, visibleText: text,
   });
   const identityCandidates = discoverWebsiteIdentityCandidates({
     finalUrl: page.url,
     title,
-    html,
+    html: discoveryHtml,
   });
 
   const internalLinks: string[] = [];
