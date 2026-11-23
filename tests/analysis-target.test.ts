@@ -1078,3 +1078,61 @@ test("readiness accepts only one active title in the document head", async () =>
     globalThis.fetch = originalFetch;
   }
 });
+
+test("readiness rejects duplicate active SEO meta and Open Graph declarations", async () => {
+  const originalFetch = globalThis.fetch;
+  const origin = "https://meta-duplicates.example";
+  const description = "Northstar Analytics provides clear forecasting, reliable business intelligence, and practical recommendations for growing teams.";
+  const descTag = '<meta name="description" content="' + description + '">';
+  const ogTitle = '<meta property="og:title" content="Northstar Analytics overview">';
+  const ogDescription = '<meta property="og:description" content="Insights and forecasting services">';
+  const ogTags = ogTitle + ogDescription;
+  const cases: Array<{
+    label: string; head: string; body?: string; descriptionPoints: number; ogPoints: number;
+  }> = [
+    { label: "one of each active field", head: descTag + ogTags, descriptionPoints: 7, ogPoints: 6 },
+    { label: "same description twice", head: descTag + descTag + ogTags, descriptionPoints: 0, ogPoints: 6 },
+    { label: "conflicting descriptions", head: descTag + '<meta name="description" content="Different description">' + ogTags, descriptionPoints: 0, ogPoints: 6 },
+    { label: "empty first description", head: '<meta name="description" content="">' + descTag + ogTags, descriptionPoints: 0, ogPoints: 6 },
+    { label: "empty second description", head: descTag + '<meta name="description">' + ogTags, descriptionPoints: 0, ogPoints: 6 },
+    { label: "duplicate identical og title", head: descTag + ogTags + ogTitle, descriptionPoints: 7, ogPoints: 0 },
+    { label: "conflicting og description", head: descTag + ogTags + '<meta property="og:description" content="Another summary">', descriptionPoints: 7, ogPoints: 0 },
+    { label: "missing og description", head: descTag + ogTitle, descriptionPoints: 7, ogPoints: 0 },
+    { label: "short single description remains partial", head: '<meta name="description" content="Short">' + ogTags, descriptionPoints: 4, ogPoints: 6 },
+    { label: "commented duplicate is inert", head: descTag + '<!-- ' + descTag + ' -->' + ogTags, descriptionPoints: 7, ogPoints: 6 },
+    { label: "template duplicate is inert", head: descTag + '<template>' + descTag + '</template>' + ogTags, descriptionPoints: 7, ogPoints: 6 },
+    { label: "script example is inert", head: descTag + '<script>const example = \\'' + descTag + '\\';</script>' + ogTags, descriptionPoints: 7, ogPoints: 6 },
+    { label: "body-only duplicate does not count", head: descTag + ogTags, body: descTag + ogTitle, descriptionPoints: 7, ogPoints: 6 },
+    { label: "different meta key is harmless", head: descTag + ogTags + '<meta name="keywords" content="analytics">', descriptionPoints: 7, ogPoints: 6 },
+  ];
+  try {
+    for (const entry of cases) {
+      const fetched: string[] = [];
+      globalThis.fetch = async (input) => {
+        const url = new URL(String(input));
+        fetched.push(url.pathname);
+        if (url.pathname === "/robots.txt") return new Response("User-agent: *\\nAllow: /");
+        if (url.pathname === "/sitemap.xml") return new Response("<urlset></urlset>");
+        assert.equal(url.pathname, "/", entry.label);
+        return new Response(
+          '<!doctype html><html lang="en"><head><title>Northstar Analytics overview</title>' +
+            entry.head + '</head><body><h1>Northstar Analytics</h1>' + (entry.body || "") + '</body></html>',
+          { headers: { "Content-Type": "text/html" } },
+        );
+      };
+      const usage = { requestCount: 0, bytesFetched: 0 };
+      const result = await runLiveReadinessScan(origin + "/", undefined, usage);
+      const metaFinding = result.findings.find((row) => row.code === "meta_description");
+      const ogFinding = result.findings.find((row) => row.code === "open_graph");
+      assert.ok(metaFinding, entry.label);
+      assert.ok(ogFinding, entry.label);
+      assert.equal(metaFinding.awardedPoints, entry.descriptionPoints, entry.label);
+      assert.equal(ogFinding.awardedPoints, entry.ogPoints, entry.label);
+      if (!entry.descriptionPoints) assert.equal(metaFinding.evidence, "No meta description was found.", entry.label);
+      assert.deepEqual(fetched, ["/", "/robots.txt", "/sitemap.xml"], entry.label);
+      assert.equal(usage.requestCount, 3, entry.label + ": no additional crawl requests");
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
