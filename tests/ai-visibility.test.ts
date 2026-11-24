@@ -1030,3 +1030,33 @@ test("website identity discovery ignores inert markup but preserves active JSON-
     globalThis.fetch = originalFetch;
   }
 });
+
+test("readiness confidence increases only for usable sitemap evidence", async () => {
+  const originalFetch = globalThis.fetch;
+  const cases: Array<{ label: string; response: () => Response; valid: boolean }> = [
+    { label: "valid urlset", response: () => new Response("<urlset></urlset>"), valid: true },
+    { label: "valid sitemap index", response: () => new Response("<sitemapindex></sitemapindex>"), valid: true },
+    { label: "404 response", response: () => new Response("<urlset></urlset>", { status: 404 }), valid: false },
+    { label: "partial response", response: () => new Response("<urlset></urlset>", { status: 206 }), valid: false },
+    { label: "HTML fallback", response: () => new Response("<html><body>Not found</body></html>"), valid: false },
+    { label: "incomplete XML", response: () => new Response("<urlset>"), valid: false },
+    { label: "empty response", response: () => new Response(""), valid: false },
+    { label: "network failure", response: () => { throw new Error("fixture offline"); }, valid: false },
+  ];
+  try {
+    for (const entry of cases) {
+      globalThis.fetch = async (input) => {
+        const path = new URL(String(input)).pathname;
+        if (path === "/robots.txt") return new Response("User-agent: *\nAllow: /");
+        if (path === "/sitemap.xml") return entry.response();
+        return new Response('<html lang="en"><head><title>Fixture website</title></head><body><h1>Fixture</h1></body></html>', { headers: { "content-type": "text/html" } });
+      };
+      const result = await runLiveReadinessScan("https://fixture.example/");
+      assert.equal(result.confidence, entry.valid ? 86 : 81, entry.label);
+      assert.equal(result.findings.find((finding) => finding.code === "xml_sitemap")?.awardedPoints, entry.valid ? 7 : 0, entry.label);
+      assert.equal(result.requestCount, 3, entry.label);
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});

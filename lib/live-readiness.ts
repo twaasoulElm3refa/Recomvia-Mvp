@@ -634,7 +634,9 @@ export async function runLiveReadinessScan(input: string, requiredOrigin?: strin
   const issueRows = findings.filter((finding) => finding.status !== "pass");
   const requestCount = usage.requestCount;
   const bytesFetched = usage.bytesFetched;
-  const confidence = Math.min(92, 72 + (robotsReadable ? 5 : 0) + (sitemap ? 5 : 0) + (parsedJsonLd.length ? 4 : 0) + (page.status === 200 ? 4 : 0));
+  // A response alone is not sitemap evidence: errors, HTML fallbacks and
+  // incomplete XML must not increase the reported confidence.
+  const confidence = Math.min(92, 72 + (robotsReadable ? 5 : 0) + (sitemapHealthy ? 5 : 0) + (parsedJsonLd.length ? 4 : 0) + (page.status === 200 ? 4 : 0));
   // Discovery must use the same active head/body evidence as readiness scoring.
   // Comments, code samples and inert containers cannot identify a business.
   const discoveryHead = activeHeadHtml(html);
