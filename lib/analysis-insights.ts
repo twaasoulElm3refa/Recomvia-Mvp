@@ -94,7 +94,15 @@ export async function buildAnalysisInsights(input: {
       coverageComplete: hasCompleteMeasurementCoverage(models, prompts, runs),
       missingCostRuns: runs.filter((run) => run.estimatedCostMicros === null && run.error?.code !== "budget_exhausted").length,
       recordedProviderCostMicros: runs.reduce((total, run) => total + (run.estimatedCostMicros ?? 0), 0) },
-    byEngine: unique(runs.map((run) => run.model)).map((model) => ({ model, surfaces: unique(runs.filter((run) => run.model === model).map((run) => run.surfaceType)), ...rates(runs.filter((run) => run.model === model), topic) })),
+    byEngine: models.map((model) => {
+      const sample = prompts.flatMap((prompt) => {
+        const matching = runs.filter((run) => run.model === model && run.promptId === prompt.id);
+        return matching.length === 1 ? matching : [];
+      });
+      // Ambiguous or missing slots are unavailable, not extra observations.
+      const attempted = prompts.filter((prompt) => topic || !["identity", "topic", "entity_resolution"].includes(prompt.intent)).length;
+      return { model, surfaces: unique(sample.map((run) => run.surfaceType)), ...rates(sample, topic), attempted };
+    }),
     competitors: [...competitorMap.values()].map((entry) => ({ name: entry.name, observedRuns: unique(entry.runIds).length, runIds: unique(entry.runIds) })).sort((a, b) => b.observedRuns - a.observedRuns).slice(0, policy.competitorLimit),
     sources: [...sourceMap.entries()].map(([host, value]) => ({ domain: host, urls: unique(value.urls).slice(0, 12), runIds: unique(value.runIds), observedRuns: unique(value.runIds).length, owned: Boolean(ownDomain && (host === ownDomain || host.endsWith(`.${ownDomain}`))) })).sort((a, b) => b.observedRuns - a.observedRuns).slice(0, advanced ? 30 : 10),
     pages: pages.map(({ pageText: _text, ...page }) => { void _text; return page; }),

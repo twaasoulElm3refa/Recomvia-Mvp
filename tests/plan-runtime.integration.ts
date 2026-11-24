@@ -411,7 +411,20 @@ test("a repeated provider model cannot masquerade as multiple independent models
     const body = await read(await POST(request(person)));
     assert.equal(body.scan.actualVisibilityStatus, "partial");
     assert.equal(body.scan.insights!.scope.coverageComplete, false);
-    assert.equal(body.scan.insights!.byEngine.length, 1);
+    const insights = body.scan.insights!;
+    assert.deepEqual(insights.byEngine.map((row) => row.model), insights.scope.models);
+    assert.deepEqual(insights.scope.models, ["test/model", "test/second"]);
+    // Both configured models have no unambiguous observations: one has
+    // duplicate responses for every question and the other has none.
+    for (const row of insights.byEngine) {
+      assert.equal(row.attempted, 5);
+      assert.equal(row.observed, 0);
+      assert.equal(row.mentionRate, null);
+      assert.equal(row.citationRate, null);
+      assert.deepEqual(row.surfaces, []);
+    }
+    assert.equal(body.scan.engineRuns.length, 12);
+    assert.ok(body.scan.engineRuns.every((run) => run.model === "test/model"));
   }, (body) => reply(body, { model: "test/model" }));
 });
 
@@ -458,6 +471,35 @@ for (const returnedModel of ["test/model", "test/unconfigured"]) {
         assert.deepEqual(listed.sort(), [...models].sort());
       }
       assert.ok(scan.engineRuns.some((run) => run.promptId === row.promptId && run.model === returnedModel));
+    }, (body) => {
+      if (body.model === "test/second" && ++secondCalls === 2)
+        return reply(body, { model: returnedModel });
+      return reply(body);
+    });
+  });
+}
+
+for (const returnedModel of ["test/model", "test/unconfigured"]) {
+  test(`engine summaries retain configured denominators when a provider substitutes ${returnedModel}`, async () => {
+    let secondCalls = 0;
+    await setup("growth", async (_db, requests) => {
+      const response = await POST(request(person));
+      assert.equal(response.status, 201);
+      const { scan } = await read(response);
+      const insights = scan.insights!;
+      assert.equal(requests.length, 37);
+      assert.equal(scan.engineRuns.length, 36);
+      assert.equal(insights.scope.coverageComplete, false);
+      assert.deepEqual(insights.byEngine.map((row) => row.model), insights.scope.models);
+      assert.ok(insights.byEngine.every((row) => row.attempted === 11));
+      const first = insights.byEngine.find((row) => row.model === "test/model")!;
+      const second = insights.byEngine.find((row) => row.model === "test/second")!;
+      assert.equal(first.observed, returnedModel === "test/model" ? 10 : 11);
+      assert.equal(first.mentionRate, 100);
+      assert.equal(second.observed, 10);
+      assert.equal(second.mentionRate, 0);
+      assert.equal(second.citationRate, 100);
+      assert.ok(scan.engineRuns.some((run) => run.model === returnedModel));
     }, (body) => {
       if (body.model === "test/second" && ++secondCalls === 2)
         return reply(body, { model: returnedModel });
