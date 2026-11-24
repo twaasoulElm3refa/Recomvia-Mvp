@@ -258,6 +258,36 @@ test("resolution requires citations returned by the API, not invented links in m
   );
 });
 
+test("entity discovery rejects leftover candidates when provider status is unresolved or invalid", () => {
+  for (const kind of ["auto", "person", "brand"] as const) {
+    const request = { ...input, kind };
+    const citedCandidate = { ...candidate(), kind: kind === "brand" ? "brand" : "person" };
+    for (const status of ["unresolved", "unknown", "", null, undefined, ["resolved"], true, 1]) {
+      const result = parseTargetDiscovery(
+        response(JSON.stringify({ status, candidates: [citedCandidate] })),
+        request,
+      );
+      assert.equal(result.status, "unresolved", JSON.stringify({ kind, status }));
+      assert.deepEqual(result.candidates, []);
+      assert.ok(result.response, "retain provider response for accounting");
+    }
+    for (const status of ["resolved", "ambiguous"] as const) {
+      const result = parseTargetDiscovery(
+        response(JSON.stringify({ status, candidates: [citedCandidate] })),
+        request,
+      );
+      assert.equal(result.status, status);
+      assert.equal(result.candidates.length, 1);
+    }
+    const topic = parseTargetDiscovery(
+      response(JSON.stringify({ status: "topic", candidates: [citedCandidate] })),
+      request,
+    );
+    assert.equal(topic.status, kind === "auto" ? "topic" : "unresolved");
+    assert.deepEqual(topic.candidates, []);
+  }
+});
+
 test("namesakes require confirmation, including explicit ambiguity after one source is rejected", () => {
   const two = parseTargetDiscovery(
     response(
