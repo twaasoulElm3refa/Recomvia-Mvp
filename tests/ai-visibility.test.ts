@@ -1247,3 +1247,55 @@ test("readiness honors the first duplicate HTML attribute rather than the last",
     globalThis.fetch = originalFetch;
   }
 });
+
+test("readiness decodes head attribute selectors once before matching SEO signals", async () => {
+  const originalFetch = globalThis.fetch;
+  const cases = [
+    {
+      label: "encoded crawler name blocks indexing and encoded selectors are recognized",
+      head: '<meta name="&#114;obots" content="noindex">' +
+        '<meta name="descr&#x69;ption" content="Useful summary">' +
+        '<meta property="og&#58;title" content="Fixture title">' +
+        '<meta property="og&#x3a;description" content="Useful summary">' +
+        '<link rel="alternate&#32;canon&#105;cal" href="/">',
+      points: [0, 4, 6, 7],
+    },
+    {
+      label: "encoded duplicate declarations remain ambiguous",
+      head: '<meta name="&#x67;ooglebot" content="none">' +
+        '<meta name="description" content="Useful summary">' +
+        '<meta name="descr&#105;ption" content="Another summary">' +
+        '<meta property="og:title" content="Fixture title">' +
+        '<meta property="og&#58;title" content="Other title">' +
+        '<meta property="og:description" content="Useful summary">' +
+        '<link rel="canonical" href="/"><link rel="canonic&#97;l" href="/">',
+      points: [0, 0, 0, 0],
+    },
+    {
+      label: "double-encoded selectors are not real metadata",
+      head: '<meta name="&amp;#114;obots" content="noindex">' +
+        '<meta name="descr&amp;#105;ption" content="Useful summary">' +
+        '<meta property="og&amp;#58;title" content="Fixture title">' +
+        '<meta property="og:description" content="Useful summary">' +
+        '<link rel="canonic&amp;#97;l" href="/">',
+      points: [7, 0, 0, 0],
+    },
+  ];
+  const codes = ["robots_policy", "meta_description", "open_graph", "canonical"];
+  try {
+    for (const entry of cases) {
+      globalThis.fetch = async (input) => {
+        const path = new URL(String(input)).pathname;
+        if (path === "/robots.txt") return new Response("User-agent: *\nAllow: /");
+        if (path === "/sitemap.xml") return new Response("<urlset></urlset>");
+        return new Response('<html lang="en"><head><title>Fixture website</title>' +
+          entry.head + '</head><body><h1>Fixture</h1></body></html>', { headers: { "content-type": "text/html" } });
+      };
+      const result = await runLiveReadinessScan("https://fixture.example/");
+      assert.deepEqual(codes.map((code) => result.findings.find((finding) => finding.code === code)?.awardedPoints), entry.points, entry.label);
+      assert.equal(result.requestCount, 3, entry.label);
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
