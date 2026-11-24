@@ -282,11 +282,11 @@ function linkHref(html: string, rel: string) {
 // Resolve legitimate relative canonicals against the final crawl URL, but do
 // not award SEO readiness points for fragments, unsafe schemes or local hosts.
 function validatedCanonicalUrl(html: string, pageUrl: string) {
-  const href = decodeHtmlEntities(linkHref(html, "canonical"));
+  const href = decodeHtmlEntities(linkHref(html, "canonical")).trim();
   if (!href || href.startsWith("#")) return "";
   try {
     const url = new URL(href, pageUrl);
-    if (url.hash) return "";
+    if (url.href.includes("#")) return "";
     assertPublicUrl(url);
     // An off-origin canonical credits another site's URL for indexing. It is
     // a valid syndication hint, but not a positive readiness signal for this site.
