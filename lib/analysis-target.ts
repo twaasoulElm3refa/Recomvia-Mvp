@@ -66,7 +66,10 @@ export function parseTargetInput(
     throw new Error("invalid_input");
   const input = value.trim().replace(/\s+/g, " ").normalize("NFC");
   const kind = payload.kind ?? "auto";
-  if (!["auto", "website", "person", "brand", "topic"].includes(String(kind)))
+  if (
+    typeof kind !== "string" ||
+    !["auto", "website", "person", "brand", "topic"].includes(kind)
+  )
     throw new Error("invalid_kind");
   if (
     payload.context !== undefined &&
