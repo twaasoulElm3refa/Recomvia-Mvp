@@ -1619,3 +1619,44 @@ test("primary heading readiness requires readable H1 text and preserves multiple
     globalThis.fetch = originalFetch;
   }
 });
+
+test("identity readiness recognizes Arabic URL segments without accepting off-site or misleading links", async () => {
+  const originalFetch = globalThis.fetch;
+  const cases = [
+    { label: "Arabic company path", body: '<a href="/عن-الشركة">About</a>', ready: true },
+    { label: "encoded Arabic contact path", body: '<a href="/ar/' + encodeURIComponent("اتصل-بنا") + '">Contact</a>', ready: true },
+    { label: "Arabic path with space", body: '<a href="/من%20نحن/">About</a>', ready: true },
+    { label: "Arabic contact underscore", body: '<a href="/تواصل_معنا">Contact</a>', ready: true },
+    { label: "same-origin absolute URL", body: '<a href="https://identity-slug.example/عن-الموقع">About</a>', ready: true },
+    { label: "English path retained", body: '<a href="/about-us">About</a>', ready: true },
+    { label: "external Arabic identity path", body: '<a href="https://other.example/عن-الشركة">About</a>', ready: false },
+    { label: "credential-bearing URL", body: '<a href="https://user@identity-slug.example/اتصل-بنا">Contact</a>', ready: false },
+    { label: "query-only hint", body: '<a href="/search?q=عن-الشركة">Search</a>', ready: false },
+    { label: "fragment-only hint", body: '<a href="/#اتصل-بنا">Contact</a>', ready: false },
+    { label: "encoded slash", body: '<a href="/news%2Fعن-الشركة">News</a>', ready: false },
+    { label: "malformed percent encoding", body: '<a href="/%FFعن-الشركة">About</a>', ready: false },
+    { label: "unrelated Arabic slug", body: '<a href="/خبر-عن-الشركة">News</a>', ready: false },
+    { label: "inert Arabic link", body: '<template><a href="/عن-الشركة">About</a></template>', ready: false },
+  ];
+  try {
+    for (const entry of cases) {
+      const html = "<!doctype html><html><head><title>Identity fixture</title></head><body>" + entry.body + "</body></html>";
+      const requested: string[] = [];
+      globalThis.fetch = async (input) => {
+        const path = new URL(String(input)).pathname;
+        requested.push(path);
+        if (path === "/robots.txt") return new Response("User-agent: *\nAllow: /");
+        if (path === "/sitemap.xml") return new Response("<urlset></urlset>");
+        return new Response(html, { headers: { "Content-Type": "text/html" } });
+      };
+      const result = await runLiveReadinessScan("https://identity-slug.example/");
+      const finding = result.findings.find((row) => row.code === "identity_paths");
+      assert.equal(finding?.status, entry.ready ? "pass" : "fail", entry.label);
+      assert.equal(finding?.awardedPoints, entry.ready ? 6 : 0, entry.label);
+      assert.deepEqual(requested, ["/", "/robots.txt", "/sitemap.xml"], entry.label);
+      assert.equal(result.requestCount, 3, entry.label);
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
