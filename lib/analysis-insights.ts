@@ -100,10 +100,17 @@ export async function buildAnalysisInsights(input: {
     pages: pages.map(({ pageText: _text, ...page }) => { void _text; return page; }),
     actionPlan: actionPlan.slice(0, advanced ? 16 : policy.plan === "free" ? 3 : 8),
     advanced: advanced ? { byIntent: unique(runs.map((run) => run.intent)).map((intent) => ({ intent, ...rates(runs.filter((run) => run.intent === intent), topic || intent === "identity") })),
-      agreement: topic ? [] : prompts.filter((prompt) => !["identity", "entity_resolution"].includes(prompt.intent)).map((prompt) => ({ promptId: prompt.id, question: prompt.question,
-        mentionedBy: runs.filter((run) => run.promptId === prompt.id && observed(run) && run.analysis.brandVisible).map((run) => run.model),
-        absentFrom: runs.filter((run) => run.promptId === prompt.id && observed(run) && !run.analysis.brandVisible).map((run) => run.model),
-        unavailable: runs.filter((run) => run.promptId === prompt.id && !observed(run)).map((run) => run.model) })), citationOpportunities,
+      agreement: topic ? [] : prompts.filter((prompt) => !["identity", "entity_resolution"].includes(prompt.intent)).map((prompt) => {
+        const row = { promptId: prompt.id, question: prompt.question, mentionedBy: [] as string[], absentFrom: [] as string[], unavailable: [] as string[] };
+        for (const model of models) {
+          const matching = runs.filter((run) => run.promptId === prompt.id && run.model === model);
+          // Missing or ambiguous observations are not evidence of absence.
+          if (matching.length !== 1 || !observed(matching[0])) row.unavailable.push(model);
+          else if (matching[0].analysis.brandVisible) row.mentionedBy.push(model);
+          else row.absentFrom.push(model);
+        }
+        return row;
+      }), citationOpportunities,
       contentGaps: pages.flatMap((page) => page.findings.filter((finding) => ["answer_structure", "content_depth"].includes(finding.code) && finding.status !== "pass").map((finding) => ({ code: finding.code, question: finding.evidence, evidenceUrls: [finding.sourceUrl], runIds: [] }))),
     } : null,
     history: [], change: null,
