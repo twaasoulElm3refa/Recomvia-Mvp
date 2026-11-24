@@ -27,7 +27,9 @@ export function decodeHtmlEntities(value: string) {
           return String.fromCodePoint(point);
         return entity;
       }
-      return NAMED_ENTITIES[named.toLowerCase()] ?? entity;
+      const key = named.toLowerCase();
+      // Unknown names must remain literal, including inherited Object properties.
+      return Object.hasOwn(NAMED_ENTITIES, key) ? NAMED_ENTITIES[key] : entity;
     },
   );
 }

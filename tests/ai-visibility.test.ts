@@ -1169,3 +1169,13 @@ test("readiness rejects JSON fallback documents instead of treating them as robo
     globalThis.fetch = originalFetch;
   }
 });
+
+
+test("HTML decoding preserves unknown named entities instead of inherited object properties", () => {
+  for (const value of ["&constructor;", "&Constructor;", "&CONSTRUCTOR;", "&unknown;", "&toString;"]) {
+    assert.equal(decodeHtmlEntities(value), value);
+    assert.equal(sanitizeProviderAnswer(value, { decodeEntities: true }), value);
+  }
+  assert.equal(decodeHtmlEntities("خدمات &amp; حلول &#8211; &NBSP;"), "خدمات & حلول –  ");
+  assert.equal(decodeHtmlEntities("&amp;constructor;"), "&constructor;");
+});
