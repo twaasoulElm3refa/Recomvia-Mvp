@@ -1179,3 +1179,29 @@ test("HTML decoding preserves unknown named entities instead of inherited object
   assert.equal(decodeHtmlEntities("خدمات &amp; حلول &#8211; &NBSP;"), "خدمات & حلول –  ");
   assert.equal(decodeHtmlEntities("&amp;constructor;"), "&constructor;");
 });
+
+
+test("website identity discovery handles deeply nested JSON-LD in document order", () => {
+  const first = '{"@type":"Organization","name":"Northstar","url":"https://northstar.example/"}';
+  const second = '{"@type":"Organization","name":"Northstar Labs","url":"https://northstar.example/"}';
+  const nested = "[".repeat(20000) + first + "]".repeat(20000);
+  const html = '<script type="application/ld+json">[' + nested + "," + second + ']</script>';
+  const identities = discoverWebsiteIdentityCandidates({
+    html,
+    title: "",
+    finalUrl: "https://northstar.example/",
+  });
+  assert.deepEqual(identities.map((item) => item.name), ["Northstar", "Northstar Labs"]);
+});
+
+test("website identity discovery handles wide root arrays without dropping valid evidence", () => {
+  const html = '<script type="application/ld+json">[' +
+    "null,".repeat(150000) +
+    '{"@type":"Organization","name":"Northstar","url":"https://northstar.example/"}]</script>';
+  const identities = discoverWebsiteIdentityCandidates({
+    html,
+    title: "",
+    finalUrl: "https://northstar.example/",
+  });
+  assert.deepEqual(identities.map((item) => item.name), ["Northstar"]);
+});
