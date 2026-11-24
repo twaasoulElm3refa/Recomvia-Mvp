@@ -317,7 +317,7 @@ function activeJsonLdScripts(html: string) {
 // only unreserved ASCII octets: encoded separators and wildcard characters
 // must not acquire a different meaning in a robots rule.
 function normalizeRobotsPath(value: string) {
-  return value.replace(/%[0-9a-f]{2}|[^\x00-\x7f]/giu, (part) => {
+  return value.replace(/%[0-9a-fA-F]{2}|[\u0080-\u{10ffff}]/gu, (part) => {
     if (!part.startsWith("%")) return encodeURIComponent(part);
     const character = String.fromCharCode(Number.parseInt(part.slice(1), 16));
     return /^[A-Za-z0-9._~-]$/.test(character) ? character : part.toUpperCase();
