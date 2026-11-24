@@ -100,6 +100,18 @@ test("classifies URL inputs without forcing personal names or topics into domain
   assert.throws(() => parseTargetInput({ input: "Valid", kind: "unknown" }));
 });
 
+test("target kind must be an actual allowed string, not a coercible JSON value", () => {
+  for (const kind of [["auto"], ["website"], ["person"], ["brand"], ["topic"], [["topic"]], [], {}, true, 1]) {
+    assert.throws(() => parseTargetInput({ input: "Valid example", kind }), /invalid_kind/);
+  }
+  for (const kind of ["auto", "person", "brand", "topic"]) {
+    assert.equal(parseTargetInput({ input: "Valid example", kind }).kind, kind);
+  }
+  assert.equal(parseTargetInput({ input: "example.com", kind: "website" }).kind, "website");
+  assert.equal(parseTargetInput({ input: "Valid example" }).kind, "auto");
+  assert.equal(parseTargetInput({ input: "Valid example", kind: null }).kind, "auto");
+});
+
 test("safe source URLs reject credentials and private hosts without rejecting fc-prefixed public names", () => {
   assert.equal(
     safeSourceUrl("https://fc-example.com"),
