@@ -1544,3 +1544,40 @@ test("unusable auxiliary bodies are cancelled while HTTP evidence is retained", 
     globalThis.fetch = originalFetch;
   }
 });
+
+test("answer readiness recognizes genuine question headings without substring false positives", async () => {
+  const originalFetch = globalThis.fetch;
+  const cases: Array<{ label: string; body: string; ready: boolean }> = [
+    { label: "ordinary business heading", body: "<h2>Business services</h2>", ready: false },
+    { label: "ordinary English words with question prefixes", body: "<h3>Island showcase</h3><h4>Warehouse</h4>", ready: false },
+    { label: "ordinary Arabic heading with embedded question word", body: "<h2>المعلومات المالية</h2><h3>المكان والخدمات</h3>", ready: false },
+    { label: "English question without punctuation", body: "<h2>How does the platform work</h2>", ready: true },
+    { label: "English question with inline markup", body: "<h3><span>What</span> does it measure?</h3>", ready: true },
+    { label: "Arabic question with inline markup", body: "<h4><strong>كيف</strong> تعمل المنصة؟</h4>", ready: true },
+    { label: "Arabic question without punctuation", body: "<h2>متى تظهر النتائج</h2>", ready: true },
+    { label: "explicit question with entity punctuation", body: "<h2>Pricing options&#63;</h2>", ready: true },
+    { label: "inert question examples", body: "<!-- <h2>What is this?</h2> --><template><h3>How does it work?</h3></template><h2>Business services</h2>", ready: false },
+    { label: "question text outside heading", body: "<p>How does it work?</p><h2>Services</h2>", ready: false },
+  ];
+  try {
+    for (const entry of cases) {
+      const html = '<!doctype html><html><head><title>Question heading fixture</title></head><body><h1>Welcome</h1>' + entry.body + "</body></html>";
+      const requested: string[] = [];
+      globalThis.fetch = async (input) => {
+        const path = new URL(String(input)).pathname;
+        requested.push(path);
+        if (path === "/robots.txt") return new Response("User-agent: *\nAllow: /");
+        if (path === "/sitemap.xml") return new Response("<urlset></urlset>");
+        return new Response(html, { headers: { "Content-Type": "text/html" } });
+      };
+      const result = await runLiveReadinessScan("https://question-heading.example/");
+      const finding = result.findings.find((row) => row.code === "answer_structure");
+      assert.equal(finding?.status, entry.ready ? "pass" : "fail", entry.label);
+      assert.equal(finding?.awardedPoints, entry.ready ? 8 : 0, entry.label);
+      assert.deepEqual(requested, ["/", "/robots.txt", "/sitemap.xml"], entry.label);
+      assert.equal(result.requestCount, 3, entry.label);
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
