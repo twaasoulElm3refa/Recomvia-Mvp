@@ -175,7 +175,12 @@ async function fetchText(startUrl: URL, maxBytes: number, accept: string, requir
 function attributes(tag: string) {
   const output: Record<string, string> = {};
   const pattern = /([:\w-]+)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/g;
-  for (const match of tag.matchAll(pattern)) output[match[1].toLowerCase()] = match[2] ?? match[3] ?? match[4] ?? "";
+  for (const match of tag.matchAll(pattern)) {
+    const name = match[1].toLowerCase();
+    // HTML tokenization retains the first attribute and ignores later duplicates.
+    // Do not let a later value override an indexing or identity signal.
+    if (!Object.hasOwn(output, name)) output[name] = match[2] ?? match[3] ?? match[4] ?? "";
+  }
   return output;
 }
 
