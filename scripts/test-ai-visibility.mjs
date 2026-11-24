@@ -8,13 +8,13 @@ try {
   const compiled = spawnSync(process.execPath, [
     "node_modules/typescript/bin/tsc", "--module", "commonjs", "--moduleResolution", "node",
     "--target", "es2022", "--esModuleInterop", "--skipLibCheck", "--outDir", output,
-    "tests/ai-visibility.test.ts",
+    "tests/ai-visibility.test.ts", "tests/robots-path-encoding.test.ts",
   ], { stdio: "inherit" });
   if (compiled.error) throw compiled.error;
   if (compiled.status !== 0) process.exitCode = compiled.status ?? 1;
   else {
     writeFileSync(join(output, "package.json"), '{"type":"commonjs"}');
-    const tests = spawnSync(process.execPath, ["--test", join(output, "tests/ai-visibility.test.js")], { stdio: "inherit" });
+    const tests = spawnSync(process.execPath, ["--test", join(output, "tests/ai-visibility.test.js"), join(output, "tests/robots-path-encoding.test.js")], { stdio: "inherit" });
     if (tests.error) throw tests.error;
     if (tests.status !== 0) process.exitCode = tests.status ?? 1;
   }
