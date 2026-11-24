@@ -343,6 +343,14 @@ export function generateTargetPrompts(target: AnalysisTarget, limit = 3): Intent
   });
   // A generic placeholder cannot support a defensible unbranded visibility score.
   if (!subject || stillLeaks) return prompts;
+  // The inferred market is also interpolated into every unbranded question.
+  // Do not measure prompted mentions when it contains the target or an alias.
+  // Keep the original market metadata rather than silently changing scope.
+  const market = normalized(decodeHtmlEntities(target.country));
+  if (names.some((name) => {
+    const token = normalized(decodeHtmlEntities(name));
+    return token.length >= 2 && market.includes(token);
+  })) return prompts;
   const audience =
     target.kind === "person"
       ? ar
