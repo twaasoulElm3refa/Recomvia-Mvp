@@ -143,7 +143,8 @@ function jsonLdObjects(html: string): unknown[] {
   )) {
     try {
       const parsed = JSON.parse(match[1].trim());
-      objects.push(...(Array.isArray(parsed) ? parsed : [parsed]));
+      // Keep root arrays intact; spreading a wide array can exceed argument limits.
+      objects.push(parsed);
     } catch {
       /* Invalid page markup is ignored during discovery. */
     }
@@ -155,12 +156,24 @@ function walkJson(
   value: unknown,
   visit: (object: Record<string, unknown>) => void,
 ) {
-  if (Array.isArray(value))
-    return value.forEach((item) => walkJson(item, visit));
-  if (!value || typeof value !== "object") return;
-  const object = value as Record<string, unknown>;
-  visit(object);
-  Object.values(object).forEach((item) => walkJson(item, visit));
+  // JSON-LD is untrusted page content. Use an explicit stack to avoid call
+  // stack exhaustion while retaining the original depth-first discovery order.
+  const pending: unknown[] = [value];
+  while (pending.length) {
+    const node = pending.pop();
+    if (!node || typeof node !== "object") continue;
+    let children: unknown[];
+    if (Array.isArray(node)) {
+      children = node;
+    } else {
+      const object = node as Record<string, unknown>;
+      visit(object);
+      children = Object.values(object);
+    }
+    for (let index = children.length - 1; index >= 0; index -= 1) {
+      pending.push(children[index]);
+    }
+  }
 }
 
 function schemaTypes(value: unknown): string[] {
