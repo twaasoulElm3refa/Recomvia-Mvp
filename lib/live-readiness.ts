@@ -571,8 +571,16 @@ export async function runLiveReadinessScan(input: string, requiredOrigin?: strin
     try {
       const target = new URL(href, page.url);
       // An external company's About page does not identify this website.
-      return target.origin === origin &&
-        /(?:\/about(?:[-_/]|$)|\/contact(?:[-_/]|$)|\/company(?:[-_/]|$)|عن-?ا|اتصل-?بنا)/i.test(target.pathname);
+      if (target.origin !== origin || target.username || target.password) return false;
+      if (/(?:\/about(?:[-_/]|$)|\/contact(?:[-_/]|$)|\/company(?:[-_/]|$))/i.test(target.pathname)) return true;
+      // URL.pathname percent-encodes Arabic slugs. Decode each segment
+      // independently so an encoded slash cannot manufacture a new path.
+      return target.pathname.split("/").some((segment) => {
+        try {
+          const slug = decodeURIComponent(segment).replace(/[_\s]+/g, "-");
+          return /^(?:عن-?(?:الشركة|الموقع|المنصة|المؤسسة)|من-?نحن|اتصل-?بنا|تواصل-?معنا)$/.test(slug);
+        } catch { return false; }
+      });
     } catch { return false; }
   });
   const hasOpenGraph = Boolean(metaContent(html, "og:title") && metaContent(html, "og:description"));
