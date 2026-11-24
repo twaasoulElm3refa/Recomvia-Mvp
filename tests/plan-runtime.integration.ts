@@ -415,6 +415,26 @@ test("a repeated provider model cannot masquerade as multiple independent models
   }, (body) => reply(body, { model: "test/model" }));
 });
 
+for (const returnedModel of ["test/model", "test/unconfigured"]) {
+  test(`one substituted provider response (${returnedModel}) cannot count as complete model coverage`, async () => {
+    let secondCalls = 0;
+    await setup("essential", async (_db, requests) => {
+      const response = await POST(request(person));
+      assert.equal(response.status, 201);
+      const body = await read(response);
+      assert.equal(requests.length, 13);
+      assert.equal(body.scan.engineRuns.length, 12);
+      assert.ok(body.scan.engineRuns.some((run) => run.model === "test/second"));
+      assert.equal(body.scan.actualVisibilityStatus, "partial");
+      assert.equal(body.scan.insights!.scope.coverageComplete, false);
+    }, (body) => {
+      if (body.model === "test/second" && ++secondCalls === 2)
+        return reply(body, { model: returnedModel });
+      return reply(body);
+    });
+  });
+}
+
 test("concurrent analyses of one project reserve only one running job", async () => {
   await setup("essential", async (db, requests) => {
     const responses = await Promise.all([POST(request(person)), POST(request(person))]);
