@@ -543,7 +543,14 @@ export async function runLiveReadinessScan(input: string, requiredOrigin?: strin
   };
   const hasOrganization = hasJsonLdType("Organization");
   const hasFaq = hasJsonLdType("FAQPage");
-  const hasQuestionHeadings = /<h[2-4]\b[^>]*>[^<]{0,120}(?:what|how|why|when|where|who|can|does|is|are|ما|ماذا|كيف|لماذا|هل|متى|أين|اين)[^<]*<\/h[2-4]>/i.test(visibleBody);
+  // Detect question-led headings rather than substrings in ordinary words
+  // (e.g. "Business services"). Extract visible text so inline formatting and
+  // HTML entities do not hide real English or Arabic question headings.
+  const hasQuestionHeadings = Array.from(visibleBody.matchAll(/<h([2-4])\b[^>]*>([\s\S]*?)<\/h\1\s*>/gi)).some((heading) => {
+    const label = plainText(heading[2]).trim();
+    return /[?؟]$/.test(label) ||
+      /^(?:(?:what|how|why|when|where|who|can|does|do|did|is|are|will|should|could|would|which|whose|whom|has|have)\b|(?:ما|ماذا|كيف|لماذا|هل|متى|أين|اين|من|كم|أي)(?=\s|[?؟]))/iu.test(label);
+  });
   const words = text ? text.split(/\s+/).length : 0;
   const globallyBlocked = robotsReadable && robots ? hasRelevantCrawlerPathDisallow(robots.text, finalUrl.pathname + finalUrl.search) : false;
   const metaNoindex = hasRelevantNoindexMeta(html);
