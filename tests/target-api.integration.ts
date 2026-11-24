@@ -106,6 +106,22 @@ test("authenticated API: entity discovery, topic mode, isolation, confirmation, 
     return Response.json({ ...data, model: body.model });
   };
   try {
+    await t.test("malformed target kinds are rejected before any scan or provider use", async () => {
+      const db = createFixture();
+      calls = 0;
+      try {
+        for (const kind of [["auto"], ["person"], ["brand"], ["topic"], ["website"], [["topic"]]]) {
+          const res = await POST(request({ input: "Ada Example", kind }));
+          assert.equal(res.status, 400);
+          assert.equal((await res.json() as { code: string }).code, "invalid_input");
+        }
+        assert.equal(calls, 0);
+        assert.equal(db.prepare("SELECT COUNT(*) n FROM scans").get()?.n, 0);
+        assert.equal(db.prepare("SELECT COUNT(*) n FROM cost_ledger").get()?.n, 0);
+      } finally {
+        db.close();
+      }
+    });
     await t.test(
       "resolved person has no fake website or technical score and all costs are stored",
       async () => {
