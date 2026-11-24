@@ -1060,3 +1060,34 @@ test("readiness confidence increases only for usable sitemap evidence", async ()
     globalThis.fetch = originalFetch;
   }
 });
+
+test("readiness excludes metadata that is blank after entity decoding", async () => {
+  const originalFetch = globalThis.fetch;
+  const cases: Array<{ label: string; description: string; ogTitle: string; ogDescription: string; descriptionPoints: number; ogPoints: number }> = [
+    { label: "named whitespace", description: "&nbsp;", ogTitle: "&nbsp;", ogDescription: "&nbsp;", descriptionPoints: 0, ogPoints: 0 },
+    { label: "decimal whitespace", description: "&#32;&#160;", ogTitle: "Real title", ogDescription: "&#32;", descriptionPoints: 0, ogPoints: 0 },
+    { label: "hex whitespace", description: "&#x20;&#xA0;", ogTitle: "&#x9;", ogDescription: "Real summary", descriptionPoints: 0, ogPoints: 0 },
+    { label: "encoded padding cannot earn full description points", description: "&nbsp;".repeat(80) + "Short summary", ogTitle: "Real title", ogDescription: "Real summary", descriptionPoints: 4, ogPoints: 6 },
+    { label: "Arabic text with entity padding", description: "&nbsp;خدمات تقنية للشركات&#160;", ogTitle: "خدمات تقنية", ogDescription: "&#32;حلول تقنية&#32;", descriptionPoints: 4, ogPoints: 6 },
+    { label: "meaningful encoded punctuation", description: "Research &amp; analysis", ogTitle: "Research &amp; analysis", ogDescription: "Useful context", descriptionPoints: 4, ogPoints: 6 },
+  ];
+  try {
+    for (const entry of cases) {
+      globalThis.fetch = async (input) => {
+        const path = new URL(String(input)).pathname;
+        if (path === "/robots.txt") return new Response("User-agent: *\nAllow: /");
+        if (path === "/sitemap.xml") return new Response("<urlset></urlset>");
+        const head = '<meta name="description" content="' + entry.description + '">' +
+          '<meta property="og:title" content="' + entry.ogTitle + '">' +
+          '<meta property="og:description" content="' + entry.ogDescription + '">';
+        return new Response('<html lang="en"><head><title>Fixture website</title>' + head + '</head><body><h1>Fixture</h1></body></html>', { headers: { "content-type": "text/html" } });
+      };
+      const result = await runLiveReadinessScan("https://fixture.example/");
+      assert.equal(result.findings.find((finding) => finding.code === "meta_description")?.awardedPoints, entry.descriptionPoints, entry.label);
+      assert.equal(result.findings.find((finding) => finding.code === "open_graph")?.awardedPoints, entry.ogPoints, entry.label);
+      assert.equal(result.requestCount, 3, entry.label);
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
