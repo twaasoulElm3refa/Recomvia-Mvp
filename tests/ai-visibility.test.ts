@@ -645,6 +645,12 @@ test("readiness canonical scoring rejects unsafe or broken href values but accep
       { href: "https://fixture.example:8443/private", valid: false },
       { href: "https://user:secret@fixture.example/", valid: false },
       { href: "https://fixture.example/page#fragment", valid: false },
+      { href: "&nbsp;&#32;&#x9;", valid: false },
+      { href: "&#32;#section", valid: false },
+      { href: "&#32;&#35;", valid: false },
+      { href: "/page#", valid: false },
+      { href: "&#32;/articles?lang=ar&#32;", valid: true, expected: "https://fixture.example/articles?lang=ar" },
+      { href: "/articles%23archive", valid: true, expected: "https://fixture.example/articles%23archive" },
     ];
     for (const { href, valid, expected } of cases) {
       const pageHtml = `<!doctype html><html lang="en"><head><title>Fixture site for canonical testing</title>
@@ -661,6 +667,7 @@ test("readiness canonical scoring rejects unsafe or broken href values but accep
       assert.equal(finding.status, valid ? "pass" : "fail", href);
       assert.equal(finding.awardedPoints, valid ? 7 : 0, href);
       if (expected) assert.equal(finding.evidence, expected);
+      assert.equal(result.requestCount, 3, href);
     }
   } finally {
     globalThis.fetch = originalFetch;
