@@ -1205,3 +1205,45 @@ test("website identity discovery handles wide root arrays without dropping valid
   });
   assert.deepEqual(identities.map((item) => item.name), ["Northstar"]);
 });
+
+
+test("readiness honors the first duplicate HTML attribute rather than the last", async () => {
+  const originalFetch = globalThis.fetch;
+  const cases = [
+    {
+      label: "later values cannot manufacture positive readiness",
+      root: '<html lang="" LANG="en">',
+      head: '<meta name="robots" content="noindex" CONTENT="index">' +
+        '<meta name="description" content="" CONTENT="A later description">' +
+        '<link rel="canonical" href="https://other.example/" HREF="/">' +
+        '<script type="text/plain" TYPE="application/ld+json">{"@type":"Organization","name":"Fixture"}</script>',
+      points: [0, 0, 0, 0, 0],
+    },
+    {
+      label: "later values cannot hide legitimate readiness",
+      root: '<html LANG="ar" lang="">',
+      head: '<meta name="robots" CONTENT="index" content="noindex">' +
+        '<meta name="description" CONTENT="Useful summary" content="">' +
+        '<link rel="canonical" HREF="/" href="https://other.example/">' +
+        '<script TYPE="application/ld+json" type="text/plain">{"@type":"Organization","name":"Fixture"}</script>',
+      points: [7, 4, 7, 5, 8],
+    },
+  ];
+  const codes = ["robots_policy", "meta_description", "canonical", "html_language", "structured_data"];
+  try {
+    for (const entry of cases) {
+      globalThis.fetch = async (input) => {
+        const path = new URL(String(input)).pathname;
+        if (path === "/robots.txt") return new Response("User-agent: *\nAllow: /");
+        if (path === "/sitemap.xml") return new Response("<urlset></urlset>");
+        return new Response(entry.root + '<head><title>Fixture website</title>' + entry.head +
+          '</head><body><h1>Fixture</h1></body></html>', { headers: { "content-type": "text/html" } });
+      };
+      const result = await runLiveReadinessScan("https://fixture.example/");
+      assert.deepEqual(codes.map((code) => result.findings.find((finding) => finding.code === code)?.awardedPoints), entry.points, entry.label);
+      assert.equal(result.requestCount, 3, entry.label);
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
