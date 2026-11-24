@@ -1059,6 +1059,14 @@ test("homepage X-Robots-Tag blocks a false indexing readiness pass without extra
   const html = '<!doctype html><html lang="en"><head><title>Header indexation fixture</title></head><body><h1>Home</h1></body></html>';
   const cases: Array<{ label: string; header: string; blocked: boolean }> = [
     { label: "global noindex", header: "noindex", blocked: true },
+    { label: "global valued max-snippet before noindex", header: "max-snippet: 0, noindex", blocked: true },
+    { label: "global image preview before none", header: "max-image-preview: large, none", blocked: true },
+    { label: "global video preview before noindex", header: "MAX-VIDEO-PREVIEW: -1, NoIndex", blocked: true },
+    { label: "global expiry before noindex", header: "unavailable_after: 25 Jun 2030 15:00:00 GMT, noindex", blocked: true },
+    { label: "named relevant scope survives valued directive", header: "googlebot: follow, max-snippet: 10, noindex", blocked: true },
+    { label: "unrelated scope survives valued directive", header: "otherbot: follow, max-image-preview: standard, noindex", blocked: false },
+    { label: "named scope changes after valued directive", header: "otherbot: follow, max-snippet: 0, bingbot: none", blocked: true },
+    { label: "valued directives alone do not block indexing", header: "max-snippet: 0, max-video-preview: 0, max-image-preview: none", blocked: false },
     { label: "global none", header: "none", blocked: true },
     { label: "mixed case and multiple directives", header: "nofollow, NoIndex", blocked: true },
     { label: "global directive before named crawler", header: "noindex, googlebot: index", blocked: true },
