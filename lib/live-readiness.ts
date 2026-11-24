@@ -415,10 +415,8 @@ function plainText(html: string) {
     html
     .replace(/<script\b[\s\S]*?<\/script>/gi, " ")
     .replace(/<style\b[\s\S]*?<\/style>/gi, " ")
-    .replace(/<[^>]+>/g, " ")
-    .replace(/\s+/g, " ")
-    .trim(),
-  );
+    .replace(/<[^>]+>/g, " "),
+  ).replace(/\s+/g, " ").trim();
 }
 
 function clip(value: string, length = 220) {

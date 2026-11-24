@@ -1098,3 +1098,35 @@ test("readiness excludes metadata that is blank after entity decoding", async ()
     globalThis.fetch = originalFetch;
   }
 });
+
+test("readiness normalizes decoded visible whitespace before scoring titles and body depth", async () => {
+  const originalFetch = globalThis.fetch;
+  const shortBody = Array(98).fill("content").join(" ");
+  const longArabicBody = Array(300).fill("محتوى").join("&#32;");
+  const cases = [
+    { label: "encoded blank title and body", title: "&nbsp;".repeat(20), body: "&#32;&#160;&#x9;", titlePoints: 0, depthPoints: 0, wordCount: 0, pageText: "" },
+    { label: "padding cannot earn title or depth points", title: "&nbsp;".repeat(20) + "Short", body: "&nbsp;" + shortBody + "&#160;", titlePoints: 4, depthPoints: 0, wordCount: 98, pageText: shortBody },
+    { label: "internal whitespace collapses after decoding", title: "Useful&#32;&#32;website&#x9;title", body: "One&#32;&#160;two&#x9;three", titlePoints: 7, depthPoints: 0, wordCount: 3, pageText: "One two three" },
+    { label: "Arabic content at threshold", title: "&#160;خدمات تقنية للشركات&#32;", body: longArabicBody, titlePoints: 7, depthPoints: 8, wordCount: 300, pageText: Array(300).fill("محتوى").join(" ") },
+    { label: "meaningful escaped markup remains text", title: "Research &amp; analysis", body: "&lt;example&gt; &amp; text", titlePoints: 7, depthPoints: 0, wordCount: 3, pageText: "<example> & text" },
+  ];
+  try {
+    for (const entry of cases) {
+      globalThis.fetch = async (input) => {
+        const path = new URL(String(input)).pathname;
+        if (path === "/robots.txt") return new Response("User-agent: *\nAllow: /");
+        if (path === "/sitemap.xml") return new Response("<urlset></urlset>");
+        return new Response('<html lang="en"><head><title>' + entry.title + '</title></head><body>' + entry.body + '</body></html>', { headers: { "content-type": "text/html" } });
+      };
+      const result = await runLiveReadinessScan("https://fixture.example/");
+      assert.equal(result.findings.find((finding) => finding.code === "title")?.awardedPoints, entry.titlePoints, entry.label);
+      const depth = result.findings.find((finding) => finding.code === "content_depth");
+      assert.equal(depth?.awardedPoints, entry.depthPoints, entry.label);
+      assert.ok(depth?.evidence.includes(entry.wordCount + " visible words"), entry.label);
+      assert.equal(result.pageText, entry.pageText, entry.label);
+      assert.equal(result.requestCount, 3, entry.label);
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
