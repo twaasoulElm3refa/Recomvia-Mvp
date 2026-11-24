@@ -227,7 +227,8 @@ function metaContent(html: string, target: string) {
   let singleContent: string | null = null;
   for (const tag of activeHeadHtml(html).match(/<meta\b[^>]*>/gi) ?? []) {
     const attrs = attributes(tag);
-    if ((attrs.name || attrs.property || "").toLowerCase() !== target.toLowerCase()) continue;
+    // HTML attribute values are entity-decoded before their semantic comparison.
+    if (decodeHtmlEntities(attrs.name || attrs.property || "").toLowerCase() !== target.toLowerCase()) continue;
     if (singleContent !== null) return "";
     singleContent = decodeHtmlEntities(attrs.content || "").trim();
   }
@@ -245,7 +246,7 @@ function hasRelevantNoindexMeta(html: string) {
   const head = activeHeadHtml(html);
   return (head.match(/<meta\b[^>]*>/gi) ?? []).some((tag) => {
     const attrs = attributes(tag);
-    if (!INDEXING_CRAWLER_NAMES.has((attrs.name || "").trim().toLowerCase())) return false;
+    if (!INDEXING_CRAWLER_NAMES.has(decodeHtmlEntities(attrs.name || "").trim().toLowerCase())) return false;
     return decodeHtmlEntities(attrs.content || "").toLowerCase()
       .split(/[\s,]+/).some((directive) => directive === "noindex" || directive === "none");
   });
@@ -278,7 +279,7 @@ function linkHref(html: string, rel: string) {
   let singleHref: string | null = null;
   for (const tag of head.match(/<link\b[^>]*>/gi) ?? []) {
     const attrs = attributes(tag);
-    if (!(attrs.rel || "").toLowerCase().split(/\s+/).includes(rel.toLowerCase())) continue;
+    if (!decodeHtmlEntities(attrs.rel || "").toLowerCase().split(/\s+/).includes(rel.toLowerCase())) continue;
     // Multiple canonical declarations, even identical ones, should not earn
     // a clean SEO signal: crawlers may ignore conflicting canonical hints.
     if (singleHref !== null) return "";
