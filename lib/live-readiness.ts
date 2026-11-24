@@ -349,7 +349,7 @@ function hasRelevantCrawlerPathDisallow(robotsText: string, path: string) {
     hasRule = false;
   };
 
-  for (const rawLine of robotsText.split(/\r?\n/)) {
+  for (const rawLine of robotsText.split(/\r\n|\n|\r/)) {
     const line = rawLine.replace(/#.*/, "").trim();
     // Blank and comment-only lines are permitted within a robots group.
     // Only a new user-agent after rules starts a new group.
