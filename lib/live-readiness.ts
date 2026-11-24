@@ -484,8 +484,17 @@ export async function runLiveReadinessScan(input: string, requiredOrigin?: strin
   // instead of a document root. Plain robots comments start with "#"; keep
   // accepting genuine text policies even if a server mislabels their MIME.
   const robotsIsHtml = Boolean(robots && /^\s*(?:<!--|<!doctype\s+html\b|<(?:html|head|body|title|meta|link|script|style|div|main|section|p|h[1-6])\b)/i.test(robots.text));
-  // A partial/empty or asynchronous 2xx response cannot establish a complete robots policy.
-  const robotsReadable = Boolean(robots && robots.status === 200 && !robotsIsHtml);
+  // A JSON API/error fallback is not a robots policy either. Inspect the
+  // bounded body rather than trusting its MIME type; a genuinely empty
+  // robots.txt or a mislabeled text policy remains valid.
+  let robotsIsJson = false;
+  if (robots && /^\s*[\[{]/.test(robots.text)) {
+    try {
+      const parsed: unknown = JSON.parse(robots.text);
+      robotsIsJson = parsed !== null && typeof parsed === "object";
+    } catch { /* Malformed non-directive lines alone do not invalidate a text policy. */ }
+  }
+  const robotsReadable = Boolean(robots && robots.status === 200 && !robotsIsHtml && !robotsIsJson);
   let sitemapUrl = new URL("/sitemap.xml", origin);
   if (robotsReadable && robots) {
     // Sitemap directives are line-scoped. Ignore empty/commented values and
@@ -620,7 +629,7 @@ export async function runLiveReadinessScan(input: string, requiredOrigin?: strin
   add({ code: "answer_structure", category: "Content readiness", severity: "medium", status: answerReady ? "pass" : "fail", title: "Question-and-answer structure is discoverable", explanation: "Direct question headings and self-contained answers improve answer extraction for relevant queries.", evidence: hasFaq ? "FAQPage structured data found." : hasQuestionHeadings ? "Question-led headings found in visible HTML." : "No FAQPage schema or question-led headings were detected.", sourceUrl: page.url, weight: 8, awardedPoints: answerReady ? 8 : 0 });
   const contentPoints = words >= 300 ? 8 : words >= 100 ? 4 : 0;
   add({ code: "content_depth", category: "Content readiness", severity: "medium", status: contentPoints === 8 ? "pass" : contentPoints ? "partial" : "fail", title: "The page exposes enough readable context", explanation: "Thin pages often lack the facts and distinctions needed for confident understanding.", evidence: `Approximately ${words.toLocaleString("en-US")} visible words detected.`, sourceUrl: page.url, weight: 8, awardedPoints: contentPoints });
-  add({ code: "robots_policy", category: "Technical AEO", severity: "critical", status: robotsHealthy ? "pass" : "fail", title: "Crawler discovery and indexing are permitted", explanation: "A readable robots policy and homepage indexing directives should permit major search crawlers and the scan crawler to access the page.", evidence: metaNoindex ? "Homepage meta robots requests noindex/none." : headerNoindex ? "Homepage X-Robots-Tag requests noindex/none." : robots ? `HTTP ${robots.status}${robotsIsHtml ? " · HTML fallback is not robots.txt" : globallyBlocked ? " · target path blocked by crawler-specific or wildcard robots rules" : ""}` : "robots.txt could not be retrieved.", sourceUrl: metaNoindex || headerNoindex ? page.url : robotsUrl.toString(), weight: 7, awardedPoints: robotsHealthy ? 7 : 0 });
+  add({ code: "robots_policy", category: "Technical AEO", severity: "critical", status: robotsHealthy ? "pass" : "fail", title: "Crawler discovery and indexing are permitted", explanation: "A readable robots policy and homepage indexing directives should permit major search crawlers and the scan crawler to access the page.", evidence: metaNoindex ? "Homepage meta robots requests noindex/none." : headerNoindex ? "Homepage X-Robots-Tag requests noindex/none." : robots ? `HTTP ${robots.status}${robotsIsHtml ? " · HTML fallback is not robots.txt" : robotsIsJson ? " · JSON fallback is not robots.txt" : globallyBlocked ? " · target path blocked by crawler-specific or wildcard robots rules" : ""}` : "robots.txt could not be retrieved.", sourceUrl: metaNoindex || headerNoindex ? page.url : robotsUrl.toString(), weight: 7, awardedPoints: robotsHealthy ? 7 : 0 });
   add({ code: "xml_sitemap", category: "Technical AEO", severity: "high", status: sitemapHealthy ? "pass" : "fail", title: "XML sitemap is available", explanation: "A valid sitemap gives crawlers a reliable inventory of canonical content URLs.", evidence: sitemap ? `HTTP ${sitemap.status} · ${sitemapHealthy ? "sitemap root document detected" : "no complete sitemap root document detected"}` : "A sitemap could not be retrieved.", sourceUrl: sitemapUrl.toString(), weight: 7, awardedPoints: sitemapHealthy ? 7 : 0 });
   add({ code: "identity_paths", category: "Authority & entity", severity: "medium", status: hasIdentityLink ? "pass" : "fail", title: "Identity and contact paths are visible", explanation: "Clear company and contact paths help users and systems verify who is responsible for the site.", evidence: hasIdentityLink ? "An About, Company, or Contact path was found." : "No clear About, Company, or Contact path was detected in homepage links.", sourceUrl: page.url, weight: 6, awardedPoints: hasIdentityLink ? 6 : 0 });
   add({ code: "open_graph", category: "Content readiness", severity: "low", status: hasOpenGraph ? "pass" : "fail", title: "Share metadata describes the page", explanation: "Open Graph metadata provides another consistent summary when the page is shared or referenced.", evidence: hasOpenGraph ? "og:title and og:description were found." : "og:title or og:description is missing.", sourceUrl: page.url, weight: 6, awardedPoints: hasOpenGraph ? 6 : 0 });
