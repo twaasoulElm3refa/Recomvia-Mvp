@@ -1581,3 +1581,41 @@ test("answer readiness recognizes genuine question headings without substring fa
     globalThis.fetch = originalFetch;
   }
 });
+
+test("primary heading readiness requires readable H1 text and preserves multiple-heading penalties", async () => {
+  const originalFetch = globalThis.fetch;
+  const cases = [
+    { label: "no heading", body: "<p>Welcome</p>", points: 0 },
+    { label: "empty heading", body: "<h1></h1>", points: 0 },
+    { label: "whitespace heading", body: "<h1> &nbsp; &#160; </h1>", points: 0 },
+    { label: "inert heading content", body: "<h1><!-- Example --><template>Sample</template><script>example()</script></h1>", points: 0 },
+    { label: "empty inline formatting", body: "<h1><span> </span></h1>", points: 0 },
+    { label: "single meaningful heading", body: "<h1>Website analysis</h1>", points: 6 },
+    { label: "Arabic inline heading", body: "<H1 class='hero'><strong>تحليل المواقع</strong></H1>", points: 6 },
+    { label: "two empty headings", body: "<h1></h1><h1> </h1>", points: 0 },
+    { label: "one meaningful and one empty", body: "<h1>Analysis</h1><h1></h1>", points: 3 },
+    { label: "two meaningful headings", body: "<h1>Analysis</h1><h1>Reports</h1>", points: 3 },
+    { label: "inert extra heading", body: "<h1>Analysis</h1><template><h1>Example</h1></template>", points: 6 },
+  ];
+  try {
+    for (const entry of cases) {
+      const html = "<!doctype html><html><head><title>Heading fixture</title></head><body>" + entry.body + "</body></html>";
+      const requested: string[] = [];
+      globalThis.fetch = async (input) => {
+        const path = new URL(String(input)).pathname;
+        requested.push(path);
+        if (path === "/robots.txt") return new Response("User-agent: *\nAllow: /");
+        if (path === "/sitemap.xml") return new Response("<urlset></urlset>");
+        return new Response(html, { headers: { "Content-Type": "text/html" } });
+      };
+      const result = await runLiveReadinessScan("https://primary-heading.example/");
+      const finding = result.findings.find((row) => row.code === "primary_heading");
+      assert.equal(finding?.awardedPoints, entry.points, entry.label);
+      assert.equal(finding?.status, entry.points === 6 ? "pass" : entry.points === 3 ? "partial" : "fail", entry.label);
+      assert.deepEqual(requested, ["/", "/robots.txt", "/sitemap.xml"], entry.label);
+      assert.equal(result.requestCount, 3, entry.label);
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
