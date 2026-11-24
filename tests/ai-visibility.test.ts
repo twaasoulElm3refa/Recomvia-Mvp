@@ -1138,3 +1138,34 @@ test("readiness normalizes decoded visible whitespace before scoring titles and 
     globalThis.fetch = originalFetch;
   }
 });
+
+test("readiness rejects JSON fallback documents instead of treating them as robots policies", async () => {
+  const originalFetch = globalThis.fetch;
+  const cases = [
+    { label: "JSON API error", body: '{"error":"not found"}', mime: "application/json", readable: false, points: 0 },
+    { label: "mislabeled JSON object", body: '  {"status":404}', mime: "text/plain", readable: false, points: 0 },
+    { label: "JSON array fallback", body: '[{"message":"missing"}]', mime: "text/plain", readable: false, points: 0 },
+    { label: "empty JSON object", body: '{}', mime: "application/json", readable: false, points: 0 },
+    { label: "empty text policy", body: "", mime: "text/plain", readable: true, points: 7 },
+    { label: "mislabeled valid text policy", body: "User-agent: *\nAllow: /", mime: "application/json", readable: true, points: 7 },
+    { label: "unknown invalid line before real rules", body: "[ignored]\nUser-agent: *\nDisallow: /", mime: "text/plain", readable: true, points: 0 },
+  ];
+  try {
+    for (const entry of cases) {
+      globalThis.fetch = async (input) => {
+        const path = new URL(String(input)).pathname;
+        if (path === "/robots.txt") return new Response(entry.body, { headers: { "content-type": entry.mime } });
+        if (path === "/sitemap.xml") return new Response("<urlset></urlset>");
+        return new Response('<html lang="en"><head><title>Fixture website</title></head><body><h1>Fixture</h1></body></html>', { headers: { "content-type": "text/html" } });
+      };
+      const result = await runLiveReadinessScan("https://fixture.example/");
+      const robots = result.findings.find((finding) => finding.code === "robots_policy");
+      assert.equal(robots?.awardedPoints, entry.points, entry.label);
+      assert.equal(result.confidence, entry.readable ? 86 : 81, entry.label);
+      assert.equal(robots?.evidence.includes("JSON fallback"), !entry.readable, entry.label);
+      assert.equal(result.requestCount, 3, entry.label);
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
