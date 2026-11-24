@@ -220,7 +220,7 @@ function metaContent(html: string, target: string) {
     const attrs = attributes(tag);
     if ((attrs.name || attrs.property || "").toLowerCase() !== target.toLowerCase()) continue;
     if (singleContent !== null) return "";
-    singleContent = decodeHtmlEntities((attrs.content || "").trim());
+    singleContent = decodeHtmlEntities(attrs.content || "").trim();
   }
   return singleContent ?? "";
 }
