@@ -435,6 +435,37 @@ for (const returnedModel of ["test/model", "test/unconfigured"]) {
   });
 }
 
+for (const returnedModel of ["test/model", "test/unconfigured"]) {
+  test(`advanced agreement accounts for each configured model once when a provider substitutes ${returnedModel}`, async () => {
+    let secondCalls = 0;
+    await setup("growth", async (_db, requests) => {
+      const response = await POST(request(person));
+      assert.equal(response.status, 201);
+      const { scan } = await read(response);
+      assert.equal(requests.length, 37);
+      const insights = scan.insights!;
+      const models = insights.scope.models;
+      const rows = insights.advanced!.agreement;
+      assert.equal(rows.length, 11);
+      const affected = rows.filter((row) => row.unavailable.includes("test/second"));
+      assert.equal(affected.length, 1);
+      const row = affected[0];
+      assert.equal(row.unavailable.includes("test/model"), returnedModel === "test/model");
+      assert.equal(row.mentionedBy.includes("test/model"), returnedModel !== "test/model");
+      for (const item of rows) {
+        const listed = [...item.mentionedBy, ...item.absentFrom, ...item.unavailable];
+        assert.equal(listed.length, models.length);
+        assert.deepEqual(listed.sort(), [...models].sort());
+      }
+      assert.ok(scan.engineRuns.some((run) => run.promptId === row.promptId && run.model === returnedModel));
+    }, (body) => {
+      if (body.model === "test/second" && ++secondCalls === 2)
+        return reply(body, { model: returnedModel });
+      return reply(body);
+    });
+  });
+}
+
 test("concurrent analyses of one project reserve only one running job", async () => {
   await setup("essential", async (db, requests) => {
     const responses = await Promise.all([POST(request(person)), POST(request(person))]);
