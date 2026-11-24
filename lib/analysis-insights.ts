@@ -1,6 +1,6 @@
 import type { AnalysisPolicy } from "./analysis-policy";
 import type { AnalysisTarget } from "./analysis-target";
-import type { IntentPrompt, VisibilityEngineRun } from "./ai-visibility";
+import { hasCompleteMeasurementCoverage, type IntentPrompt, type VisibilityEngineRun } from "./ai-visibility";
 import type { PageEvidence } from "./plan-analysis";
 
 export type ActionItem = { priority: "high" | "medium"; title: { en: string; ar: string }; instruction: { en: string; ar: string }; evidenceUrls: string[]; runIds: string[] };
@@ -91,7 +91,7 @@ export async function buildAnalysisInsights(input: {
   return {
     version: "evidence-insights-v1", level: advanced ? "advanced" : policy.plan === "free" ? "initial" : "detailed", basisKey,
     scope: { models, questions: prompts.length, requestedPages: target.websiteUrl ? policy.pageLimit : 0, auditedPages: pages.filter((page) => !page.error).length,
-      coverageComplete: runs.length === models.length * prompts.length && runs.every(observed) && unique(runs.map((run) => run.model)).length >= models.length,
+      coverageComplete: hasCompleteMeasurementCoverage(models, prompts, runs),
       missingCostRuns: runs.filter((run) => run.estimatedCostMicros === null && run.error?.code !== "budget_exhausted").length,
       recordedProviderCostMicros: runs.reduce((total, run) => total + (run.estimatedCostMicros ?? 0), 0) },
     byEngine: unique(runs.map((run) => run.model)).map((model) => ({ model, surfaces: unique(runs.filter((run) => run.model === model).map((run) => run.surfaceType)), ...rates(runs.filter((run) => run.model === model), topic) })),

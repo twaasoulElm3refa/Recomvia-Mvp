@@ -1,4 +1,4 @@
-import { aggregateActualVisibility, runActualVisibility, type DiscoveredSiteContext, type IntentPrompt, type VisibilityEngineRun, type ActualVisibilityMeasurement } from "./ai-visibility";
+import { aggregateActualVisibility, hasCompleteMeasurementCoverage, runActualVisibility, type DiscoveredSiteContext, type IntentPrompt, type VisibilityEngineRun, type ActualVisibilityMeasurement } from "./ai-visibility";
 import type { EngineAdapter, EngineResponse } from "./ai-engines/engine-adapter";
 import type { AnalysisPolicy } from "./analysis-policy";
 import { runLiveReadinessScan, type LiveReadinessResult, type ReadinessFinding, type CrawlUsage } from "./live-readiness";
@@ -92,6 +92,6 @@ export async function runPlanVisibility(input: {
     aggregate.status = successful === jobs.length ? "measured" : successful ? "partial" : "failed";
     aggregate.score = null; aggregate.confidence = 0;
   }
-  if (new Set(runs.filter((run) => !run.error).map((run) => run.model)).size < input.adapters.length && aggregate.status === "measured") aggregate.status = "partial";
+  if (aggregate.status === "measured" && !hasCompleteMeasurementCoverage(input.adapters.map((adapter) => adapter.model), input.prompts, runs)) aggregate.status = "partial";
   return { ...aggregate, engineRuns: runs, prompts: input.prompts };
 }

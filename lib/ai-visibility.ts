@@ -1053,6 +1053,25 @@ export function analyzeVisibilityResponse(input: {
   };
 }
 
+/** Complete coverage requires exactly one observed response per configured model and prompt. */
+export function hasCompleteMeasurementCoverage(
+  models: string[],
+  prompts: IntentPrompt[],
+  runs: VisibilityEngineRun[],
+): boolean {
+  if (!models.length || !prompts.length || runs.length !== models.length * prompts.length)
+    return false;
+  const expected = new Set(
+    models.flatMap((model) => prompts.map((prompt) => JSON.stringify([model, prompt.id]))),
+  );
+  if (expected.size !== runs.length) return false;
+  for (const run of runs) {
+    if (run.error || !run.responseText || run.surfaceType !== "api_with_search" ||
+        !expected.delete(JSON.stringify([run.model, run.promptId]))) return false;
+  }
+  return expected.size === 0;
+}
+
 export function aggregateActualVisibility(
   runs: VisibilityEngineRun[],
   promptCount: number,
