@@ -208,7 +208,11 @@ function activeDocumentLanguage(html: string) {
   );
   const beforeContent = markup.split(/<(?:head|body)\b/i, 1)[0];
   const rootTag = beforeContent.match(/<html\b[^>]*>/i)?.[0] ?? "";
-  return decodeHtmlEntities((attributes(rootTag).lang || "").trim());
+  // Decode before trimming so encoded whitespace cannot masquerade as a language.
+  // Reject clearly malformed tokens without restricting valid language, script,
+  // region, extension or private-use subtags to a fixed locale catalog.
+  const language = decodeHtmlEntities(attributes(rootTag).lang || "").trim();
+  return /^(?:[a-z]{2,8}(?:-[a-z0-9]{1,8})*|[ix](?:-[a-z0-9]{1,8})+)$/i.test(language) ? language : "";
 }
 
 // A meta description or Open Graph field is unambiguous only when a single
@@ -607,7 +611,7 @@ export async function runLiveReadinessScan(input: string, requiredOrigin?: strin
   const descriptionPoints = description.length >= 70 && description.length <= 180 ? 7 : description ? 4 : 0;
   add({ code: "meta_description", category: "Content readiness", severity: "medium", status: descriptionPoints === 7 ? "pass" : descriptionPoints ? "partial" : "fail", title: "Meta description summarizes the page", explanation: "A specific description gives retrieval systems a compact statement of the page purpose.", evidence: description ? `${description.length} characters · ${clip(description)}` : "No meta description was found.", sourceUrl: page.url, weight: 7, awardedPoints: descriptionPoints });
   add({ code: "canonical", category: "Technical AEO", severity: "high", status: canonical ? "pass" : "fail", title: "Canonical URL is declared", explanation: "A canonical reduces ambiguity between duplicate URL variants and consolidates discovery signals.", evidence: canonical ? clip(canonical) : "Canonical link is missing or invalid.", sourceUrl: page.url, weight: 7, awardedPoints: canonical ? 7 : 0 });
-  add({ code: "html_language", category: "Technical AEO", severity: "medium", status: htmlLang ? "pass" : "fail", title: "Document language is declared", explanation: "The document language helps systems interpret the content and market context correctly.", evidence: htmlLang ? `lang=${htmlLang}` : "The html element has no lang attribute.", sourceUrl: page.url, weight: 5, awardedPoints: htmlLang ? 5 : 0 });
+  add({ code: "html_language", category: "Technical AEO", severity: "medium", status: htmlLang ? "pass" : "fail", title: "Document language is declared", explanation: "The document language helps systems interpret the content and market context correctly.", evidence: htmlLang ? `lang=${htmlLang}` : "The html element has no usable lang attribute.", sourceUrl: page.url, weight: 5, awardedPoints: htmlLang ? 5 : 0 });
   const h1Points = nonemptyH1Count === 0 ? 0 : h1Count === 1 ? 6 : 3;
   add({ code: "primary_heading", category: "Content readiness", severity: "medium", status: h1Points === 6 ? "pass" : h1Points ? "partial" : "fail", title: "A single primary heading frames the page", explanation: "A stable primary heading makes the central subject easier to extract.", evidence: `${h1Count} H1 element${h1Count === 1 ? "" : "s"} found; ${nonemptyH1Count} with readable text.`, sourceUrl: page.url, weight: 6, awardedPoints: h1Points });
   add({ code: "structured_data", category: "Technical AEO", severity: "medium", status: parsedJsonLd.length ? "pass" : "fail", title: "Parseable JSON-LD structured data is present", explanation: "Structured data supplies explicit machine-readable facts, but it must match visible content.", evidence: `${parsedJsonLd.length} parseable JSON-LD block${parsedJsonLd.length === 1 ? "" : "s"} found (${jsonLdBlocks.length} inspected).`, sourceUrl: page.url, weight: 8, awardedPoints: parsedJsonLd.length ? 8 : 0 });

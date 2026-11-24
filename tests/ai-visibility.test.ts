@@ -956,6 +956,14 @@ test("readiness document-language scoring ignores inert and non-root html tags",
     { label: "valid single-quoted mixed-case root", html: page("<HTML dir='ltr' LANG='en-GB'>"), language: "en-GB" },
     { label: "valid unquoted language", html: page("<html lang=fr>"), language: "fr" },
     { label: "empty language", html: page('<html lang="">'), language: "" },
+    { label: "encoded blank language", html: page('<html lang="&nbsp;&#32;&#x9;">'), language: "" },
+    { label: "encoded padded Arabic", html: page('<html lang="&#32;ar-SA&nbsp;">'), language: "ar-SA" },
+    { label: "encoded hyphen", html: page('<html lang="zh&#45;Hant-TW">'), language: "zh-Hant-TW" },
+    { label: "multiple language tokens", html: page('<html lang="ar en">'), language: "" },
+    { label: "underscore locale", html: page('<html lang="en_US">'), language: "" },
+    { label: "empty subtag", html: page('<html lang="en--GB">'), language: "" },
+    { label: "numeric language", html: page('<html lang="123">'), language: "" },
+    { label: "private-use language", html: page('<html lang="x-example">'), language: "x-example" },
     { label: "missing language", html: page("<html>"), language: "" },
     { label: "data-lang is not a language declaration", html: page('<html data-lang="ar">'), language: "" },
     { label: "fake root in HTML comment", html: page("<html>", '<!-- <html lang="fr"> -->'), language: "" },
@@ -981,7 +989,7 @@ test("readiness document-language scoring ignores inert and non-root html tags",
       assert.ok(finding, entry.label + ": missing document-language finding");
       assert.equal(finding.awardedPoints, entry.language ? 5 : 0, entry.label);
       assert.equal(finding.status, entry.language ? "pass" : "fail", entry.label);
-      assert.equal(finding.evidence, entry.language ? "lang=" + entry.language : "The html element has no lang attribute.", entry.label);
+      assert.equal(finding.evidence, entry.language ? "lang=" + entry.language : "The html element has no usable lang attribute.", entry.label);
       assert.equal(result.requestCount, 3, entry.label + ": unexpected HTTP requests");
     }
   } finally {
