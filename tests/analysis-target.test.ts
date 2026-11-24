@@ -1355,6 +1355,11 @@ test("robots readiness evaluates the scanned URL path, with specific Allow rules
     { label: "blank line between rules preserves a specific denial", path: "/private/open", robots: "User-agent: *\nAllow: /private\n\nDisallow: /private/open", blocked: true },
     { label: "blank line between agents preserves shared rules", path: "/private", robots: "User-agent: Googlebot\n\nUser-agent: ExampleBot\nDisallow: /private", blocked: true },
     { label: "CRLF and whitespace-only lines preserve rules", path: "/private", robots: "User-agent: Bingbot\r\n \t\r\nDisallow: /private", blocked: true },
+    { label: "CR-only wildcard denial is enforced", path: "/private", robots: "User-agent: *\rDisallow: /private", blocked: true },
+    { label: "CR-only named denial overrides general allow", path: "/private", robots: "User-agent: *\rAllow: /\rUser-agent: Googlebot\rDisallow: /private", blocked: true },
+    { label: "CR-only specific allow overrides broader denial", path: "/private/open", robots: "User-agent: *\rDisallow: /\rAllow: /private/open", blocked: false },
+    { label: "mixed line endings preserve comment boundaries", path: "/private", robots: "User-agent: Bingbot\r\n# comment\rDisallow: /private\n", blocked: true },
+    { label: "CR-only unrelated crawler is ignored", path: "/private", robots: "User-agent: ExampleBot\rDisallow: /\rUser-agent: *\rAllow: /", blocked: false },
     { label: "new agent after a rule still begins a distinct group", path: "/private", robots: "User-agent: ExampleBot\nDisallow: /private\n\n# Public policy\nUser-agent: *\nAllow: /", blocked: false },
   ];
   try {
