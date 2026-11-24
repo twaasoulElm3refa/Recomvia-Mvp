@@ -313,6 +313,17 @@ function activeJsonLdScripts(html: string) {
 // Evaluate the crawled page's own URL against wildcard robots rules, not
 // just a site-wide "Disallow: /". Specific Allow rules win longer matches and
 // ties, as they do for major search crawlers. No extra requests are needed.
+// Compare equivalent UTF-8 and percent-encoded paths consistently. Decode
+// only unreserved ASCII octets: encoded separators and wildcard characters
+// must not acquire a different meaning in a robots rule.
+function normalizeRobotsPath(value: string) {
+  return value.replace(/%[0-9a-f]{2}|[^\x00-\x7f]/giu, (part) => {
+    if (!part.startsWith("%")) return encodeURIComponent(part);
+    const character = String.fromCharCode(Number.parseInt(part.slice(1), 16));
+    return /^[A-Za-z0-9._~-]$/.test(character) ? character : part.toUpperCase();
+  });
+}
+
 function robotsRuleMatches(rule: string, path: string) {
   const anchored = rule.endsWith("$");
   const pattern = anchored ? rule.slice(0, -1) : rule;
@@ -365,10 +376,11 @@ function hasRelevantCrawlerPathDisallow(robotsText: string, path: string) {
     }
     if (key !== "allow" && key !== "disallow") continue;
     hasRule = true;
-    if (group.agents.length && value) group.rules.push({ kind: key, pattern: value });
+    if (group.agents.length && value) group.rules.push({ kind: key, pattern: normalizeRobotsPath(value) });
   }
   finishGroup();
 
+  const normalizedPath = normalizeRobotsPath(path);
   const isBlockedFor = (crawler: string) => {
     const matches = groups.map((entry) => ({
       group: entry,
@@ -382,8 +394,8 @@ function hasRelevantCrawlerPathDisallow(robotsText: string, path: string) {
     for (const entry of matches) {
       if (entry.specificity !== bestAgent) continue;
       for (const rule of entry.group.rules) {
-        if (!robotsRuleMatches(rule.pattern, path)) continue;
-        const specificity = rule.pattern.replace(/[*$]/g, "").length;
+        if (!robotsRuleMatches(rule.pattern, normalizedPath)) continue;
+        const specificity = rule.pattern.replace(/[*$]/g, "").replace(/%[0-9A-F]{2}/g, "_").length;
         if (specificity > bestPath || (specificity === bestPath && rule.kind === "allow")) {
           bestPath = specificity;
           blocked = rule.kind === "disallow";
