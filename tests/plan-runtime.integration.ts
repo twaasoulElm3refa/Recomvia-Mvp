@@ -466,6 +466,35 @@ for (const returnedModel of ["test/model", "test/unconfigured"]) {
   });
 }
 
+for (const returnedModel of ["test/model", "test/unconfigured"]) {
+  test(`engine summaries retain configured denominators when a provider substitutes ${returnedModel}`, async () => {
+    let secondCalls = 0;
+    await setup("growth", async (_db, requests) => {
+      const response = await POST(request(person));
+      assert.equal(response.status, 201);
+      const { scan } = await read(response);
+      const insights = scan.insights!;
+      assert.equal(requests.length, 37);
+      assert.equal(scan.engineRuns.length, 36);
+      assert.equal(insights.scope.coverageComplete, false);
+      assert.deepEqual(insights.byEngine.map((row) => row.model), insights.scope.models);
+      assert.ok(insights.byEngine.every((row) => row.attempted === 11));
+      const first = insights.byEngine.find((row) => row.model === "test/model")!;
+      const second = insights.byEngine.find((row) => row.model === "test/second")!;
+      assert.equal(first.observed, returnedModel === "test/model" ? 10 : 11);
+      assert.equal(first.mentionRate, 100);
+      assert.equal(second.observed, 10);
+      assert.equal(second.mentionRate, 0);
+      assert.equal(second.citationRate, 100);
+      assert.ok(scan.engineRuns.some((run) => run.model === returnedModel));
+    }, (body) => {
+      if (body.model === "test/second" && ++secondCalls === 2)
+        return reply(body, { model: returnedModel });
+      return reply(body);
+    });
+  });
+}
+
 test("concurrent analyses of one project reserve only one running job", async () => {
   await setup("essential", async (db, requests) => {
     const responses = await Promise.all([POST(request(person)), POST(request(person))]);
