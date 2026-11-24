@@ -318,7 +318,7 @@ function activeJsonLdScripts(html: string) {
   return (activeMarkup.match(/<script\b[^>]*>[\s\S]*?<\/script\s*>/gi) ?? [])
     .filter((script) => {
       const opening = script.match(/^<script\b[^>]*>/i)?.[0] ?? "";
-      return (attributes(opening).type || "").trim().toLowerCase() === "application/ld+json";
+      return decodeHtmlEntities(attributes(opening).type || "").trim().toLowerCase() === "application/ld+json";
     });
 }
 
@@ -663,7 +663,7 @@ export async function runLiveReadinessScan(input: string, requiredOrigin?: strin
     const payload = script.slice(opening.length).replace(/<\/script\s*>$/i, "");
     // Preserve JSON-LD while preventing embedded HTML examples from looking
     // like active metadata or navigation to downstream string extractors.
-    return opening + payload.replace(/</g, "\\u003c").replace(/>/g, "\\u003e") + "</script>";
+    // The active-script filter has already validated the type. Normalize the\n    // opening tag for discovery, which accepts quoted JSON-LD MIME types.\n    // Keep the raw JSON payload (HTML entities are not decoded in script data).\n    return '<script type="application/ld+json">' + payload.replace(/</g, "\\u003c").replace(/>/g, "\\u003e") + "</script>";
   }).join("");
   const discoveryHtml = "<head>" + discoveryHead + "</head><body>" + discoveryBody + "</body>" + discoveryJsonLd;
   const discoveredContext = discoverWebsiteContext({
