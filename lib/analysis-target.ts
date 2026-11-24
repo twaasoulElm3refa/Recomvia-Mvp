@@ -140,6 +140,10 @@ export function parseTargetDiscovery(
     return unresolved;
   if (data.status === "topic" && input.kind === "auto")
     return { status: "topic", candidates: [], response };
+  // A provider that reports uncertainty or an invalid status has not resolved
+  // an identity. Do not offer its leftover candidates for confirmation.
+  if (data.status !== "resolved" && data.status !== "ambiguous")
+    return unresolved;
   const cited = new Set(
     response.citations
       .map((c) => safeSourceUrl(c.url))
