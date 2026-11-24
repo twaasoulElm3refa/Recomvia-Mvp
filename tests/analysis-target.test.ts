@@ -345,6 +345,39 @@ test("named identity questions are separated from unbranded questions and aliase
   }
 });
 
+test("unbranded questions cannot leak target names through the inferred market", () => {
+  for (const country of [
+    target.name,
+    "منطقة عمر مثال",
+    "OMAR-EXAMPLE",
+    "Omar&nbsp;Example",
+    "Omar&#32;Example",
+  ]) {
+    for (const limit of [3, 6, 12]) {
+      const prompts = generateTargetPrompts({ ...target, country }, limit);
+      assert.deepEqual(prompts.map((prompt) => prompt.intent), ["identity"], country);
+      assert.equal(prompts[0].country, country, "do not change the declared market");
+    }
+  }
+  const brand: AnalysisTarget = {
+    ...target,
+    kind: "brand",
+    name: "Acme Studio",
+    input: "Acme Studio",
+    aliases: ["Acme"],
+    category: "Film production",
+    language: "en",
+    country: "Acme Region",
+  };
+  assert.deepEqual(generateTargetPrompts(brand, 12).map((prompt) => prompt.intent), ["identity"]);
+  for (const country of ["Global", "Saudi Arabia", "المملكة العربية السعودية"]) {
+    const prompts = generateTargetPrompts({ ...target, country }, 12);
+    assert.equal(prompts.length, 12, country);
+    assert.ok(prompts.slice(1).every((prompt) => prompt.question.includes(country)));
+  }
+  assert.equal(generateTargetPrompts({ ...brand, country: "United Kingdom" }, 12).length, 12);
+});
+
 test("missing website does not break alias detection and negative recommendations are not promoted", () => {
   const result = analyzeVisibilityResponse({
     brand: target.name,
