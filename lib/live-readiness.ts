@@ -250,7 +250,9 @@ function hasRelevantNoindexHeader(header: string) {
   for (const part of header.split(",")) {
     let directive = part.trim().toLowerCase();
     const scoped = directive.match(/^([a-z][a-z0-9_-]*)\s*:\s*(.*)$/);
-    if (scoped) {
+    // These colon-valued directives are not user-agent prefixes. Keep the
+    // existing crawler scope so a later noindex/none is not silently ignored.
+    if (scoped && !["max-snippet", "max-image-preview", "max-video-preview", "unavailable_after"].includes(scoped[1])) {
       crawler = scoped[1];
       directive = scoped[2].trim();
     }
