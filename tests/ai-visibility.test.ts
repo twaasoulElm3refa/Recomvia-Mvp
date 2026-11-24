@@ -780,6 +780,8 @@ test("readiness ignores inert JSON-LD examples but accepts genuine head and body
     { label: "malformed JSON-LD", head: '<script type="application/ld+json">{invalid}</script>', points: [0, 0, 0], inspected: 1 },
     { label: "active head scripts", head: organization + faq, points: [8, 8, 8], inspected: 2 },
     { label: "active body, attribute order, unquoted mixed-case type", body: '<script data-test="yes" TYPE=APPLICATION/LD+JSON>{"@type":"Organization"}</script>', points: [8, 8, 0], inspected: 1 },
+    { label: "entity-encoded JSON-LD type", head: '<script type="application/ld&#43;json">{"@type":"Organization"}</script>', points: [8, 8, 0], inspected: 1 },
+    { label: "double-encoded JSON-LD type", head: '<script type="application/ld&amp;#43;json">{"@type":"Organization"}</script>', points: [0, 0, 0], inspected: 0 },
     { label: "active body closing-tag whitespace", body: '<script type="application/ld+json">{"@type":"Organization"}</script >', points: [8, 8, 0], inspected: 1 },
     { label: "mixed inactive FAQ and active Organization", body: "<template>" + faq + "</template>" + organization, points: [8, 8, 0], inspected: 1 },
   ];
@@ -1010,8 +1012,11 @@ test("website identity discovery ignores inert markup but preserves active JSON-
     { label: "JavaScript string containing copyable markup", body: "<script>const example = " + JSON.stringify(fakeSchema + fakeMeta + fakeOffering) + ";</script>" },
     { label: "textarea examples", body: "<textarea>" + fakeSchema + fakeMeta + fakeOffering + "</textarea>" },
     { label: "body-only Open Graph tag", body: fakeMeta + "<p>Real website services.</p>" },
+    { label: "double-encoded type is not JSON-LD", head: fakeSchema.replace('application/ld+json', 'application/ld&amp;#43;json') },
     { label: "active organization schema and real service", head: '<meta property="og:site_name" content="Northstar">' + realSchema,
       body: '<a href="/services/analytics">Forecasting analytics</a>', realSchema: true },
+    { label: "active unquoted JSON-LD type", head: realSchema.replace('type="application/ld+json"', 'TYPE=APPLICATION/LD+JSON'), realSchema: true },
+    { label: "active encoded JSON-LD type", head: realSchema.replace('application/ld+json', 'application/ld&#43;json'), realSchema: true },
     { label: "active JSON-LD with embedded HTML example", head:
       '<script type="application/ld+json">{"@type":"Organization","name":"Northstar","url":"https://fixture.example/","description":"<meta property=\u0027og:site_name\u0027 content=\u0027Ghost Corp\u0027>"}</script>',
       realSchema: true },
