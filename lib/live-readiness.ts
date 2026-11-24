@@ -504,7 +504,11 @@ export async function runLiveReadinessScan(input: string, requiredOrigin?: strin
   const canonical = validatedCanonicalUrl(html, page.url);
   const htmlLang = activeDocumentLanguage(html);
   const visibleBody = activeBodyHtml(html);
-  const h1Count = (visibleBody.match(/<h1\b/gi) || []).length;
+  const h1Count = (visibleBody.match(/<h1\b[^>]*>/gi) || []).length;
+  // Empty headings do not frame a subject, even if their markup is present.
+  // Keep the structural count so an extra empty H1 cannot earn a clean pass.
+  const nonemptyH1Count = Array.from(visibleBody.matchAll(/<h1\b[^>]*>([\s\S]*?)<\/h1\s*>/gi))
+    .filter((match) => plainText(match[1]).trim().length > 0).length;
   const jsonLdBlocks = activeJsonLdScripts(html);
   // A script tag does not prove valid structured data. Parse each bounded JSON-LD
   // block independently so malformed markup cannot inflate readiness or entity scores.
@@ -584,8 +588,8 @@ export async function runLiveReadinessScan(input: string, requiredOrigin?: strin
   add({ code: "meta_description", category: "Content readiness", severity: "medium", status: descriptionPoints === 7 ? "pass" : descriptionPoints ? "partial" : "fail", title: "Meta description summarizes the page", explanation: "A specific description gives retrieval systems a compact statement of the page purpose.", evidence: description ? `${description.length} characters · ${clip(description)}` : "No meta description was found.", sourceUrl: page.url, weight: 7, awardedPoints: descriptionPoints });
   add({ code: "canonical", category: "Technical AEO", severity: "high", status: canonical ? "pass" : "fail", title: "Canonical URL is declared", explanation: "A canonical reduces ambiguity between duplicate URL variants and consolidates discovery signals.", evidence: canonical ? clip(canonical) : "Canonical link is missing or invalid.", sourceUrl: page.url, weight: 7, awardedPoints: canonical ? 7 : 0 });
   add({ code: "html_language", category: "Technical AEO", severity: "medium", status: htmlLang ? "pass" : "fail", title: "Document language is declared", explanation: "The document language helps systems interpret the content and market context correctly.", evidence: htmlLang ? `lang=${htmlLang}` : "The html element has no lang attribute.", sourceUrl: page.url, weight: 5, awardedPoints: htmlLang ? 5 : 0 });
-  const h1Points = h1Count === 1 ? 6 : h1Count > 0 ? 3 : 0;
-  add({ code: "primary_heading", category: "Content readiness", severity: "medium", status: h1Points === 6 ? "pass" : h1Points ? "partial" : "fail", title: "A single primary heading frames the page", explanation: "A stable primary heading makes the central subject easier to extract.", evidence: `${h1Count} H1 element${h1Count === 1 ? "" : "s"} found.`, sourceUrl: page.url, weight: 6, awardedPoints: h1Points });
+  const h1Points = nonemptyH1Count === 0 ? 0 : h1Count === 1 ? 6 : 3;
+  add({ code: "primary_heading", category: "Content readiness", severity: "medium", status: h1Points === 6 ? "pass" : h1Points ? "partial" : "fail", title: "A single primary heading frames the page", explanation: "A stable primary heading makes the central subject easier to extract.", evidence: `${h1Count} H1 element${h1Count === 1 ? "" : "s"} found; ${nonemptyH1Count} with readable text.`, sourceUrl: page.url, weight: 6, awardedPoints: h1Points });
   add({ code: "structured_data", category: "Technical AEO", severity: "medium", status: parsedJsonLd.length ? "pass" : "fail", title: "Parseable JSON-LD structured data is present", explanation: "Structured data supplies explicit machine-readable facts, but it must match visible content.", evidence: `${parsedJsonLd.length} parseable JSON-LD block${parsedJsonLd.length === 1 ? "" : "s"} found (${jsonLdBlocks.length} inspected).`, sourceUrl: page.url, weight: 8, awardedPoints: parsedJsonLd.length ? 8 : 0 });
   add({ code: "organization_entity", category: "Authority & entity", severity: "high", status: hasOrganization ? "pass" : "fail", title: "Organization entity is declared", explanation: "Organization markup can clarify the primary brand entity and connect consistent identifiers.", evidence: hasOrganization ? "Organization type found in JSON-LD." : "No Organization type was found in JSON-LD.", sourceUrl: page.url, weight: 8, awardedPoints: hasOrganization ? 8 : 0 });
   const answerReady = hasFaq || hasQuestionHeadings;
