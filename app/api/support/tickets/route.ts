@@ -4,28 +4,42 @@ import { createSupportTicket, SupportRateLimitError } from "@/db/support";
 export const runtime = "edge";
 
 const MAX_BODY_BYTES = 16_384;
+const BODY_TIMEOUT_MS = 5_000;
+const BODY_TIMED_OUT = Symbol("body timed out");
 const noStore = { "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff" };
 const json = (body: unknown, status: number) => Response.json(body, { status, headers: noStore });
 
-async function readBoundedBody(request: Request): Promise<string | null> {
+async function readBoundedBody(request: Request): Promise<string | null | typeof BODY_TIMED_OUT> {
   if (!request.body) return "";
   const reader = request.body.getReader();
   const decoder = new TextDecoder("utf-8", { fatal: true });
   let bytesRead = 0;
   let result = "";
+  let timedOut = false;
+  // Bound the entire upload, including incomplete or slowly arriving chunks.
+  const timer = setTimeout(() => {
+    timedOut = true;
+    void reader.cancel().catch(() => undefined);
+  }, BODY_TIMEOUT_MS);
   try {
     while (true) {
       const { done, value } = await reader.read();
+      if (timedOut) return BODY_TIMED_OUT;
       if (done) break;
       bytesRead += value.byteLength;
       if (bytesRead > MAX_BODY_BYTES) {
-        await reader.cancel().catch(() => undefined);
+        void reader.cancel().catch(() => undefined);
         return null;
       }
       result += decoder.decode(value, { stream: true });
     }
     return result + decoder.decode();
+  } catch (error) {
+    if (timedOut) return BODY_TIMED_OUT;
+    void reader.cancel().catch(() => undefined);
+    throw error;
   } finally {
+    clearTimeout(timer);
     reader.releaseLock();
   }
 }
@@ -114,6 +128,7 @@ export async function POST(request: Request) {
   let payload: TicketRequest;
   try {
     const body = await readBoundedBody(request);
+    if (body === BODY_TIMED_OUT) return json({ error: "Request body timed out." }, 408);
     if (body === null) return json({ error: "Request body is too large." }, 413);
     const value: unknown = JSON.parse(body);
     if (value === null || typeof value !== "object" || Array.isArray(value)) {

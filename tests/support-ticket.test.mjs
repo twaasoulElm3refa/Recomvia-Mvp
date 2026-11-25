@@ -261,3 +261,106 @@ test("support preserves valid plus-addressing, subdomains and Arabic names", asy
   assert.equal(created.at(-1).requesterEmail, "account+report@sub.example.org");
 });
 
+test("support enforces one upload deadline before creating a ticket", async (t) => {
+  const before = created.length;
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  let controller;
+  let cancelled = false;
+  let finishCleanup;
+  const cleanup = new Promise((resolve) => { finishCleanup = resolve; });
+  const body = new ReadableStream({
+    start(value) {
+      controller = value;
+      value.enqueue(new TextEncoder().encode('{"name":"Test Sender",'));
+    },
+    cancel() {
+      cancelled = true;
+      return cleanup;
+    },
+  });
+  const pending = POST(new Request("https://recomvia.test/api/support/tickets", {
+    method: "POST", body, duplex: "half",
+    headers: { Origin: "https://recomvia.test", "Content-Type": "application/json" },
+  }));
+  try {
+    await new Promise((resolve) => setImmediate(resolve));
+    t.mock.timers.tick(4999);
+    assert.equal(cancelled, false);
+    controller.enqueue(new TextEncoder().encode('"email":"sender@example.org","question":"Please explain this report"}'));
+    await new Promise((resolve) => setImmediate(resolve));
+    t.mock.timers.tick(1);
+    const response = await Promise.race([
+      pending,
+      new Promise((resolve) => setImmediate(() => resolve(null))),
+    ]);
+    assert.equal(cancelled, true);
+    assert.ok(response, "deadline must not wait for upstream cleanup");
+    assert.equal(response.status, 408);
+    assert.equal(response.headers.get("Cache-Control"), "no-store");
+    assert.equal(response.headers.get("X-Content-Type-Options"), "nosniff");
+    assert.equal(body.locked, false);
+    assert.equal(created.length, before);
+  } finally {
+    if (!cancelled) controller.close();
+    finishCleanup();
+    await pending;
+    t.mock.timers.reset();
+  }
+});
+
+test("support cancels invalid and oversized streams without waiting for cleanup", async () => {
+  const before = created.length;
+  for (const [bytes, status] of [
+    [new Uint8Array([0xff]), 400],
+    [new Uint8Array(16_385), 413],
+  ]) {
+    let controller;
+    let cancelled = false;
+    let finishCleanup;
+    const cleanup = new Promise((resolve) => { finishCleanup = resolve; });
+    const body = new ReadableStream({
+      start(value) {
+        controller = value;
+        value.enqueue(bytes);
+      },
+      cancel() {
+        cancelled = true;
+        return cleanup;
+      },
+    });
+    const pending = POST(new Request("https://recomvia.test/api/support/tickets", {
+      method: "POST", body, duplex: "half",
+      headers: { Origin: "https://recomvia.test", "Content-Type": "application/json" },
+    }));
+    try {
+      const response = await Promise.race([
+        pending,
+        new Promise((resolve) => setImmediate(() => resolve(null))),
+      ]);
+      assert.equal(cancelled, true);
+      assert.ok(response, "rejection must not wait for upstream cleanup");
+      assert.equal(response.status, status);
+      assert.equal(body.locked, false);
+      assert.equal(created.length, before);
+    } finally {
+      if (!cancelled) controller.close();
+      finishCleanup();
+      await pending;
+    }
+  }
+});
+
+test("support clears upload deadline after a valid submission", async (t) => {
+  const before = created.length;
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const input = { name: "عميل عربي", email: "sender@example.org", question: "أرجو توضيح نتائج التقرير" };
+  try {
+    const response = await POST(request(JSON.stringify(input)));
+    assert.equal(response.status, 201);
+    t.mock.timers.tick(5000);
+    assert.equal(created.length, before + 1);
+    assert.equal(created.at(-1).question, input.question);
+  } finally {
+    t.mock.timers.reset();
+  }
+});
