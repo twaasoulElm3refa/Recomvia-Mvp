@@ -130,3 +130,99 @@ test("project rename preserves ordinary mixed Arabic and Latin names", async () 
     { userId: "owner" }, validData.projectId, validData.expectedName, displayName,
   ]);
 });
+
+
+function streamRequest(body) {
+  return new Request("https://recomvia.test/api/projects/rename", {
+    method: "POST", duplex: "half", body,
+    headers: { Origin: "https://recomvia.test", "Content-Type": "application/json" },
+  });
+}
+
+test("project rename upload deadline is not extended by partial chunks or slow cancellation", async (t) => {
+  const before = writes.length;
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  let controller;
+  let cancelled = false;
+  let finishCleanup;
+  const cleanup = new Promise((resolve) => { finishCleanup = resolve; });
+  const body = new ReadableStream({
+    start(value) {
+      controller = value;
+      value.enqueue(new TextEncoder().encode(valid.slice(0, 12)));
+    },
+    cancel() { cancelled = true; return cleanup; },
+  });
+  const pending = POST(streamRequest(body));
+  try {
+    await new Promise((resolve) => setImmediate(resolve));
+    t.mock.timers.tick(4999);
+    assert.equal(cancelled, false);
+    controller.enqueue(new TextEncoder().encode(valid.slice(12)));
+    await new Promise((resolve) => setImmediate(resolve));
+    t.mock.timers.tick(1);
+    const response = await Promise.race([pending, new Promise((resolve) => setImmediate(() => resolve(null)))]);
+    assert.equal(cancelled, true);
+    assert.ok(response, "deadline must not await upstream cancellation");
+    assert.equal(response.status, 408);
+    assert.deepEqual(await response.json(), { code: "invalid_request" });
+    assert.equal(response.headers.get("Cache-Control"), "no-store");
+    assert.equal(response.headers.get("X-Content-Type-Options"), "nosniff");
+    assert.equal(body.locked, false);
+    assert.equal(writes.length, before);
+  } finally {
+    if (!cancelled) controller.close();
+    finishCleanup();
+    await pending;
+    t.mock.timers.reset();
+  }
+});
+
+test("project rename rejects malformed and oversized streams without waiting for cleanup", async () => {
+  const before = writes.length;
+  for (const [bytes, status] of [[new Uint8Array([0xff]), 400], [new Uint8Array(2049), 413]]) {
+    let controller;
+    let cancelled = false;
+    let finishCleanup;
+    const cleanup = new Promise((resolve) => { finishCleanup = resolve; });
+    const body = new ReadableStream({
+      start(value) { controller = value; value.enqueue(bytes); },
+      cancel() { cancelled = true; return cleanup; },
+    });
+    const pending = POST(streamRequest(body));
+    try {
+      const response = await Promise.race([pending, new Promise((resolve) => setImmediate(() => resolve(null)))]);
+      assert.equal(cancelled, true);
+      assert.ok(response, "invalid upload must not await upstream cancellation");
+      assert.equal(response.status, status);
+      assert.equal(response.headers.get("Cache-Control"), "no-store");
+      assert.equal(body.locked, false);
+      assert.equal(writes.length, before);
+    } finally {
+      if (!cancelled) controller.close();
+      finishCleanup();
+      await pending;
+    }
+  }
+});
+
+test("completed Arabic project rename clears its deadline and preserves mutation contract", async (t) => {
+  const before = writes.length;
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  try {
+    const displayName = "مشروع جديد";
+    const req = request(JSON.stringify({ ...validData, displayName }));
+    const response = await POST(req);
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), {
+      projectId: validData.projectId, displayName, changed: true,
+      projectKeyUnchanged: true, quotasReset: false,
+    });
+    assert.equal(req.body.locked, false);
+    t.mock.timers.tick(5000);
+    assert.equal(writes.length, before + 1);
+    assert.deepEqual(writes.at(-1), [{ userId: "owner" }, validData.projectId, validData.expectedName, displayName]);
+  } finally {
+    t.mock.timers.reset();
+  }
+});
