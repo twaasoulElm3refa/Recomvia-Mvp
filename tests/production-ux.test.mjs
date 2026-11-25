@@ -186,3 +186,24 @@ test("Fix Center rejects malformed and repeated report IDs without private repor
   assert.deepEqual(calls, [["scan", "account-1", "scan-1"]],
     "a valid selector must remain scoped to the authenticated account");
 });
+
+
+test("staff inbox never renders legacy non-local support source links", () => {
+  const inboxMocks = {
+    ...mocks,
+    "@/components/ui/badge": { Badge: wrap },
+    "@/components/ui/table": Object.fromEntries(["Table", "TableBody", "TableCell", "TableHead", "TableHeader", "TableRow"].map((key) => [key, wrap])),
+    "@/components/ui/dialog": { ...mocks["@/components/ui/dialog"], DialogFooter: wrap },
+    "@/components/ui/textarea": { Textarea: () => null },
+  };
+  const { SupportInbox } = load("app/support/inbox/support-inbox.tsx", inboxMocks);
+  const render = (pageUrl) => renderToStaticMarkup(React.createElement(SupportInbox, {
+    initialTickets: [{ id: "ticket", publicId: "RCV-TEST", requesterName: "Test",
+      requesterEmail: "test@example.org", question: "Help with this report", status: "open",
+      createdAt: "2026-11-25T00:00:00Z", pageUrl }],
+  }));
+  for (const value of ["//evil.example/path", "/\\evil.example/path", "https://evil.example/path", "/\t/evil.example/path", "javascript:alert(1)"]) {
+    assert.doesNotMatch(render(value), /Source page/, value);
+  }
+  assert.match(render("/ar/contact?from=help"), /href="\/ar\/contact\?from=help"/);
+});

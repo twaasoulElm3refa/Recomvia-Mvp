@@ -73,6 +73,9 @@ function safePageUrl(value: string, origin: string) {
   try {
     const url = new URL(value, origin);
     if (url.origin !== origin || !["http:", "https:"].includes(url.protocol)) return "";
+    // A same-origin absolute URL can normalize to a network-path reference.
+    // Reject it before stripping the origin so the stored href remains local.
+    if (url.pathname.startsWith("//")) return "";
     return url.pathname + url.search;
   } catch {
     return "";

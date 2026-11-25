@@ -164,6 +164,9 @@ test("support source links stay on the app origin even for backslash or absolute
     "//evil.example/phishing",
     "/\\\\evil.example/phishing",
     "https://evil.example/phishing",
+    "https://recomvia.test//evil.example/phishing",
+    "/safe/..//evil.example/phishing",
+    "/safe/%2e%2e//evil.example/phishing",
     "javascript:alert(1)",
     "contact", // Relative links without a leading slash are not accepted.
   ];
