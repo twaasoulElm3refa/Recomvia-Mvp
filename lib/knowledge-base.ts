@@ -166,17 +166,11 @@ function relatedToken(left:string,right:string){
 
 export type KnowledgeResult={answered:boolean;answer?:string;title?:string;sourceUrl?:string;sourceLabel?:string;confidence:number;language:"ar"|"en";suggestedQuestion?:string};
 
-export function searchKnowledge(question:string):KnowledgeResult {
-  const language: "ar" | "en" = /[\u0600-\u06ff]/.test(question) ? "ar" : "en";
+// The published corpus is static for a deployed version. Keep only two lazy,
+// language-specific indexes in each warm worker; never cache visitor queries.
+function buildKnowledgeIndex(language: "ar" | "en") {
   const prefix = language === "ar" ? "/ar" : "";
   const articles = getLocalizedArticles(language);
-  const query=normalize(question); const queryTokens=[...new Set(tokens(question))];
-  // The brand name alone can find the introduction, but must not dominate an unrelated question.
-  if(!queryTokens.length){
-    const intro=faqEntries.find(entry=>entry.id==="what-is-recomvia");
-    if(intro&&/recomvia|ريكومفيا/i.test(question))return {answered:true,title:language==="ar"?intro.questionAr:intro.question,answer:language==="ar"?intro.answerAr:intro.answer,sourceUrl:`${prefix}/faq#what-is-recomvia`,sourceLabel:language==="ar"?"عرض المصدر":"View source",confidence:90,language};
-    return {answered:false,confidence:0,language};
-  }
   const candidates=[
     ...faqEntries.map(entry=>({title:language==="ar"?entry.questionAr:entry.question,answer:language==="ar"?entry.answerAr:entry.answer,url:`${prefix}/faq#${entry.id}`,phrases:[entry.question,entry.questionAr,...entry.keywords],keywords:[entry.question,entry.questionAr,...entry.keywords].join(" "),body:[entry.answer,entry.answerAr].join(" ")})),
     ...articles.map(article=>({
@@ -212,11 +206,29 @@ export function searchKnowledge(question:string):KnowledgeResult {
     keywordTokens:new Set(tokens(candidate.keywords)),
     bodyTokens:new Set(tokens(candidate.body)),
   }));
-  const documentFrequency=new Map<string,number>();
-  for(const token of new Set(queryTokens)){
-    const count=searchable.filter(candidate=>candidate.titleTokens.has(token)||candidate.keywordTokens.has(token)||candidate.bodyTokens.has(token)).length;
-    documentFrequency.set(token,count);
+  const documentFrequency = new Map<string, number>();
+  for (const candidate of searchable) {
+    const uniqueTokens = new Set([...candidate.titleTokens, ...candidate.keywordTokens, ...candidate.bodyTokens]);
+    for (const token of uniqueTokens) {
+      documentFrequency.set(token, (documentFrequency.get(token) ?? 0) + 1);
+    }
   }
+  return { searchable, documentFrequency };
+}
+
+const knowledgeIndexes: Partial<Record<"ar" | "en", ReturnType<typeof buildKnowledgeIndex>>> = {};
+
+export function searchKnowledge(question:string):KnowledgeResult {
+  const language: "ar" | "en" = /[\u0600-\u06ff]/.test(question) ? "ar" : "en";
+  const prefix = language === "ar" ? "/ar" : "";
+  const query=normalize(question); const queryTokens=[...new Set(tokens(question))];
+  // The brand name alone can find the introduction, but must not dominate an unrelated question.
+  if(!queryTokens.length){
+    const intro=faqEntries.find(entry=>entry.id==="what-is-recomvia");
+    if(intro&&/recomvia|ريكومفيا/i.test(question))return {answered:true,title:language==="ar"?intro.questionAr:intro.question,answer:language==="ar"?intro.answerAr:intro.answer,sourceUrl:`${prefix}/faq#what-is-recomvia`,sourceLabel:language==="ar"?"عرض المصدر":"View source",confidence:90,language};
+    return {answered:false,confidence:0,language};
+  }
+  const { searchable, documentFrequency } = knowledgeIndexes[language] ??= buildKnowledgeIndex(language);
   const ranked=searchable.map(candidate=>{
     let score=0; let matched=0; let topicMatched=0;
     if(candidate.normalizedTitle===query)score+=80;
