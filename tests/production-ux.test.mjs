@@ -281,3 +281,96 @@ test("assistant rejects oversized tool questions before fetch or UI changes", as
   assert.equal(pending.length, 0);
   assert.equal(writes.length, 0);
 });
+
+
+function contactHarness() {
+  const writes = [];
+  const pending = [];
+  const stored = [];
+  const state = [];
+  const refs = [];
+  let stateIndex = 0;
+  let refIndex = 0;
+  const fakeReact = {
+    ...React,
+    useState: (initial) => {
+      const index = stateIndex++;
+      if (!(index in state)) state[index] = initial;
+      return [state[index], (value) => { state[index] = value; writes.push(value); }];
+    },
+    useRef: (initial) => {
+      const index = refIndex++;
+      return refs[index] ??= { current: initial };
+    },
+    useEffect: () => {},
+  };
+  const js = ts.transpileModule(source("app/contact/contact-form.tsx"), {
+    compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX, target: ts.ScriptTarget.ES2022 },
+  }).outputText;
+  const loadedModule = { exports: {} };
+  const fakeFetch = (url, options) => {
+    assert.equal(url, "/api/support/tickets");
+    assert.equal(options.method, "POST");
+    return new Promise((resolve) => pending.push({
+      finish: (payload, status = 201) => resolve(Response.json(payload, { status })),
+    }));
+  };
+  new Function("require", "module", "exports", "fetch", "window", js)((id) => {
+    if (id === "react") return fakeReact;
+    if (id === "@/components/ui/input") return { Input: wrap };
+    if (id === "@/components/ui/textarea") return { Textarea: wrap };
+    if (id === "@/components/ui/select") return Object.fromEntries(
+      ["Select", "SelectContent", "SelectItem", "SelectTrigger", "SelectValue"].map((key) => [key, wrap]),
+    );
+    return mocks[id] ?? require(id);
+  }, loadedModule, loadedModule.exports, fakeFetch, {
+    localStorage: { setItem: (key, value) => stored.push([key, JSON.parse(value)]) },
+  });
+  const render = () => {
+    stateIndex = 0;
+    refIndex = 0;
+    return loadedModule.exports.ContactForm({ locale: "ar" });
+  };
+  return { render, pending, stored, writes };
+}
+
+test("contact form submits only once even before rerender and after success", async () => {
+  const { render, pending, stored } = contactHarness();
+  const submit = render().props.onSubmit;
+  const event = { preventDefault() {} };
+  const first = submit(event);
+  await submit(event);
+  assert.equal(pending.length, 1);
+  pending[0].finish({ reference: "RCV-TEST", accessKey: "private-key", status: "open" });
+  await first;
+  await submit(event);
+  assert.equal(pending.length, 1, "a completed ticket remains locked until send another");
+  assert.equal(stored.length, 1);
+  const success = render();
+  const again = React.Children.toArray(success.props.children).find((child) => child.props?.onClick);
+  assert.ok(again);
+  again.props.onClick();
+  const second = render().props.onSubmit(event);
+  assert.equal(pending.length, 2);
+  pending[1].finish({ reference: "RCV-SECOND", accessKey: "second-key" });
+  await second;
+  assert.equal(stored.length, 2);
+});
+
+test("contact form unlocks after a rejected submission for deliberate retry", async () => {
+  const { render, pending, stored, writes } = contactHarness();
+  const event = { preventDefault() {} };
+  const submit = render().props.onSubmit;
+  const first = submit(event);
+  await submit(event);
+  assert.equal(pending.length, 1);
+  pending[0].finish({ error: "unavailable" }, 503);
+  await first;
+  assert.equal(stored.length, 0);
+  assert.ok(writes.includes("تعذر إرسال رسالتك."));
+  const retry = render().props.onSubmit(event);
+  assert.equal(pending.length, 2);
+  pending[1].finish({ reference: "RCV-RETRY", accessKey: "retry-key" });
+  await retry;
+  assert.equal(stored.length, 1);
+});
