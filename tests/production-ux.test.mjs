@@ -207,3 +207,77 @@ test("staff inbox never renders legacy non-local support source links", () => {
   }
   assert.match(render("/ar/contact?from=help"), /href="\/ar\/contact\?from=help"/);
 });
+
+
+function assistantHarness() {
+  const writes = [];
+  const pending = [];
+  let ask;
+  const fakeReact = {
+    ...React,
+    useState: (initial) => [initial, (value) => writes.push(value)],
+    useRef: (initial) => ({ current: initial }),
+    useEffect: () => {},
+    useCallback: (callback) => { ask = callback; return callback; },
+  };
+  const js = ts.transpileModule(source("app/components/knowledge-assistant.tsx"), {
+    compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX, target: ts.ScriptTarget.ES2022 },
+  }).outputText;
+  const loadedModule = { exports: {} };
+  const fakeFetch = (url, options) => {
+    assert.equal(url, "/api/assistant");
+    return new Promise((resolve) => pending.push({
+      question: JSON.parse(options.body).question,
+      finish: (payload, status = 200) => resolve(Response.json(payload, { status })),
+    }));
+  };
+  new Function("require", "module", "exports", "fetch", js)((id) => {
+    if (id === "react") return fakeReact;
+    if (id === "@/lib/site-locale") return {};
+    if (id === "@/components/ui/input") return { Input: wrap };
+    if (id === "@/components/ui/textarea") return { Textarea: wrap };
+    if (id === "@/components/ui/sheet") return Object.fromEntries(
+      ["Sheet", "SheetContent", "SheetDescription", "SheetHeader", "SheetTitle", "SheetTrigger"].map((key) => [key, wrap]),
+    );
+    return mocks[id] ?? require(id);
+  }, loadedModule, loadedModule.exports, fakeFetch);
+  loadedModule.exports.KnowledgeAssistant();
+  return { ask, writes, pending };
+}
+
+test("assistant ignores an older unsupported answer after a newer supported Arabic answer", async () => {
+  const { ask, writes, pending } = assistantHarness();
+  const older = ask("An older question");
+  const newer = ask("ما الفرق بين الباقات؟");
+  assert.deepEqual(pending.map((entry) => entry.question), ["An older question", "ما الفرق بين الباقات؟"]);
+  const recent = { answered: true, answer: "إجابة موثقة", confidence: 1, language: "ar" };
+  pending[1].finish(recent);
+  assert.deepEqual(await newer, recent);
+  assert.ok(writes.includes(false));
+  assert.ok(writes.some((value) => value?.answer === recent.answer));
+  const count = writes.length;
+  const stale = { answered: false, confidence: 0, language: "en" };
+  pending[0].finish(stale);
+  assert.deepEqual(await older, stale, "each tool caller still receives its own answer");
+  assert.equal(writes.length, count, "an older response must not reopen escalation or replace the result");
+});
+
+test("assistant ignores stale failure while latest question is still pending", async () => {
+  const { ask, writes, pending } = assistantHarness();
+  const older = ask("Old question");
+  const newer = ask("New question");
+  const count = writes.length;
+  pending[0].finish({ error: "old failure" }, 500);
+  assert.equal(await older, null);
+  assert.equal(writes.length, count, "stale errors must not clear the latest loading state");
+  pending[1].finish({ error: "new failure" }, 500);
+  assert.equal(await newer, null);
+  assert.deepEqual(writes.slice(count), ["new failure", false]);
+});
+
+test("assistant rejects oversized tool questions before fetch or UI changes", async () => {
+  const { ask, writes, pending } = assistantHarness();
+  assert.equal(await ask("س".repeat(601)), null);
+  assert.equal(pending.length, 0);
+  assert.equal(writes.length, 0);
+});
