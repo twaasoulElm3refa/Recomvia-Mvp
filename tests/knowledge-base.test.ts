@@ -56,3 +56,21 @@ test("paid-plan FAQ and assistant do not promise checkout before payment activat
     assert.match(arabic.answer ?? "", /إلا بعد تفعيل/);
   }
 });
+
+
+test("privacy FAQ and assistant accurately describe current beta abuse controls", () => {
+  const entry = faqEntries.find((item) => item.id === "privacy");
+  assert.ok(entry);
+  for (const [question, language, account, retries, cache, limitation, rights] of [
+    [entry.question, "en", /account eligibility/i, /retry limits/i, /recent eligible results may be reused/i, /device fingerprinting and risk scoring are not implemented/i, /request access or deletion/i],
+    [entry.questionAr, "ar", /أهلية الحساب/, /حدود إعادة المحاولة/, /النتائج الحديثة المؤهلة/, /لم تُنفذ بعد آليات بصمة الجهاز المتقدمة وتقييم المخاطر/, /طلب الوصول إليها أو حذفها/],
+  ] as const) {
+    const result = searchKnowledge(question);
+    assert.equal(result.answered, true);
+    assert.equal(result.language, language);
+    assert.equal(result.sourceUrl, "/faq#privacy");
+    const answer = result.answer ?? "";
+    for (const assertion of [account, retries, cache, limitation, rights]) assert.match(answer, assertion);
+    assert.equal(answer, language === "en" ? entry.answer : entry.answerAr);
+  }
+});
