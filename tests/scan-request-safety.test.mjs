@@ -273,3 +273,103 @@ test("private scan lookup is authenticated and owner-scoped for valid identifier
     ["customer-1", "scan_other"],
   ], "all private reads must remain scoped to the signed-in user");
 });
+
+test("scan upload deadline cannot be extended by partial chunks or slow cancellation", async (t) => {
+  const before = workspaceCalls;
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  let controller;
+  let cancelled = false;
+  let finishCleanup;
+  const cleanup = new Promise((resolve) => { finishCleanup = resolve; });
+  const body = new ReadableStream({
+    start(value) {
+      controller = value;
+      value.enqueue(new TextEncoder().encode('{"input":'));
+    },
+    cancel() {
+      cancelled = true;
+      return cleanup;
+    },
+  });
+  const pending = POST(new Request("https://recomvia.test/api/scans", {
+    method: "POST", duplex: "half", body,
+    headers: { Origin: "https://recomvia.test", "Content-Type": "application/json" },
+  }));
+  try {
+    await new Promise((resolve) => setImmediate(resolve));
+    t.mock.timers.tick(4999);
+    assert.equal(cancelled, false);
+    controller.enqueue(new TextEncoder().encode('"Valid topic","kind":"topic"}'));
+    await new Promise((resolve) => setImmediate(resolve));
+    t.mock.timers.tick(1);
+    const response = await Promise.race([
+      pending,
+      new Promise((resolve) => setImmediate(() => resolve(null))),
+    ]);
+    assert.equal(cancelled, true);
+    assert.ok(response, "timeout must not await upstream cleanup");
+    assert.equal(response.status, 408);
+    assert.equal(response.headers.get("Cache-Control"), "no-store");
+    assert.equal(response.headers.get("X-Content-Type-Options"), "nosniff");
+    assert.equal(body.locked, false);
+    assert.equal(workspaceCalls, before);
+  } finally {
+    if (!cancelled) controller.close();
+    finishCleanup();
+    await pending;
+    t.mock.timers.reset();
+  }
+});
+
+test("malformed and oversized scan streams are cancelled without waiting for cleanup", async () => {
+  const before = workspaceCalls;
+  for (const [bytes, status] of [[new Uint8Array([0xff]), 400], [new Uint8Array(4001), 413]]) {
+    let controller;
+    let cancelled = false;
+    let finishCleanup;
+    const cleanup = new Promise((resolve) => { finishCleanup = resolve; });
+    const body = new ReadableStream({
+      start(value) {
+        controller = value;
+        value.enqueue(bytes);
+      },
+      cancel() {
+        cancelled = true;
+        return cleanup;
+      },
+    });
+    const pending = POST(new Request("https://recomvia.test/api/scans", {
+      method: "POST", duplex: "half", body,
+      headers: { Origin: "https://recomvia.test", "Content-Type": "application/json" },
+    }));
+    try {
+      const response = await Promise.race([
+        pending,
+        new Promise((resolve) => setImmediate(() => resolve(null))),
+      ]);
+      assert.equal(cancelled, true);
+      assert.ok(response, "invalid upload must not await upstream cleanup");
+      assert.equal(response.status, status);
+      assert.equal(body.locked, false);
+      assert.equal(workspaceCalls, before);
+    } finally {
+      if (!cancelled) controller.close();
+      finishCleanup();
+      await pending;
+    }
+  }
+});
+
+test("a completed scan upload clears its deadline before entering the workspace", async (t) => {
+  const before = workspaceCalls;
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  try {
+    const req = request(JSON.stringify({ input: "موضوع عربي", kind: "topic", language: "ar" }));
+    await assert.rejects(POST(req), /Scan workspace boundary reached/);
+    assert.equal(req.body.locked, false);
+    t.mock.timers.tick(5000);
+    assert.equal(workspaceCalls, before + 1);
+  } finally {
+    t.mock.timers.reset();
+  }
+});
