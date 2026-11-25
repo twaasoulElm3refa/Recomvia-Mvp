@@ -27,19 +27,31 @@ export async function POST(request: Request) {
     const decoder = new TextDecoder("utf-8", { fatal: true });
     let size = 0;
     let text = "";
+    let timedOut = false;
+    // One deadline for the entire upload; cancellation must not hold the response open.
+    const timer = setTimeout(() => {
+      timedOut = true;
+      void reader.cancel().catch(() => undefined);
+    }, 5_000);
     try {
       while (true) {
         const { done, value } = await reader.read();
+        if (timedOut) return respond({ code: "invalid_request" }, 408);
         if (done) break;
         size += value.byteLength;
         if (size > 300) {
-          await reader.cancel();
+          void reader.cancel().catch(() => undefined);
           return respond({ code: "invalid_request" }, 413);
         }
         text += decoder.decode(value, { stream: true });
       }
       text += decoder.decode();
+    } catch (error) {
+      if (timedOut) return respond({ code: "invalid_request" }, 408);
+      void reader.cancel().catch(() => undefined);
+      throw error;
     } finally {
+      clearTimeout(timer);
       reader.releaseLock();
     }
     body = JSON.parse(text);
