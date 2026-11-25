@@ -18,12 +18,17 @@ async function readBoundedBody(request: Request): Promise<string | null> {
       if (done) break;
       bytesRead += value.byteLength;
       if (bytesRead > MAX_BODY_BYTES) {
-        await reader.cancel().catch(() => undefined);
+        // Do not wait for upstream cancellation before returning the rejection.
+        void reader.cancel().catch(() => undefined);
         return null;
       }
       text += decoder.decode(value, { stream: true });
     }
     return text + decoder.decode();
+  } catch (error) {
+    // Invalid UTF-8 or a read failure must not leave an unread body active.
+    void reader.cancel().catch(() => undefined);
+    throw error;
   } finally {
     reader.releaseLock();
   }
