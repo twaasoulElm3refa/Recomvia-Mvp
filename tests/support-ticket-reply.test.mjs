@@ -169,3 +169,95 @@ test("admin replies preserve ordinary Arabic multiline formatting", async () => 
   assert.equal(writes.length, before + 1);
   assert.deepEqual(writes.at(-1), [12, reply, "admin-123"]);
 });
+
+
+function streamRequest(body) {
+  return new Request("https://recomvia.test/api/support/tickets/12/reply", {
+    method: "POST", duplex: "half", body,
+    headers: { Origin: "https://recomvia.test", "Content-Type": "application/json" },
+  });
+}
+
+test("admin reply upload deadline is not extended by chunks or slow cancellation", async (t) => {
+  const before = writes.length;
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  let controller;
+  let cancelled = false;
+  let finishCleanup;
+  const cleanup = new Promise((resolve) => { finishCleanup = resolve; });
+  const body = new ReadableStream({
+    start(value) {
+      controller = value;
+      value.enqueue(new TextEncoder().encode(valid.slice(0, 12)));
+    },
+    cancel() { cancelled = true; return cleanup; },
+  });
+  const pending = POST(streamRequest(body), context());
+  try {
+    await new Promise((resolve) => setImmediate(resolve));
+    t.mock.timers.tick(4999);
+    assert.equal(cancelled, false);
+    controller.enqueue(new TextEncoder().encode(valid.slice(12)));
+    await new Promise((resolve) => setImmediate(resolve));
+    t.mock.timers.tick(1);
+    const response = await Promise.race([pending, new Promise((resolve) => setImmediate(() => resolve(null)))]);
+    assert.equal(cancelled, true);
+    assert.ok(response, "deadline must not await upstream cancellation");
+    assert.equal(response.status, 408);
+    assert.equal(response.headers.get("Cache-Control"), "no-store");
+    assert.equal(response.headers.get("X-Content-Type-Options"), "nosniff");
+    assert.equal(body.locked, false);
+    assert.equal(writes.length, before);
+  } finally {
+    if (!cancelled) controller.close();
+    finishCleanup();
+    await pending;
+    t.mock.timers.reset();
+  }
+});
+
+test("admin reply rejects malformed and oversized streams without waiting for cleanup", async () => {
+  const before = writes.length;
+  for (const [bytes, status] of [[new Uint8Array([0xff]), 400], [new Uint8Array(16385), 413]]) {
+    let controller;
+    let cancelled = false;
+    let finishCleanup;
+    const cleanup = new Promise((resolve) => { finishCleanup = resolve; });
+    const body = new ReadableStream({
+      start(value) { controller = value; value.enqueue(bytes); },
+      cancel() { cancelled = true; return cleanup; },
+    });
+    const pending = POST(streamRequest(body), context());
+    try {
+      const response = await Promise.race([pending, new Promise((resolve) => setImmediate(() => resolve(null)))]);
+      assert.equal(cancelled, true);
+      assert.ok(response, "invalid upload must not await upstream cancellation");
+      assert.equal(response.status, status);
+      assert.equal(response.headers.get("Cache-Control"), "no-store");
+      assert.equal(body.locked, false);
+      assert.equal(writes.length, before);
+    } finally {
+      if (!cancelled) controller.close();
+      finishCleanup();
+      await pending;
+    }
+  }
+});
+
+test("completed Arabic admin reply clears its deadline and saves exactly once", async (t) => {
+  const before = writes.length;
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  try {
+    const reply = "شكرًا لتواصلك معنا، سنراجع التقرير.";
+    const req = request(JSON.stringify({ reply }));
+    const response = await POST(req, context());
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), { ok: true, status: "answered" });
+    assert.equal(req.body.locked, false);
+    t.mock.timers.tick(5000);
+    assert.equal(writes.length, before + 1);
+    assert.deepEqual(writes.at(-1), [12, reply, "admin-123"]);
+  } finally {
+    t.mock.timers.reset();
+  }
+});
