@@ -45,26 +45,40 @@ const json = (body: unknown, status = 200) =>
   Response.json(body, { status, headers });
 
 const MAX_SCAN_BODY_BYTES = 4_000;
+const SCAN_BODY_TIMEOUT_MS = 5_000;
+const SCAN_BODY_TIMED_OUT = Symbol("scan body timed out");
 
-async function readBoundedScanBody(request: Request): Promise<string | null> {
+async function readBoundedScanBody(request: Request): Promise<string | null | typeof SCAN_BODY_TIMED_OUT> {
   if (!request.body) return "";
   const reader = request.body.getReader();
   const decoder = new TextDecoder("utf-8", { fatal: true });
   let size = 0;
   let text = "";
+  let timedOut = false;
+  // One deadline for the entire upload, before any workspace or provider work.
+  const timer = setTimeout(() => {
+    timedOut = true;
+    void reader.cancel().catch(() => undefined);
+  }, SCAN_BODY_TIMEOUT_MS);
   try {
     while (true) {
       const { done, value } = await reader.read();
+      if (timedOut) return SCAN_BODY_TIMED_OUT;
       if (done) break;
       size += value.byteLength;
       if (size > MAX_SCAN_BODY_BYTES) {
-        await reader.cancel().catch(() => undefined);
+        void reader.cancel().catch(() => undefined);
         return null;
       }
       text += decoder.decode(value, { stream: true });
     }
     return text + decoder.decode();
+  } catch (error) {
+    if (timedOut) return SCAN_BODY_TIMED_OUT;
+    void reader.cancel().catch(() => undefined);
+    throw error;
   } finally {
+    clearTimeout(timer);
     reader.releaseLock();
   }
 }
@@ -109,6 +123,8 @@ export async function POST(request: Request) {
   let payload: Record<string, unknown>;
   try {
     const body = await readBoundedScanBody(request);
+    if (body === SCAN_BODY_TIMED_OUT)
+      return json({ code: "invalid_input", error: "Request body timed out." }, 408);
     if (body === null)
       return json({ code: "invalid_input", error: "Request is too large." }, 413);
     const parsed: unknown = JSON.parse(body);
