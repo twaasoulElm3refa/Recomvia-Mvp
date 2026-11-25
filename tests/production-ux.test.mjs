@@ -638,3 +638,57 @@ test("staff reply preserves the draft on failure and permits a deliberate retry"
   await settleAssistantFetch();
   assert.equal(harness.dialog().open, false);
 });
+
+test("assistant rejects stale escalation forms even when the new question has the same text", async () => {
+  const harness = assistantHarness();
+  const question = "أحتاج مساعدة بشأن التقرير";
+  const first = harness.ask(question);
+  harness.pending.at(-1).finish({ answered: false, confidence: 0, language: "ar" });
+  await first;
+  const form = findAssistantElement(harness.render(), (node) =>
+    node.type === "form" && node.props.className.includes("space-y-3"));
+  assert.ok(form);
+  const newer = harness.ask(question);
+  const before = harness.pending.length;
+  await form.props.onSubmit({ preventDefault() {} });
+  assert.equal(harness.pending.length, before, "a stale form cannot send during a newer question");
+  harness.pending.at(-1).finish({ answered: false, confidence: 0, language: "ar" });
+  await newer;
+  await form.props.onSubmit({ preventDefault() {} });
+  assert.equal(harness.pending.length, before, "a stale form cannot send for a later result");
+  const current = findAssistantElement(harness.render(), (node) =>
+    node.type === "form" && node.props.className.includes("space-y-3"));
+  assert.ok(current);
+  const send = current.props.onSubmit({ preventDefault() {} });
+  assert.equal(harness.pending.at(-1).url, "/api/support/tickets");
+  harness.pending.at(-1).finish({ reference: "RCV-CURRENT", accessKey: "current-key" }, 201);
+  await send;
+  assert.equal(harness.stored.at(-1)[1].reference, "RCV-CURRENT");
+});
+
+test("obsolete escalation failures do not overwrite a newer question and its support form", async () => {
+  const harness = assistantHarness();
+  const first = harness.ask("أحتاج مساعدة بشأن التقرير");
+  harness.pending.at(-1).finish({ answered: false, confidence: 0, language: "ar" });
+  await first;
+  const form = findAssistantElement(harness.render(), (node) =>
+    node.type === "form" && node.props.className.includes("space-y-3"));
+  assert.ok(form);
+  const send = form.props.onSubmit({ preventDefault() {} });
+  const old = harness.pending.at(-1);
+  const newer = harness.ask("سؤال آخر حول الحساب");
+  harness.pending.at(-1).finish({ answered: false, confidence: 0, language: "ar" });
+  await newer;
+  const count = harness.writes.length;
+  old.finish({ error: "obsolete escalation failure" }, 503);
+  await send;
+  assert.deepEqual(harness.writes.slice(count), [false]);
+  const current = findAssistantElement(harness.render(), (node) =>
+    node.type === "form" && node.props.className.includes("space-y-3"));
+  assert.ok(current);
+  const retry = current.props.onSubmit({ preventDefault() {} });
+  assert.equal(harness.pending.at(-1).body.question, "سؤال آخر حول الحساب");
+  harness.pending.at(-1).finish({ reference: "RCV-NEW", accessKey: "new-key" }, 201);
+  await retry;
+  assert.equal(harness.stored.length, 1);
+});
