@@ -78,6 +78,7 @@ export function KnowledgeAssistant() {
   const [pageArabic, setPageArabic] = useState(false);
   const latestQuestionRequest = useRef(0);
   const escalationInFlight = useRef(false);
+  const activeEscalationResult = useRef<KnowledgeResult | null>(null);
   const lastSubmittedQuestionRequest = useRef<number | null>(null);
   const activeTicket = useRef<StoredTicket | null>(null);
   const latestTicketStatusRequest = useRef(0);
@@ -125,6 +126,7 @@ export function KnowledgeAssistant() {
     // Concurrent tool calls still get their own answers, but only the newest
     // question may update the visible conversation and escalation state.
     const requestId = ++latestQuestionRequest.current;
+    activeEscalationResult.current = null;
     setOpen(true);
     setAsking(true);
     setError("");
@@ -142,7 +144,10 @@ export function KnowledgeAssistant() {
       if (!response.ok) throw new Error(data.error || "The assistant could not answer right now.");
       if (requestId === latestQuestionRequest.current) {
         setResult(data);
-        if (!data.answered) setShowEscalation(true);
+        if (!data.answered) {
+          activeEscalationResult.current = data;
+          setShowEscalation(true);
+        }
       }
       return data;
     } catch (caught) {
@@ -192,7 +197,7 @@ export function KnowledgeAssistant() {
   async function sendToHuman(event: FormEvent) {
     event.preventDefault();
     const questionRequestId = latestQuestionRequest.current;
-    if (escalationInFlight.current || lastSubmittedQuestionRequest.current === questionRequestId) return;
+    if (!result || result !== activeEscalationResult.current || escalationInFlight.current || lastSubmittedQuestionRequest.current === questionRequestId) return;
     escalationInFlight.current = true;
     setSending(true);
     setError("");
@@ -231,7 +236,9 @@ export function KnowledgeAssistant() {
       lastSubmittedQuestionRequest.current = questionRequestId;
       if (questionRequestId === latestQuestionRequest.current) setShowEscalation(false);
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "The request could not be sent.");
+      if (questionRequestId === latestQuestionRequest.current) {
+        setError(caught instanceof Error ? caught.message : "The request could not be sent.");
+      }
     } finally {
       escalationInFlight.current = false;
       setSending(false);
