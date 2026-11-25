@@ -77,6 +77,8 @@ export function KnowledgeAssistant() {
   const [checking, setChecking] = useState(false);
   const [pageArabic, setPageArabic] = useState(false);
   const latestQuestionRequest = useRef(0);
+  const activeTicket = useRef<StoredTicket | null>(null);
+  const latestTicketStatusRequest = useRef(0);
 
   useEffect(() => {
     const root = document.documentElement;
@@ -103,7 +105,11 @@ export function KnowledgeAssistant() {
     const timer = window.setTimeout(() => {
       try {
         const saved = window.localStorage.getItem(ticketStorageKey);
-        if (saved) setTicket(JSON.parse(saved) as StoredTicket);
+        if (saved && !activeTicket.current) {
+          const restored = JSON.parse(saved) as StoredTicket;
+          activeTicket.current = restored;
+          setTicket(restored);
+        }
       } catch {
         // Ticket lookup still works when the visitor keeps the reference manually.
       }
@@ -205,6 +211,10 @@ export function KnowledgeAssistant() {
         question: supportQuestion,
         status: data.status || "open",
       };
+      // Invalidate a lookup for the previous ticket before replacing it.
+      ++latestTicketStatusRequest.current;
+      activeTicket.current = stored;
+      setChecking(false);
       setTicket(stored);
       // The ticket is already saved on the server. Storage being blocked must
       // not turn a successful request into a false error or a duplicate.
@@ -222,18 +232,22 @@ export function KnowledgeAssistant() {
   }
 
   async function checkTicket() {
-    if (!ticket) return;
+    const currentTicket = activeTicket.current;
+    if (!currentTicket) return;
+    const requestId = ++latestTicketStatusRequest.current;
     setChecking(true);
     setError("");
     try {
       const response = await fetch("/api/support/tickets/status", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ reference: ticket.reference, accessKey: ticket.accessKey }),
+        body: JSON.stringify({ reference: currentTicket.reference, accessKey: currentTicket.accessKey }),
       });
       const data = (await response.json()) as { status?: string; humanReply?: string | null; updatedAt?: string; error?: string };
       if (!response.ok) throw new Error(data.error || "The ticket could not be checked.");
-      const updated = { ...ticket, status: data.status || ticket.status, humanReply: data.humanReply, updatedAt: data.updatedAt };
+      if (requestId !== latestTicketStatusRequest.current) return;
+      const updated = { ...currentTicket, status: data.status || currentTicket.status, humanReply: data.humanReply, updatedAt: data.updatedAt };
+      activeTicket.current = updated;
       setTicket(updated);
       try {
         window.localStorage.setItem(ticketStorageKey, JSON.stringify(updated));
@@ -241,9 +255,11 @@ export function KnowledgeAssistant() {
         // The latest reply remains available in the active session.
       }
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "The ticket could not be checked.");
+      if (requestId === latestTicketStatusRequest.current) {
+        setError(caught instanceof Error ? caught.message : "The ticket could not be checked.");
+      }
     } finally {
-      setChecking(false);
+      if (requestId === latestTicketStatusRequest.current) setChecking(false);
     }
   }
 
