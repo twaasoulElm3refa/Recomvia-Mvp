@@ -94,3 +94,26 @@ test("brand-only introduction links to the FAQ in the answer language", () => {
   assert.equal(searchKnowledge("Recomvia").sourceUrl, "/faq#what-is-recomvia");
   assert.equal(searchKnowledge("ريكومفيا").sourceUrl, "/ar/faq#what-is-recomvia");
 });
+
+
+test("warm knowledge indexes preserve results across languages and unrelated questions", () => {
+  const articleEn = getLocalizedArticle("ai-visibility-optimization-guide", "en");
+  const articleAr = getLocalizedArticle("ai-visibility-optimization-guide", "ar");
+  assert.ok(articleEn && articleAr);
+  const queries = [articleEn.title, articleAr.title, ...cases.map(([question]) => question),
+    "What is the weather in Riyadh today?", "ما حالة الطقس في الرياض اليوم؟"];
+  const expected = queries.map((question) => searchKnowledge(question));
+  assert.equal(expected[0].sourceUrl, "/blog/ai-visibility-optimization-guide");
+  assert.equal(expected[1].sourceUrl, "/ar/blog/ai-visibility-optimization-guide");
+  assert.equal(expected.at(-1)?.answered, false);
+  assert.equal(expected.at(-2)?.answered, false);
+  for (let round = 0; round < 3; round++) {
+    for (let i = queries.length - 1; i >= 0; i--) {
+      const result = searchKnowledge(queries[i]);
+      assert.deepEqual(result, expected[i]);
+      // Returned objects belong to the caller, not to the shared index.
+      result.answer = "caller mutation";
+      assert.deepEqual(searchKnowledge(queries[i]), expected[i]);
+    }
+  }
+});
