@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useEffect, useRef, useState } from "react";
 import { CheckCircle2, Loader2, Send } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -32,6 +32,8 @@ export function ContactForm({ locale }: { locale: SiteLocale }) {
   const [message, setMessage] = useState("");
   const [companyWebsite, setCompanyWebsite] = useState("");
   const [sending, setSending] = useState(false);
+  // State updates are asynchronous; lock immediately, including before a rerender.
+  const submissionLocked = useRef(false);
   const [error, setError] = useState("");
   const [reference, setReference] = useState("");
   const [interest, setInterest] = useState<{ plan: string | null; credits: boolean; scan: string | null } | null>(null);
@@ -55,6 +57,8 @@ export function ContactForm({ locale }: { locale: SiteLocale }) {
 
   async function submit(event: FormEvent) {
     event.preventDefault();
+    if (submissionLocked.current) return;
+    submissionLocked.current = true;
     setSending(true);
     setError("");
     try {
@@ -76,6 +80,7 @@ export function ContactForm({ locale }: { locale: SiteLocale }) {
       setReference(data.reference);
       setMessage("");
     } catch (caught) {
+      submissionLocked.current = false;
       setError(caught instanceof Error ? caught.message : t.failed);
     } finally {
       setSending(false);
@@ -89,7 +94,7 @@ export function ContactForm({ locale }: { locale: SiteLocale }) {
         <h2 className="mt-5 text-2xl font-extrabold text-slate-900">{t.successTitle}</h2>
         <p className="mt-2 text-sm leading-6 text-slate-600">{t.successText}</p>
         <p className="mx-auto mt-5 w-fit rounded-xl border border-emerald-200 bg-white px-4 py-2 font-mono text-sm font-extrabold text-emerald-800">{reference}</p>
-        <Button type="button" variant="outline" onClick={() => setReference("")} className="mt-5 rounded-xl border-emerald-200 bg-white font-bold">{t.again}</Button>
+        <Button type="button" variant="outline" onClick={() => { submissionLocked.current = false; setReference(""); }} className="mt-5 rounded-xl border-emerald-200 bg-white font-bold">{t.again}</Button>
       </div>
     );
   }
