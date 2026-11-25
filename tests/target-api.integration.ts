@@ -445,49 +445,63 @@ test("authenticated API: entity discovery, topic mode, isolation, confirmation, 
     await t.test(
       "conflicting website identity evidence requires confirmation and remains anchored to the URL",
       async () => {
-        const db = createFixture();
-        globalThis.fetch = async (remote) => {
-          const address = String(remote);
-          return new Response(
-            address.endsWith("robots.txt")
-              ? "User-agent: *\nAllow: /"
-              : address.includes("sitemap")
-                ? '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"></urlset>'
-                : `<html lang="en"><head><title>First Identity</title><meta property="og:site_name" content="Second Identity"></head><body>
-                    <script type="application/ld+json">{"@type":"Organization","name":"First Identity","url":"https://same.example/about"}</script>
-                    <h1>Research services</h1></body></html>`,
-            {
-              headers: {
-                "Content-Type": address.includes("sitemap")
-                  ? "application/xml"
-                  : address.endsWith("robots.txt")
-                    ? "text/plain"
-                    : "text/html",
-              },
-            },
-          );
-        };
-        const res = await POST(request({ url: "https://same.example" }));
-        const data = await readBody(res);
-        assert.equal(res.status, 202);
-        assert.equal(data.status, "needs_confirmation");
-        assert.deepEqual(data.candidates?.map((item) => item.name), [
-          "First Identity",
-          "Second Identity",
-        ]);
-        assert.equal(
-          db.prepare("SELECT status FROM scans").get()?.status,
-          "awaiting_identity",
-        );
-        assert.equal(db.prepare("SELECT COUNT(*) n FROM engine_runs").get()?.n, 0);
-        db.close();
-        globalThis.fetch = async (_url, init) => {
-          calls++;
-          const body = JSON.parse(String(init?.body));
-    const response = handler(body);
-    const data = await response.json() as Record<string, unknown>;
-    return Response.json({ ...data, model: body.model });
-        };
+        const previousFetch = globalThis.fetch;
+        const types = [
+          'type="application/ld+json"',
+          'TYPE=APPLICATION/LD+JSON',
+          'type="application/ld&#43;json"',
+        ];
+        try {
+          for (const type of types) {
+            const db = createFixture();
+            let providerCalls = 0;
+            try {
+              globalThis.fetch = async (remote) => {
+                const address = String(remote);
+                if (address.includes("openrouter.ai")) {
+                  providerCalls++;
+                  throw new Error("Identity confirmation must precede provider calls");
+                }
+                return new Response(
+                  address.endsWith("robots.txt")
+                    ? "User-agent: *\nAllow: /"
+                    : address.includes("sitemap")
+                      ? '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"></urlset>'
+                      : `<html lang="en"><head><title>First Identity</title><meta property="og:site_name" content="Second Identity"></head><body>
+                          <script ${type}>{"@type":"Organization","name":"First Identity","url":"https://same.example/about"}</script>
+                          <h1>Research services</h1></body></html>`,
+                  {
+                    headers: {
+                      "Content-Type": address.includes("sitemap")
+                        ? "application/xml"
+                        : address.endsWith("robots.txt")
+                          ? "text/plain"
+                          : "text/html",
+                    },
+                  },
+                );
+              };
+              const res = await POST(request({ url: "https://same.example" }));
+              const data = await readBody(res);
+              assert.equal(res.status, 202, type + ": " + JSON.stringify(data));
+              assert.equal(data.status, "needs_confirmation", type);
+              assert.deepEqual(data.candidates?.map((item) => item.name), [
+                "First Identity",
+                "Second Identity",
+              ], type);
+              assert.equal(
+                db.prepare("SELECT status FROM scans").get()?.status,
+                "awaiting_identity",
+              );
+              assert.equal(db.prepare("SELECT COUNT(*) n FROM engine_runs").get()?.n, 0);
+              assert.equal(providerCalls, 0, type);
+            } finally {
+              db.close();
+            }
+          }
+        } finally {
+          globalThis.fetch = previousFetch;
+        }
       },
     );
     await t.test(
