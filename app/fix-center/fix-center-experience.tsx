@@ -100,6 +100,8 @@ export function FixCenterExperience({ scanId, targetName, hasWebsiteAudit, findi
   const [selected, setSelected] = useState<Finding | null>(null);
   const [requested, setRequested] = useState<string[]>(requestedFindingIds);
   const [requesting, setRequesting] = useState(false);
+  const reviewInFlight = useRef(false);
+  const confirmedReviews = useRef(new Set(requestedFindingIds));
   const [requestError, setRequestError] = useState("");
   const [decisionComment, setDecisionComment] = useState("");
   const [decisionSending, setDecisionSending] = useState(false);
@@ -124,10 +126,11 @@ export function FixCenterExperience({ scanId, targetName, hasWebsiteAudit, findi
   const openEvidence = useCallback((issueId: string) => {
     const finding = unresolved.find((item) => item.id === issueId);
     if (!finding) throw new Error("Finding not present in this account's report.");
-    if (decisionInFlight.current) throw new Error("Wait for the current proposal decision to finish.");
+    if (decisionInFlight.current || reviewInFlight.current) throw new Error("Wait for the current review action to finish.");
     const selection = { ...finding };
     currentSelection.current = selection;
     setSelected(selection);
+    setRequestError("");
     setDecisionComment("");
     setDecisionError("");
     return {
@@ -166,7 +169,9 @@ export function FixCenterExperience({ scanId, targetName, hasWebsiteAudit, findi
   }, [openEvidence, unresolved]);
 
   async function sendReviewRequest() {
-    if (!scanId || !selected || requesting || requested.includes(selected.id)) return;
+    if (!scanId || !selected || currentSelection.current !== selected || reviewInFlight.current ||
+        decisionInFlight.current || confirmedReviews.current.has(selected.id)) return;
+    reviewInFlight.current = true;
     setRequesting(true);
     setRequestError("");
     try {
@@ -176,14 +181,16 @@ export function FixCenterExperience({ scanId, targetName, hasWebsiteAudit, findi
         body: JSON.stringify({ scanId, findingId: selected.id }),
       });
       if (!response.ok) throw new Error("Review request failed");
-      const result: { request?: { findingId?: string }; executionEnabled?: boolean; creditsCharged?: number } =
+      const result: { request?: { findingId?: string }; executionEnabled?: boolean; approved?: boolean; creditsCharged?: number } =
         await response.json();
       if (result.request?.findingId !== selected.id || result.executionEnabled !== false ||
-          result.creditsCharged !== 0) throw new Error("Invalid review confirmation");
+          result.approved !== false || result.creditsCharged !== 0) throw new Error("Invalid review confirmation");
+      confirmedReviews.current.add(selected.id);
       setRequested((current) => current.includes(selected.id) ? current : [...current, selected.id]);
     } catch {
       setRequestError(t.reviewError);
     } finally {
+      reviewInFlight.current = false;
       setRequesting(false);
     }
   }
@@ -195,7 +202,7 @@ export function FixCenterExperience({ scanId, targetName, hasWebsiteAudit, findi
 
   async function decideOnDraft(decision: "accepted_for_planning" | "changes_requested") {
     if (!scanId || !selected || currentSelection.current !== selected || !selectedProposal ||
-        selectedDecision || confirmedDecisions.current.has(selectedProposal.proposalId) || decisionInFlight.current) return;
+        selectedDecision || confirmedDecisions.current.has(selectedProposal.proposalId) || decisionInFlight.current || reviewInFlight.current) return;
     if (decision === "changes_requested" && decisionComment.trim().length < 10) {
       setDecisionError(t.decisionNote);
       return;
@@ -304,7 +311,7 @@ export function FixCenterExperience({ scanId, targetName, hasWebsiteAudit, findi
                           <p className="mt-2 line-clamp-2 text-sm leading-6 text-slate-600" dir="auto">{item.explanation}</p>
                           <p className="mt-3 text-xs font-semibold text-slate-500">{item.category}</p>
                         </div>
-                        <Button variant="outline" className="shrink-0 rounded-xl" disabled={decisionSending} onClick={() => { if (!decisionInFlight.current) openEvidence(item.id); }}>
+                        <Button variant="outline" className="shrink-0 rounded-xl" disabled={decisionSending || requesting} onClick={() => { if (!decisionInFlight.current && !reviewInFlight.current) openEvidence(item.id); }}>
                           <Eye className="size-4" />{t.view}
                         </Button>
                       </CardContent>
@@ -324,9 +331,10 @@ export function FixCenterExperience({ scanId, targetName, hasWebsiteAudit, findi
         </Button>
       </section>
       <Dialog open={Boolean(selected)} onOpenChange={(open) => {
-        if (!open && !decisionInFlight.current) {
+        if (!open && !decisionInFlight.current && !reviewInFlight.current) {
           currentSelection.current = null;
           setSelected(null);
+          setRequestError("");
           setDecisionComment("");
           setDecisionError("");
         }
@@ -374,9 +382,9 @@ export function FixCenterExperience({ scanId, targetName, hasWebsiteAudit, findi
                         className="min-h-20 w-full rounded-xl border border-slate-200 p-3 text-sm" />
                       {decisionError && <p role="alert" className="text-xs font-bold text-red-700">{decisionError}</p>}
                       <div className="flex flex-wrap gap-2">
-                        <Button type="button" disabled={decisionSending} onClick={() => void decideOnDraft("accepted_for_planning")}
+                        <Button type="button" disabled={decisionSending || requesting} onClick={() => void decideOnDraft("accepted_for_planning")}
                           className="rounded-xl bg-blue-600">{decisionSending ? t.decisionPending : t.acceptDraft}</Button>
-                        <Button type="button" variant="outline" disabled={decisionSending || decisionComment.trim().length < 10}
+                        <Button type="button" variant="outline" disabled={decisionSending || requesting || decisionComment.trim().length < 10}
                           onClick={() => void decideOnDraft("changes_requested")}
                           className="rounded-xl">{t.changeDraft}</Button>
                       </div>
@@ -391,7 +399,7 @@ export function FixCenterExperience({ scanId, targetName, hasWebsiteAudit, findi
               <p className="text-xs leading-6 text-slate-500">{t.reviewNote}</p>
               {requestError && <p role="alert" className="text-sm font-semibold text-red-700">{requestError}</p>}
               <DialogFooter>
-                <Button type="button" disabled={requesting || requested.includes(selected.id)}
+                <Button type="button" disabled={requesting || decisionSending || requested.includes(selected.id)}
                   className="rounded-xl bg-blue-600" onClick={() => void sendReviewRequest()}>
                   {requested.includes(selected.id) ? t.reviewRequested : requesting ? t.reviewPending : t.reviewRequest}
                 </Button>
