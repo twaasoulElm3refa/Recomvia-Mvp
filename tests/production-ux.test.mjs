@@ -925,3 +925,145 @@ test("monitoring controls never request a resume without the plan entitlement", 
   h.button(1).onClick();
   assert.equal(h.pending.length, 0);
 });
+
+
+function proposalDecisionHarness() {
+  const state = [];
+  const refs = [];
+  const pending = [];
+  let stateIndex = 0;
+  let refIndex = 0;
+  const fakeReact = {
+    ...React,
+    useState: (initial) => {
+      const index = stateIndex++;
+      if (!(index in state)) state[index] = typeof initial === "function" ? initial() : initial;
+      return [state[index], (value) => {
+        state[index] = typeof value === "function" ? value(state[index]) : value;
+      }];
+    },
+    useRef: (initial) => refs[refIndex++] ??= { current: initial },
+    useMemo: (factory) => factory(),
+    useCallback: (callback) => callback,
+    useEffect: () => {},
+  };
+  const js = ts.transpileModule(source("app/fix-center/fix-center-experience.tsx"), {
+    compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX, target: ts.ScriptTarget.ES2022 },
+  }).outputText;
+  const loadedModule = { exports: {} };
+  const fakeFetch = (url, options) => {
+    assert.equal(url, "/api/fix-proposals/decision");
+    assert.equal(options.method, "POST");
+    return new Promise((resolve) => pending.push({
+      body: JSON.parse(options.body),
+      finish: (payload, status = 200) => resolve(Response.json(payload, { status })),
+    }));
+  };
+  const localMocks = {
+    ...mocks, react: fakeReact,
+    "@/app/components/app-shell": { AppShell: wrap, StatusPill: wrap },
+    "@/components/ui/card": { Card: wrap, CardContent: wrap },
+    "@/components/ui/dialog": { ...mocks["@/components/ui/dialog"], DialogFooter: wrap },
+    "@/hooks/use-site-locale": { useSiteLocale: () => "ar" },
+    "@/lib/analysis-target": { safeSourceUrl: () => null },
+    "@/app/components/fix-proposal-history": { FixProposalHistory: () => null },
+  };
+  new Function("require", "module", "exports", "fetch", js)((id) =>
+    localMocks[id] ?? require(id), loadedModule, loadedModule.exports, fakeFetch);
+  const findings = ["one", "two"].map((id) => ({
+    id, title: id, code: id, category: "content", severity: "high", status: "fail",
+    explanation: "Finding", evidence: "Evidence", sourceUrl: null,
+  }));
+  const reviewProposals = findings.map(({ id }) => ({
+    findingId: id, proposalId: "proposal-" + id, proposalVersion: 1, decision: null,
+    decisionComment: null, scope: "Scope", proposedText: "Text", rationale: "Reason", rollbackPlan: "Rollback",
+  }));
+  const render = () => {
+    stateIndex = 0;
+    refIndex = 0;
+    return loadedModule.exports.FixCenterExperience({
+      scanId: "scan-1", targetName: "Example", hasWebsiteAudit: true, findings,
+      requestedFindingIds: ["one", "two"], reviewProposals, proposalHistory: [],
+    });
+  };
+  const props = (predicate) => {
+    const node = findAssistantElement(render(), predicate);
+    assert.ok(node);
+    return node.props;
+  };
+  const open = (index) => {
+    const buttons = [];
+    function walk(node) {
+      if (!React.isValidElement(node)) return;
+      if (node.type === Button && React.Children.toArray(node.props.children).includes("راجع الدليل")) buttons.push(node.props);
+      React.Children.toArray(node.props.children).forEach(walk);
+    }
+    walk(render());
+    assert.ok(buttons[index]);
+    return buttons[index];
+  };
+  return {
+    pending, render, open,
+    dialog: () => props((node) => typeof node.props.onOpenChange === "function"),
+    comment: () => props((node) => node.type === "textarea"),
+    changes: () => props((node) => node.type === Button && node.props.children === "اطلب تعديل المسودة"),
+    accept: () => props((node) => node.type === Button && node.props.children === "أقبل المسودة لأغراض التخطيط فقط"),
+  };
+}
+
+test("planning decision comments never carry across findings or reopened dialogs", () => {
+  const h = proposalDecisionHarness();
+  h.open(0).onClick();
+  h.comment().onChange({ target: { value: "تعليق خاص بالمقترح الأول" } });
+  const obsolete = h.changes().onClick;
+  const oldEdit = h.comment().onChange;
+  h.dialog().onOpenChange(false);
+  h.open(1).onClick();
+  assert.equal(h.comment().value, "");
+  obsolete();
+  oldEdit({ target: { value: "تعليق قديم" } });
+  assert.equal(h.comment().value, "");
+  assert.equal(h.pending.length, 0);
+  h.dialog().onOpenChange(false);
+  h.open(0).onClick();
+  assert.equal(h.comment().value, "");
+  obsolete();
+  assert.equal(h.pending.length, 0, "reopening the same finding does not revive old callbacks");
+});
+
+test("planning decisions block duplicates and conflicting actions, preserve failed drafts and allow retry", async () => {
+  const h = proposalDecisionHarness();
+  h.open(0).onClick();
+  const note = "يرجى مراجعة المقترح قبل اعتماده";
+  h.comment().onChange({ target: { value: note } });
+  const submit = h.changes().onClick;
+  const accept = h.accept().onClick;
+  const edit = h.comment().onChange;
+  submit();
+  submit();
+  accept();
+  h.dialog().onOpenChange(false);
+  h.open(1).onClick();
+  edit({ target: { value: "unintended edit" } });
+  assert.equal(h.pending.length, 1);
+  assert.deepEqual(h.pending[0].body, {
+    scanId: "scan-1", proposalId: "proposal-one", decision: "changes_requested", comment: note,
+  });
+  assert.equal(h.comment().disabled, true);
+  assert.equal(h.comment().value, note);
+  h.pending[0].finish({ code: "conflict" }, 409);
+  await settleAssistantFetch();
+  assert.equal(h.comment().disabled, false);
+  assert.equal(h.comment().value, note);
+  h.changes().onClick();
+  assert.equal(h.pending.length, 2);
+  h.pending[1].finish({ decision: { proposalId: "proposal-one", decision: "changes_requested" }, applied: false, creditsCharged: 0 });
+  await settleAssistantFetch();
+  submit();
+  accept();
+  assert.equal(h.pending.length, 2, "a confirmed decision cannot be sent again by a stale callback");
+  h.dialog().onOpenChange(false);
+  h.open(1).onClick();
+  assert.equal(h.comment().value, "");
+  assert.equal(h.changes().disabled, true);
+});
