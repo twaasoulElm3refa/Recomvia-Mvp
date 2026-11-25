@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { useSiteLocale } from "@/hooks/use-site-locale";
@@ -15,13 +15,18 @@ export function MonitoringControls({
   const ar = useSiteLocale() === "ar";
   const router = useRouter();
   const [schedules, setSchedules] = useState(initialSchedules);
+  const currentSchedules = useRef(initialSchedules);
+  const inFlight = useRef(false);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState("");
 
   async function changeState(schedule: MonitoringScheduleSummary) {
-    if (busyId) return;
+    // React state alone cannot prevent two clicks before the next render.
+    // Reject callbacks captured for a schedule that has already changed.
+    if (inFlight.current || !currentSchedules.current.includes(schedule)) return;
     const action = schedule.state === "active" ? "pause" : "resume";
     if (action === "resume" && !canMonitor) return;
+    inFlight.current = true;
     setBusyId(schedule.id);
     setError("");
     try {
@@ -32,15 +37,21 @@ export function MonitoringControls({
       });
       const result: { state?: "active" | "paused"; nextRunAt?: string; scanStarted?: boolean; code?: string } =
         await response.json();
-      if (!response.ok || !result.state || !result.nextRunAt || result.scanStarted !== false) {
+      const expectedState: MonitoringScheduleSummary["state"] = action === "pause" ? "paused" : "active";
+      if (!response.ok || result.state !== expectedState ||
+          typeof result.nextRunAt !== "string" || !result.nextRunAt.trim() || result.scanStarted !== false) {
         throw new Error(result.code || "Monitoring update failed");
       }
-      setSchedules((current) => current.map((item) => item.id === schedule.id
-        ? { ...item, state: result.state!, nextRunAt: result.nextRunAt! } : item));
+      const nextRunAt = result.nextRunAt;
+      const next = currentSchedules.current.map((item) => item.id === schedule.id
+        ? { ...item, state: expectedState, nextRunAt } : item);
+      currentSchedules.current = next;
+      setSchedules(next);
       router.refresh();
     } catch {
       setError(ar ? "تعذر تحديث حالة المتابعة. حاول مرة أخرى." : "Could not update monitoring. Please try again.");
     } finally {
+      inFlight.current = false;
       setBusyId(null);
     }
   }

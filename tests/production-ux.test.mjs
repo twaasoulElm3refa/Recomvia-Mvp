@@ -808,3 +808,120 @@ test("project rename preserves a failed draft and accepts an intentional retry",
   await second;
   assert.equal(h.refreshes(), 1);
 });
+
+
+function monitoringControlHarness(canMonitor = true) {
+  const state = [];
+  const refs = [];
+  const pending = [];
+  let stateIndex = 0;
+  let refIndex = 0;
+  let refreshes = 0;
+  const fakeReact = {
+    ...React,
+    useState: (initial) => {
+      const index = stateIndex++;
+      if (!(index in state)) state[index] = initial;
+      return [state[index], (value) => {
+        state[index] = typeof value === "function" ? value(state[index]) : value;
+      }];
+    },
+    useRef: (initial) => refs[refIndex++] ??= { current: initial },
+  };
+  const js = ts.transpileModule(source("app/dashboard/monitoring-controls.tsx"), {
+    compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX, target: ts.ScriptTarget.ES2022 },
+  }).outputText;
+  const loadedModule = { exports: {} };
+  const fakeFetch = (url, options) => {
+    assert.equal(url, "/api/monitoring/control");
+    assert.equal(options.method, "POST");
+    return new Promise((resolve) => pending.push({
+      body: JSON.parse(options.body),
+      finish: (payload, status = 200) => resolve(Response.json(payload, { status })),
+    }));
+  };
+  const controlMocks = {
+    ...mocks, react: fakeReact,
+    "next/navigation": { useRouter: () => ({ refresh: () => { refreshes++; } }) },
+    "@/hooks/use-site-locale": { useSiteLocale: () => "ar" },
+  };
+  new Function("require", "module", "exports", "fetch", js)((id) =>
+    controlMocks[id] ?? require(id), loadedModule, loadedModule.exports, fakeFetch);
+  const initialSchedules = ["one", "two"].map((id, index) => ({
+    id, targetName: id, state: index === 0 ? "active" : "paused",
+    nextRunAt: "2026-11-27 00:00:00", lastStatus: null, lastScanId: null, leaseUntil: null,
+  }));
+  const render = () => {
+    stateIndex = 0;
+    refIndex = 0;
+    return loadedModule.exports.MonitoringControls({ initialSchedules, canMonitor });
+  };
+  const button = (index) => {
+    const buttons = [];
+    function walk(node) {
+      if (!React.isValidElement(node)) return;
+      if (node.type === Button) buttons.push(node.props);
+      React.Children.toArray(node.props.children).forEach(walk);
+    }
+    walk(render());
+    assert.ok(buttons[index]);
+    return buttons[index];
+  };
+  return { pending, button, render, refreshes: () => refreshes };
+}
+
+test("monitoring controls serialize actions and discard callbacks for a changed schedule", async () => {
+  const h = monitoringControlHarness();
+  const pause = h.button(0).onClick;
+  const resumeOther = h.button(1).onClick;
+  pause();
+  pause();
+  resumeOther();
+  assert.equal(h.pending.length, 1);
+  assert.deepEqual(h.pending[0].body, { scheduleId: "one", action: "pause" });
+  assert.equal(h.button(0).disabled, true);
+  assert.equal(h.button(1).disabled, true);
+  h.pending[0].finish({ state: "paused", nextRunAt: "2026-11-27 00:00:00", scanStarted: false });
+  await settleAssistantFetch();
+  assert.equal(h.refreshes(), 1);
+  assert.equal(h.button(0).children, "استئناف المتابعة");
+  pause();
+  assert.equal(h.pending.length, 1, "obsolete pause callback cannot send again");
+  h.button(0).onClick();
+  assert.deepEqual(h.pending[1].body, { scheduleId: "one", action: "resume" });
+  h.pending[1].finish({ state: "active", nextRunAt: "2026-11-28 00:00:00", scanStarted: false });
+  await settleAssistantFetch();
+  pause();
+  assert.equal(h.pending.length, 2, "even a matching state does not revive an old callback");
+  assert.equal(h.refreshes(), 2);
+});
+
+test("monitoring controls reject inconsistent success payloads and allow deliberate retry", async () => {
+  const h = monitoringControlHarness();
+  for (const payload of [
+    { state: "active", nextRunAt: "2026-11-27 00:00:00", scanStarted: false },
+    { state: "paused", nextRunAt: 123, scanStarted: false },
+    { state: "paused", nextRunAt: "2026-11-27 00:00:00", scanStarted: true },
+  ]) {
+    h.button(0).onClick();
+    h.pending.at(-1).finish(payload);
+    await settleAssistantFetch();
+    assert.equal(h.refreshes(), 0);
+    assert.equal(h.button(0).disabled, false);
+    assert.equal(h.button(0).children, "إيقاف المتابعة");
+    assert.ok(findAssistantElement(h.render(), (node) => node.props.role === "alert"));
+  }
+  h.button(0).onClick();
+  h.pending.at(-1).finish({ state: "paused", nextRunAt: "2026-11-27 00:00:00", scanStarted: false });
+  await settleAssistantFetch();
+  assert.equal(h.refreshes(), 1);
+  assert.equal(h.button(0).children, "استئناف المتابعة");
+  assert.equal(findAssistantElement(h.render(), (node) => node.props.role === "alert"), undefined);
+});
+
+test("monitoring controls never request a resume without the plan entitlement", () => {
+  const h = monitoringControlHarness(false);
+  assert.equal(h.button(1).disabled, true);
+  h.button(1).onClick();
+  assert.equal(h.pending.length, 0);
+});
