@@ -182,3 +182,60 @@ test("assistant handles rejected upstream cancellation without leaking an error"
   assert.equal(body.locked, false);
   assert.deepEqual(searched, []);
 });
+
+test("assistant applies one upload deadline even when partial chunks arrive", async (t) => {
+  searched = [];
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  let controller;
+  let cancelled = false;
+  let finishCleanup;
+  const cleanup = new Promise((resolve) => { finishCleanup = resolve; });
+  const body = new ReadableStream({
+    start(value) {
+      controller = value;
+      value.enqueue(new TextEncoder().encode('{"question":"'));
+    },
+    cancel() {
+      cancelled = true;
+      return cleanup;
+    },
+  });
+  const pending = POST(new Request("https://recomvia.test/api/assistant", {
+    method: "POST", body, duplex: "half",
+    headers: { Origin: "https://recomvia.test", "Content-Type": "application/json" },
+  }));
+  try {
+    await new Promise((resolve) => setImmediate(resolve));
+    t.mock.timers.tick(4999);
+    assert.equal(cancelled, false);
+    controller.enqueue(new TextEncoder().encode('Valid text"}'));
+    await new Promise((resolve) => setImmediate(resolve));
+    t.mock.timers.tick(1);
+    const response = await Promise.race([
+      pending,
+      new Promise((resolve) => setImmediate(() => resolve(null))),
+    ]);
+    assert.equal(cancelled, true);
+    assert.ok(response, "deadline must not wait for upstream cleanup");
+    assert.equal(response.status, 408);
+    assert.equal(response.headers.get("Cache-Control"), "no-store");
+    assert.equal(response.headers.get("X-Content-Type-Options"), "nosniff");
+    assert.equal(body.locked, false);
+    assert.deepEqual(searched, []);
+  } finally {
+    if (!cancelled) controller.close();
+    finishCleanup();
+    await pending;
+    t.mock.timers.reset();
+  }
+});
+
+test("assistant clears the upload deadline after a complete valid request", async (t) => {
+  searched = [];
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const response = await POST(request(JSON.stringify({ question: "Valid text" })));
+  assert.equal(response.status, 200);
+  t.mock.timers.tick(5000);
+  assert.deepEqual(searched, ["Valid text"]);
+  t.mock.timers.reset();
+});
