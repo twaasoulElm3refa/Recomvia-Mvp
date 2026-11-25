@@ -212,11 +212,20 @@ test("staff inbox never renders legacy non-local support source links", () => {
 function assistantHarness() {
   const writes = [];
   const pending = [];
+  const stored = [];
+  const state = [];
+  const refs = [];
+  let stateIndex = 0;
+  let refIndex = 0;
   let ask;
   const fakeReact = {
     ...React,
-    useState: (initial) => [initial, (value) => writes.push(value)],
-    useRef: (initial) => ({ current: initial }),
+    useState: (initial) => {
+      const index = stateIndex++;
+      if (!(index in state)) state[index] = initial;
+      return [state[index], (value) => { state[index] = value; writes.push(value); }];
+    },
+    useRef: (initial) => refs[refIndex++] ??= { current: initial },
     useEffect: () => {},
     useCallback: (callback) => { ask = callback; return callback; },
   };
@@ -225,13 +234,14 @@ function assistantHarness() {
   }).outputText;
   const loadedModule = { exports: {} };
   const fakeFetch = (url, options) => {
-    assert.equal(url, "/api/assistant");
+    assert.ok(["/api/assistant", "/api/support/tickets", "/api/support/tickets/status"].includes(url));
+    const body = JSON.parse(options.body);
     return new Promise((resolve) => pending.push({
-      question: JSON.parse(options.body).question,
+      url, body, question: body.question,
       finish: (payload, status = 200) => resolve(Response.json(payload, { status })),
     }));
   };
-  new Function("require", "module", "exports", "fetch", js)((id) => {
+  new Function("require", "module", "exports", "fetch", "window", js)((id) => {
     if (id === "react") return fakeReact;
     if (id === "@/lib/site-locale") return {};
     if (id === "@/components/ui/input") return { Input: wrap };
@@ -240,9 +250,17 @@ function assistantHarness() {
       ["Sheet", "SheetContent", "SheetDescription", "SheetHeader", "SheetTitle", "SheetTrigger"].map((key) => [key, wrap]),
     );
     return mocks[id] ?? require(id);
-  }, loadedModule, loadedModule.exports, fakeFetch);
-  loadedModule.exports.KnowledgeAssistant();
-  return { ask, writes, pending };
+  }, loadedModule, loadedModule.exports, fakeFetch, {
+    location: { pathname: "/ar/contact", search: "" },
+    localStorage: { setItem: (key, value) => stored.push([key, JSON.parse(value)]) },
+  });
+  const render = () => {
+    stateIndex = 0;
+    refIndex = 0;
+    return loadedModule.exports.KnowledgeAssistant();
+  };
+  render();
+  return { ask, writes, pending, stored, render };
 }
 
 test("assistant ignores an older unsupported answer after a newer supported Arabic answer", async () => {
@@ -373,4 +391,74 @@ test("contact form unlocks after a rejected submission for deliberate retry", as
   pending[1].finish({ reference: "RCV-RETRY", accessKey: "retry-key" });
   await retry;
   assert.equal(stored.length, 1);
+});
+
+
+function findAssistantElement(node, predicate) {
+  if (!React.isValidElement(node)) return undefined;
+  if (predicate(node)) return node;
+  for (const child of React.Children.toArray(node.props.children)) {
+    const found = findAssistantElement(child, predicate);
+    if (found) return found;
+  }
+}
+
+async function createAssistantTicket(harness, reference) {
+  const question = harness.ask("أحتاج مساعدة بشأن التقرير");
+  harness.pending.at(-1).finish({ answered: false, confidence: 0, language: "ar" });
+  await question;
+  const form = findAssistantElement(harness.render(), (node) =>
+    node.type === "form" && node.props.className.includes("space-y-3"));
+  assert.ok(form);
+  const sending = form.props.onSubmit({ preventDefault() {} });
+  assert.equal(harness.pending.at(-1).url, "/api/support/tickets");
+  harness.pending.at(-1).finish({ reference, accessKey: reference + "-key", status: "open" }, 201);
+  await sending;
+}
+
+function startAssistantTicketCheck(harness, reference) {
+  const button = findAssistantElement(harness.render(), (node) =>
+    node.props.variant === "outline" && typeof node.props.onClick === "function");
+  assert.ok(button);
+  button.props.onClick();
+  const request = harness.pending.at(-1);
+  assert.equal(request.url, "/api/support/tickets/status");
+  assert.deepEqual(request.body, { reference, accessKey: reference + "-key" });
+  return request;
+}
+
+const settleAssistantFetch = () => new Promise((resolve) => setImmediate(resolve));
+
+test("assistant does not restore an old ticket after a newer ticket is created", async () => {
+  const harness = assistantHarness();
+  await createAssistantTicket(harness, "RCV-OLD");
+  const old = startAssistantTicketCheck(harness, "RCV-OLD");
+  await createAssistantTicket(harness, "RCV-NEW");
+  const count = harness.writes.length;
+  old.finish({ status: "answered", humanReply: "رد قديم" });
+  await settleAssistantFetch();
+  assert.equal(harness.writes.length, count);
+  assert.equal(harness.stored.length, 2);
+  assert.equal(harness.stored.at(-1)[1].reference, "RCV-NEW");
+  const current = startAssistantTicketCheck(harness, "RCV-NEW");
+  current.finish({ status: "answered", humanReply: "رد جديد" });
+  await settleAssistantFetch();
+  assert.equal(harness.stored.at(-1)[1].humanReply, "رد جديد");
+  assert.equal(harness.stored.at(-1)[1].reference, "RCV-NEW");
+});
+
+test("assistant ignores obsolete ticket status errors and preserves the latest loading state", async () => {
+  const harness = assistantHarness();
+  await createAssistantTicket(harness, "RCV-OLD");
+  const old = startAssistantTicketCheck(harness, "RCV-OLD");
+  await createAssistantTicket(harness, "RCV-NEW");
+  const current = startAssistantTicketCheck(harness, "RCV-NEW");
+  const count = harness.writes.length;
+  old.finish({ error: "obsolete failure" }, 503);
+  await settleAssistantFetch();
+  assert.equal(harness.writes.length, count);
+  current.finish({ error: "current failure" }, 503);
+  await settleAssistantFetch();
+  assert.deepEqual(harness.writes.slice(count), ["current failure", false]);
+  assert.equal(harness.stored.at(-1)[1].reference, "RCV-NEW");
 });
