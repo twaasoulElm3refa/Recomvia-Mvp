@@ -5,28 +5,41 @@ import { replyToSupportTicket } from "@/db/support";
 export const runtime = "edge";
 
 const MAX_BODY_BYTES = 16_384;
+const BODY_TIMEOUT = Symbol("body_timeout");
 const noStore = { "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff" };
 const json = (body: unknown, status: number) => Response.json(body, { status, headers: noStore });
 
-async function readBoundedBody(request: Request): Promise<string | null> {
+async function readBoundedBody(request: Request): Promise<string | null | typeof BODY_TIMEOUT> {
   if (!request.body) return "";
   const reader = request.body.getReader();
   const decoder = new TextDecoder("utf-8", { fatal: true });
   let size = 0;
   let result = "";
+  let timedOut = false;
+  // One deadline for the entire upload, not renewed by individual chunks.
+  const timer = setTimeout(() => {
+    timedOut = true;
+    void reader.cancel().catch(() => undefined);
+  }, 5_000);
   try {
     while (true) {
       const { done, value } = await reader.read();
+      if (timedOut) return BODY_TIMEOUT;
       if (done) break;
       size += value.byteLength;
       if (size > MAX_BODY_BYTES) {
-        await reader.cancel().catch(() => undefined);
+        void reader.cancel().catch(() => undefined);
         return null;
       }
       result += decoder.decode(value, { stream: true });
     }
     return result + decoder.decode();
+  } catch (error) {
+    if (timedOut) return BODY_TIMEOUT;
+    void reader.cancel().catch(() => undefined);
+    throw error;
   } finally {
+    clearTimeout(timer);
     reader.releaseLock();
   }
 }
@@ -66,6 +79,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
   let reply = "";
   try {
     const text = await readBoundedBody(request);
+    if (text === BODY_TIMEOUT) return json({ error: "Request body timed out." }, 408);
     if (text === null) return json({ error: "Request body is too large." }, 413);
     const payload: unknown = JSON.parse(text);
     if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
