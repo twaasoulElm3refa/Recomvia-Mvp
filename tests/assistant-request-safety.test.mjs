@@ -127,3 +127,58 @@ test("assistant continues accepting Arabic split across UTF-8 stream boundaries"
   assert.equal(response.headers.get("Cache-Control"), "no-store");
   assert.deepEqual(searched, ["كيف أُحسّن ظهور الموقع؟"]);
 });
+
+test("assistant cancels rejected streams without waiting for upstream cleanup", async () => {
+  searched = [];
+  for (const [chunk, status] of [
+    [new Uint8Array([0x7b, 0xff]), 400],
+    [new Uint8Array(3001), 413],
+  ]) {
+    let cancelled = false;
+    let finishCleanup;
+    const cleanup = new Promise((resolve) => { finishCleanup = resolve; });
+    const body = new ReadableStream({
+      start(controller) { controller.enqueue(chunk); },
+      cancel() {
+        cancelled = true;
+        return cleanup;
+      },
+    });
+    const responsePromise = POST(new Request("https://recomvia.test/api/assistant", {
+      method: "POST", body, duplex: "half",
+      headers: { Origin: "https://recomvia.test", "Content-Type": "application/json" },
+    }));
+    try {
+      // Local streams settle via microtasks. Upstream cleanup remains pending.
+      const response = await Promise.race([
+        responsePromise,
+        new Promise((resolve) => setImmediate(() => resolve(null))),
+      ]);
+      assert.equal(cancelled, true);
+      assert.ok(response, "rejection must not wait for cancellation to settle");
+      assert.equal(response.status, status);
+      assert.equal(response.headers.get("Cache-Control"), "no-store");
+      assert.equal(response.headers.get("X-Content-Type-Options"), "nosniff");
+      assert.equal(body.locked, false);
+    } finally {
+      finishCleanup();
+      await responsePromise;
+    }
+  }
+  assert.deepEqual(searched, []);
+});
+
+test("assistant handles rejected upstream cancellation without leaking an error", async () => {
+  searched = [];
+  const body = new ReadableStream({
+    start(controller) { controller.enqueue(new Uint8Array([0xff])); },
+    cancel() { return Promise.reject(new Error("upstream cleanup failed")); },
+  });
+  const response = await POST(new Request("https://recomvia.test/api/assistant", {
+    method: "POST", body, duplex: "half",
+    headers: { Origin: "https://recomvia.test", "Content-Type": "application/json" },
+  }));
+  assert.equal(response.status, 400);
+  assert.equal(body.locked, false);
+  assert.deepEqual(searched, []);
+});
