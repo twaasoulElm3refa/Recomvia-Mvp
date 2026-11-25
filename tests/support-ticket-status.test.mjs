@@ -165,3 +165,93 @@ test("ticket status accepts valid multibyte UTF-8 split between stream chunks", 
   assert.deepEqual(await response.json(), fixture);
   assert.equal(databaseLookups, before + 1);
 });
+
+
+function streamRequest(body) {
+  return new Request("https://recomvia.test/api/support/tickets/status", {
+    method: "POST", duplex: "half", body,
+    headers: { Origin: "https://recomvia.test", "Content-Type": "application/json" },
+  });
+}
+
+test("ticket status upload deadline is not extended by partial chunks or slow cancellation", async (t) => {
+  const before = databaseLookups;
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  let controller;
+  let cancelled = false;
+  let finishCleanup;
+  const cleanup = new Promise((resolve) => { finishCleanup = resolve; });
+  const body = new ReadableStream({
+    start(value) {
+      controller = value;
+      value.enqueue(new TextEncoder().encode('{"reference":'));
+    },
+    cancel() { cancelled = true; return cleanup; },
+  });
+  const pending = POST(streamRequest(body));
+  try {
+    await new Promise((resolve) => setImmediate(resolve));
+    t.mock.timers.tick(4999);
+    assert.equal(cancelled, false);
+    controller.enqueue(new TextEncoder().encode(JSON.stringify(fixture.publicId) + ',"accessKey":' + JSON.stringify(accessKey) + '}'));
+    await new Promise((resolve) => setImmediate(resolve));
+    t.mock.timers.tick(1);
+    const response = await Promise.race([pending, new Promise((resolve) => setImmediate(() => resolve(null)))]);
+    assert.equal(cancelled, true);
+    assert.ok(response, "deadline must not await upstream cancellation");
+    assert.equal(response.status, 408);
+    assert.equal(response.headers.get("Cache-Control"), "no-store");
+    assert.equal(response.headers.get("X-Content-Type-Options"), "nosniff");
+    assert.equal(body.locked, false);
+    assert.equal(databaseLookups, before);
+  } finally {
+    if (!cancelled) controller.close();
+    finishCleanup();
+    await pending;
+    t.mock.timers.reset();
+  }
+});
+
+test("ticket status cancels malformed and oversized streams without waiting for cleanup", async () => {
+  const before = databaseLookups;
+  for (const [bytes, status] of [[new Uint8Array([0xff]), 400], [new Uint8Array(513), 413]]) {
+    let controller;
+    let cancelled = false;
+    let finishCleanup;
+    const cleanup = new Promise((resolve) => { finishCleanup = resolve; });
+    const body = new ReadableStream({
+      start(value) { controller = value; value.enqueue(bytes); },
+      cancel() { cancelled = true; return cleanup; },
+    });
+    const pending = POST(streamRequest(body));
+    try {
+      const response = await Promise.race([pending, new Promise((resolve) => setImmediate(() => resolve(null)))]);
+      assert.equal(cancelled, true);
+      assert.ok(response, "invalid upload must not await upstream cancellation");
+      assert.equal(response.status, status);
+      assert.equal(response.headers.get("Cache-Control"), "no-store");
+      assert.equal(body.locked, false);
+      assert.equal(databaseLookups, before);
+    } finally {
+      if (!cancelled) controller.close();
+      finishCleanup();
+      await pending;
+    }
+  }
+});
+
+test("completed status upload clears its deadline and preserves authorized lookup", async (t) => {
+  const before = databaseLookups;
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  try {
+    const req = request(JSON.stringify({ reference: fixture.publicId, accessKey }));
+    const response = await POST(req);
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), fixture);
+    assert.equal(req.body.locked, false);
+    t.mock.timers.tick(5000);
+    assert.equal(databaseLookups, before + 1);
+  } finally {
+    t.mock.timers.reset();
+  }
+});
