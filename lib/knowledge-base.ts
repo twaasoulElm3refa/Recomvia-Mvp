@@ -129,8 +129,8 @@ export const faqEntries: FaqEntry[] = [
   },
   {
     id:"privacy",category:"Trust",question:"How does Recomvia protect free-scan abuse and privacy?",questionAr:"كيف تحمي Recomvia الفحص المجاني والخصوصية؟",
-    answer:"Eligibility uses a risk-based combination of account, first-party device identifier, network abuse signals, domain history, usage patterns, caching, and an abuse score. Recomvia should not rely on one fingerprint as absolute truth, and the privacy notice must explain lawful purposes, retention, and user rights.",
-    answerAr:"تحدد الأهلية وفق قرار قائم على المخاطر يجمع الحساب ومعرّف الجهاز من الطرف الأول وإشارات إساءة استخدام الشبكة وسجل فحص النطاق وأنماط الاستخدام والتخزين المؤقت ودرجة المخاطر، ولا تعتمد المنصة على بصمة واحدة بوصفها حقيقة مطلقة، ويجب أن توضح سياسة الخصوصية الغرض القانوني والاحتفاظ بالبيانات وحقوق المستخدم.",
+    answer:"During the private beta, free analysis is limited by account eligibility and retry limits. Recent eligible results may be reused to avoid unnecessary requests. Advanced device fingerprinting and risk scoring are not implemented in the current beta. The privacy notice explains the data used, why it is used, and how to request access or deletion.",
+    answerAr:"خلال الإصدار التجريبي الخاص، يخضع التحليل المجاني لأهلية الحساب وحدود إعادة المحاولة. وقد تُعاد الاستفادة من النتائج الحديثة المؤهلة لتجنب الطلبات غير الضرورية. لم تُنفذ بعد آليات بصمة الجهاز المتقدمة وتقييم المخاطر في الإصدار التجريبي الحالي. يوضح إشعار الخصوصية البيانات المستخدمة وأسباب استخدامها وكيفية طلب الوصول إليها أو حذفها.",
     keywords:["privacy","device","abuse","data","خصوصية","جهاز","بيانات","اساءة"]
   },
   {
