@@ -1,14 +1,15 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { faqEntries, searchKnowledge } from "../lib/knowledge-base";
+import { getLocalizedArticle } from "../lib/articles-ar";
 
 const cases = [
-  ["ما الفرق بين الظهور والجاهزية؟", "/faq#visibility-vs-readiness"],
-  ["هل تضمنون توصية الذكاء الاصطناعي؟", "/faq#guarantee"],
-  ["هل تضمن Recomvia ظهور علامتي التجارية أو التوصية بها داخل إجابات الذكاء الاصطناعي؟", "/faq#guarantee"],
-  ["كم سعر باقة Essential؟", "/faq#essential-plan"],
-  ["هل يمكنكم تعديل موقعي دون موافقتي؟", "/faq#approval-rollback"],
-  ["هل تدعمون ووردبريس؟", "/faq#wordpress"],
+  ["ما الفرق بين الظهور والجاهزية؟", "/ar/faq#visibility-vs-readiness"],
+  ["هل تضمنون توصية الذكاء الاصطناعي؟", "/ar/faq#guarantee"],
+  ["هل تضمن Recomvia ظهور علامتي التجارية أو التوصية بها داخل إجابات الذكاء الاصطناعي؟", "/ar/faq#guarantee"],
+  ["كم سعر باقة Essential؟", "/ar/faq#essential-plan"],
+  ["هل يمكنكم تعديل موقعي دون موافقتي؟", "/ar/faq#approval-rollback"],
+  ["هل تدعمون ووردبريس؟", "/ar/faq#wordpress"],
   ["What does the Essential plan include?", "/faq#essential-plan"],
   ["What is the difference between subscriptions and Fix Credits?", "/faq#subscription-vs-credits"],
 ] as const;
@@ -33,9 +34,9 @@ for (const question of [
   });
 }
 for (const entry of faqEntries) {
-  for (const question of [entry.question, entry.questionAr]) {
+  for (const [question, prefix] of [[entry.question, ""], [entry.questionAr, "/ar"]] as const) {
     test(`exact FAQ: ${question}`, () => {
-      assert.equal(searchKnowledge(question).sourceUrl, `/faq#${entry.id}`);
+      assert.equal(searchKnowledge(question).sourceUrl, `${prefix}/faq#${entry.id}`);
     });
   }
 }
@@ -68,9 +69,28 @@ test("privacy FAQ and assistant accurately describe current beta abuse controls"
     const result = searchKnowledge(question);
     assert.equal(result.answered, true);
     assert.equal(result.language, language);
-    assert.equal(result.sourceUrl, "/faq#privacy");
+    assert.equal(result.sourceUrl, language === "ar" ? "/ar/faq#privacy" : "/faq#privacy");
     const answer = result.answer ?? "";
     for (const assertion of [account, retries, cache, limitation, rights]) assert.match(answer, assertion);
     assert.equal(answer, language === "en" ? entry.answer : entry.answerAr);
   }
+});
+
+
+test("assistant uses the published article and source in the answer language", () => {
+  const slug = "ai-visibility-optimization-guide";
+  for (const locale of ["en", "ar"] as const) {
+    const article = getLocalizedArticle(slug, locale);
+    assert.ok(article);
+    const result = searchKnowledge(article.title);
+    assert.equal(result.answered, true);
+    assert.equal(result.language, locale);
+    assert.equal(result.answer, article.directAnswer);
+    assert.equal(result.sourceUrl, `${locale === "ar" ? "/ar" : ""}/blog/${slug}`);
+  }
+});
+
+test("brand-only introduction links to the FAQ in the answer language", () => {
+  assert.equal(searchKnowledge("Recomvia").sourceUrl, "/faq#what-is-recomvia");
+  assert.equal(searchKnowledge("ريكومفيا").sourceUrl, "/ar/faq#what-is-recomvia");
 });

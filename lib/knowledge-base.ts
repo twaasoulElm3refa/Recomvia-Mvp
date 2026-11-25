@@ -1,4 +1,4 @@
-import { articles } from "./articles";
+import { getLocalizedArticles } from "./articles-ar";
 import { PLAN_CATALOG, planById } from "./plans";
 
 const essentialPlan = planById("essential")!;
@@ -168,19 +168,21 @@ export type KnowledgeResult={answered:boolean;answer?:string;title?:string;sourc
 
 export function searchKnowledge(question:string):KnowledgeResult {
   const language: "ar" | "en" = /[\u0600-\u06ff]/.test(question) ? "ar" : "en";
+  const prefix = language === "ar" ? "/ar" : "";
+  const articles = getLocalizedArticles(language);
   const query=normalize(question); const queryTokens=[...new Set(tokens(question))];
   // The brand name alone can find the introduction, but must not dominate an unrelated question.
   if(!queryTokens.length){
     const intro=faqEntries.find(entry=>entry.id==="what-is-recomvia");
-    if(intro&&/recomvia|ريكومفيا/i.test(question))return {answered:true,title:language==="ar"?intro.questionAr:intro.question,answer:language==="ar"?intro.answerAr:intro.answer,sourceUrl:"/faq#what-is-recomvia",sourceLabel:language==="ar"?"عرض المصدر":"View source",confidence:90,language};
+    if(intro&&/recomvia|ريكومفيا/i.test(question))return {answered:true,title:language==="ar"?intro.questionAr:intro.question,answer:language==="ar"?intro.answerAr:intro.answer,sourceUrl:`${prefix}/faq#what-is-recomvia`,sourceLabel:language==="ar"?"عرض المصدر":"View source",confidence:90,language};
     return {answered:false,confidence:0,language};
   }
   const candidates=[
-    ...faqEntries.map(entry=>({title:language==="ar"?entry.questionAr:entry.question,answer:language==="ar"?entry.answerAr:entry.answer,url:`/faq#${entry.id}`,phrases:[entry.question,entry.questionAr,...entry.keywords],keywords:[entry.question,entry.questionAr,...entry.keywords].join(" "),body:[entry.answer,entry.answerAr].join(" ")})),
+    ...faqEntries.map(entry=>({title:language==="ar"?entry.questionAr:entry.question,answer:language==="ar"?entry.answerAr:entry.answer,url:`${prefix}/faq#${entry.id}`,phrases:[entry.question,entry.questionAr,...entry.keywords],keywords:[entry.question,entry.questionAr,...entry.keywords].join(" "),body:[entry.answer,entry.answerAr].join(" ")})),
     ...articles.map(article=>({
       title:article.title,
       answer:article.directAnswer,
-      url:`/blog/${article.slug}`,
+      url:`${prefix}/blog/${article.slug}`,
       phrases:[article.title,...article.keywords],
       keywords:[article.title,...article.keywords,...article.sections.map(section=>section.heading),...article.faqs.map(faq=>faq.question)].join(" "),
       body:[article.description,article.directAnswer,...article.keyPoints,...article.sections.flatMap(section=>[...section.paragraphs,...(section.bullets??[])]),...article.faqs.map(faq=>faq.answer)].join(" ")
@@ -188,7 +190,7 @@ export function searchKnowledge(question:string):KnowledgeResult {
     ...articles.flatMap(article=>article.sections.map(section=>({
       title:`${article.title}: ${section.heading}`,
       answer:section.paragraphs.join("\n\n"),
-      url:`/blog/${article.slug}`,
+      url:`${prefix}/blog/${article.slug}`,
       phrases:[section.heading,article.title,...article.keywords],
       keywords:[article.title,...article.keywords,section.heading].join(" "),
       body:[...section.paragraphs,...(section.bullets??[])].join(" ")
@@ -196,7 +198,7 @@ export function searchKnowledge(question:string):KnowledgeResult {
     ...articles.flatMap(article=>article.faqs.map(faq=>({
       title:faq.question,
       answer:faq.answer,
-      url:`/blog/${article.slug}#questions`,
+      url:`${prefix}/blog/${article.slug}#questions`,
       phrases:[faq.question,article.title,...article.keywords],
       keywords:[article.title,...article.keywords,faq.question].join(" "),
       body:faq.answer
