@@ -223,7 +223,7 @@ function assistantHarness() {
   const js = ts.transpileModule(source("app/components/knowledge-assistant.tsx"), {
     compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX, target: ts.ScriptTarget.ES2022 },
   }).outputText;
-  const module = { exports: {} };
+  const loadedModule = { exports: {} };
   const fakeFetch = (url, options) => {
     assert.equal(url, "/api/assistant");
     return new Promise((resolve) => pending.push({
@@ -240,8 +240,8 @@ function assistantHarness() {
       ["Sheet", "SheetContent", "SheetDescription", "SheetHeader", "SheetTitle", "SheetTrigger"].map((key) => [key, wrap]),
     );
     return mocks[id] ?? require(id);
-  }, module, module.exports, fakeFetch);
-  module.exports.KnowledgeAssistant();
+  }, loadedModule, loadedModule.exports, fakeFetch);
+  loadedModule.exports.KnowledgeAssistant();
   return { ask, writes, pending };
 }
 
