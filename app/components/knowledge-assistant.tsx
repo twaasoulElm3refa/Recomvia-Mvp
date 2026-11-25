@@ -77,6 +77,8 @@ export function KnowledgeAssistant() {
   const [checking, setChecking] = useState(false);
   const [pageArabic, setPageArabic] = useState(false);
   const latestQuestionRequest = useRef(0);
+  const escalationInFlight = useRef(false);
+  const lastSubmittedQuestionRequest = useRef<number | null>(null);
   const activeTicket = useRef<StoredTicket | null>(null);
   const latestTicketStatusRequest = useRef(0);
 
@@ -189,6 +191,9 @@ export function KnowledgeAssistant() {
 
   async function sendToHuman(event: FormEvent) {
     event.preventDefault();
+    const questionRequestId = latestQuestionRequest.current;
+    if (escalationInFlight.current || lastSubmittedQuestionRequest.current === questionRequestId) return;
+    escalationInFlight.current = true;
     setSending(true);
     setError("");
     try {
@@ -223,10 +228,12 @@ export function KnowledgeAssistant() {
       } catch {
         // Display the reference in the active assistant session.
       }
-      setShowEscalation(false);
+      lastSubmittedQuestionRequest.current = questionRequestId;
+      if (questionRequestId === latestQuestionRequest.current) setShowEscalation(false);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "The request could not be sent.");
     } finally {
+      escalationInFlight.current = false;
       setSending(false);
     }
   }
