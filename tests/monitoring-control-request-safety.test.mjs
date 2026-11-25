@@ -72,3 +72,97 @@ test("valid charset JSON still invokes the existing schedule control once", asyn
   assert.equal(changes, 1);
   assert.equal(entitlements, 0);
 });
+
+
+function streamRequest(body) {
+  return new Request("https://recomvia.test/api/monitoring/control", {
+    method: "POST", duplex: "half", body,
+    headers: { Origin: "https://recomvia.test", "Content-Type": "application/json" },
+  });
+}
+
+test("monitor control upload deadline covers partial chunks and slow cancellation before any schedule changes", async (t) => {
+  const before = [changes, entitlements];
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  let controller;
+  let cancelled = false;
+  let finishCleanup;
+  const cleanup = new Promise((resolve) => { finishCleanup = resolve; });
+  const body = new ReadableStream({
+    start(value) {
+      controller = value;
+      value.enqueue(new TextEncoder().encode('{"scheduleId":'));
+    },
+    cancel() { cancelled = true; return cleanup; },
+  });
+  const pending = POST(streamRequest(body));
+  try {
+    await new Promise((resolve) => setImmediate(resolve));
+    t.mock.timers.tick(4999);
+    assert.equal(cancelled, false);
+    controller.enqueue(new TextEncoder().encode('"schedule_1","action":"resume"}'));
+    await new Promise((resolve) => setImmediate(resolve));
+    t.mock.timers.tick(1);
+    const response = await Promise.race([pending, new Promise((resolve) => setImmediate(() => resolve(null)))]);
+    assert.equal(cancelled, true);
+    assert.ok(response, "deadline must not await upstream cancellation");
+    assert.equal(response.status, 408);
+    assert.equal(response.headers.get("Cache-Control"), "no-store");
+    assert.equal(response.headers.get("X-Content-Type-Options"), "nosniff");
+    assert.equal(body.locked, false);
+    assert.deepEqual([changes, entitlements], before);
+  } finally {
+    if (!cancelled) controller.close();
+    finishCleanup();
+    await pending;
+    t.mock.timers.reset();
+  }
+});
+
+test("monitor control cancels malformed UTF-8 and oversized uploads without awaiting cleanup", async () => {
+  const before = [changes, entitlements];
+  for (const [bytes, status] of [[new Uint8Array([0xff]), 400], [new Uint8Array(301), 413]]) {
+    let controller;
+    let cancelled = false;
+    let finishCleanup;
+    const cleanup = new Promise((resolve) => { finishCleanup = resolve; });
+    const body = new ReadableStream({
+      start(value) { controller = value; value.enqueue(bytes); },
+      cancel() { cancelled = true; return cleanup; },
+    });
+    const pending = POST(streamRequest(body));
+    try {
+      const response = await Promise.race([pending, new Promise((resolve) => setImmediate(() => resolve(null)))]);
+      assert.equal(cancelled, true);
+      assert.ok(response, "rejected upload must not await upstream cancellation");
+      assert.equal(response.status, status);
+      assert.equal(body.locked, false);
+      assert.deepEqual([changes, entitlements], before);
+    } finally {
+      if (!cancelled) controller.close();
+      finishCleanup();
+      await pending;
+    }
+  }
+});
+
+test("completed streamed resume clears the deadline and invokes entitlement and control once", async (t) => {
+  const before = [changes, entitlements];
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  try {
+    const body = new ReadableStream({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode('{"scheduleId":"schedule_1",'));
+        controller.enqueue(new TextEncoder().encode('"action":"resume"}'));
+        controller.close();
+      },
+    });
+    const response = await POST(streamRequest(body));
+    assert.equal(response.status, 200);
+    assert.equal(body.locked, false);
+    t.mock.timers.tick(5000);
+    assert.deepEqual([changes, entitlements], before.map((value) => value + 1));
+  } finally {
+    t.mock.timers.reset();
+  }
+});
