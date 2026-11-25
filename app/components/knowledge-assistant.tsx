@@ -2,7 +2,7 @@
 
 import { pageDisplayLocale, readStoredSiteLocale, SITE_LOCALE_EVENT } from "@/lib/site-locale";
 
-import { FormEvent, useCallback, useEffect, useState } from "react";
+import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import { NavigationLink as Link } from "@/app/components/navigation-link";
 import {
   ArrowRight,
@@ -76,6 +76,7 @@ export function KnowledgeAssistant() {
   const [ticket, setTicket] = useState<StoredTicket | null>(null);
   const [checking, setChecking] = useState(false);
   const [pageArabic, setPageArabic] = useState(false);
+  const latestQuestionRequest = useRef(0);
 
   useEffect(() => {
     const root = document.documentElement;
@@ -112,7 +113,10 @@ export function KnowledgeAssistant() {
 
   const ask = useCallback(async (value: string) => {
     const cleanQuestion = value.trim();
-    if (cleanQuestion.length < 2) return null;
+    if (cleanQuestion.length < 2 || cleanQuestion.length > 600) return null;
+    // Concurrent tool calls still get their own answers, but only the newest
+    // question may update the visible conversation and escalation state.
+    const requestId = ++latestQuestionRequest.current;
     setOpen(true);
     setAsking(true);
     setError("");
@@ -128,14 +132,18 @@ export function KnowledgeAssistant() {
       });
       const data = (await response.json()) as KnowledgeResult & { error?: string };
       if (!response.ok) throw new Error(data.error || "The assistant could not answer right now.");
-      setResult(data);
-      if (!data.answered) setShowEscalation(true);
+      if (requestId === latestQuestionRequest.current) {
+        setResult(data);
+        if (!data.answered) setShowEscalation(true);
+      }
       return data;
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "The assistant could not answer right now.");
+      if (requestId === latestQuestionRequest.current) {
+        setError(caught instanceof Error ? caught.message : "The assistant could not answer right now.");
+      }
       return null;
     } finally {
-      setAsking(false);
+      if (requestId === latestQuestionRequest.current) setAsking(false);
     }
   }, []);
 
