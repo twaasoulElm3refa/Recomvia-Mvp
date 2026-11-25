@@ -462,3 +462,64 @@ test("assistant ignores obsolete ticket status errors and preserves the latest l
   assert.deepEqual(harness.writes.slice(count), ["current failure", false]);
   assert.equal(harness.stored.at(-1)[1].reference, "RCV-NEW");
 });
+
+
+test("assistant escalation sends one ticket even before rerender and after success", async () => {
+  const harness = assistantHarness();
+  const question = harness.ask("أحتاج مساعدة بشأن التقرير");
+  harness.pending.at(-1).finish({ answered: false, confidence: 0, language: "ar" });
+  await question;
+  const form = findAssistantElement(harness.render(), (node) =>
+    node.type === "form" && node.props.className.includes("space-y-3"));
+  assert.ok(form);
+  const event = { preventDefault() {} };
+  const first = form.props.onSubmit(event);
+  await form.props.onSubmit(event);
+  assert.equal(harness.pending.filter((entry) => entry.url === "/api/support/tickets").length, 1);
+  harness.pending.at(-1).finish({ reference: "RCV-ONE", accessKey: "one-key", status: "open" }, 201);
+  await first;
+  await form.props.onSubmit(event);
+  assert.equal(harness.pending.filter((entry) => entry.url === "/api/support/tickets").length, 1);
+  assert.equal(harness.stored.length, 1);
+  await createAssistantTicket(harness, "RCV-NEXT");
+  assert.equal(harness.stored.length, 2, "a new question may create a new ticket");
+});
+
+test("assistant escalation releases its lock after a rejected request", async () => {
+  const harness = assistantHarness();
+  const question = harness.ask("أحتاج مساعدة بشأن التقرير");
+  harness.pending.at(-1).finish({ answered: false, confidence: 0, language: "ar" });
+  await question;
+  const form = findAssistantElement(harness.render(), (node) =>
+    node.type === "form" && node.props.className.includes("space-y-3"));
+  assert.ok(form);
+  const event = { preventDefault() {} };
+  const first = form.props.onSubmit(event);
+  harness.pending.at(-1).finish({ error: "temporarily unavailable" }, 503);
+  await first;
+  assert.equal(harness.stored.length, 0);
+  const retry = form.props.onSubmit(event);
+  assert.equal(harness.pending.filter((entry) => entry.url === "/api/support/tickets").length, 2);
+  harness.pending.at(-1).finish({ reference: "RCV-RETRY", accessKey: "retry-key" }, 201);
+  await retry;
+  assert.equal(harness.stored.length, 1);
+});
+
+test("completed escalation does not dismiss a newer unanswered question", async () => {
+  const harness = assistantHarness();
+  const question = harness.ask("أحتاج مساعدة بشأن التقرير");
+  harness.pending.at(-1).finish({ answered: false, confidence: 0, language: "ar" });
+  await question;
+  const form = findAssistantElement(harness.render(), (node) =>
+    node.type === "form" && node.props.className.includes("space-y-3"));
+  const first = form.props.onSubmit({ preventDefault() {} });
+  const request = harness.pending.at(-1);
+  const newer = harness.ask("لدي سؤال آخر حول حسابي");
+  harness.pending.at(-1).finish({ answered: false, confidence: 0, language: "ar" });
+  await newer;
+  request.finish({ reference: "RCV-OLD", accessKey: "old-key" }, 201);
+  await first;
+  assert.ok(findAssistantElement(harness.render(), (node) =>
+    node.type === "form" && node.props.className.includes("space-y-3")));
+  assert.equal(harness.stored.at(-1)[1].reference, "RCV-OLD");
+});
