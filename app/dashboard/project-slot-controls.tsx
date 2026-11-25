@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useState } from "react";
+import { FormEvent, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -18,22 +18,34 @@ export function ProjectSlotControls({
   const ar = useSiteLocale() === "ar";
   const router = useRouter();
   const [projects, setProjects] = useState(initialProjects);
-  const [editing, setEditing] = useState<string | null>(null);
+  const [editing, setEditing] = useState<{ id: string } | null>(null);
+  const currentEdit = useRef<{ id: string } | null>(null);
+  const inFlight = useRef(false);
   const [value, setValue] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const count = projects.filter((item) => item.withinPlanLimit).length;
 
   function begin(project: ProjectSlotSummary) {
-    setEditing(project.id);
+    if (inFlight.current) return;
+    const edit = { id: project.id };
+    currentEdit.current = edit;
+    setEditing(edit);
     setValue(project.displayName);
+    setError("");
+  }
+  function cancel() {
+    if (inFlight.current) return;
+    currentEdit.current = null;
+    setEditing(null);
     setError("");
   }
   async function save(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!editing || saving) return;
-    const project = projects.find((item) => item.id === editing);
-    if (!project || !project.canRename) return;
+    if (!editing || currentEdit.current !== editing || inFlight.current) return;
+    const project = projects.find((item) => item.id === editing.id);
+    if (!project || !project.canRename || value.trim().length < 2 || value.trim().length > 80) return;
+    inFlight.current = true;
     setSaving(true);
     setError("");
     try {
@@ -54,6 +66,7 @@ export function ProjectSlotControls({
       }
       setProjects((current) => current.map((item) =>
         item.id === project.id ? { ...item, displayName: body.displayName! } : item));
+      currentEdit.current = null;
       setEditing(null);
       router.refresh();
     } catch {
@@ -61,6 +74,7 @@ export function ProjectSlotControls({
         ? "تعذّر حفظ الاسم. قد يكون تغيّر في نافذة أخرى؛ حدّث الصفحة وحاول مجددًا."
         : "Could not save the name. It may have changed in another tab; refresh and retry.");
     } finally {
+      inFlight.current = false;
       setSaving(false);
     }
   }
@@ -114,26 +128,26 @@ export function ProjectSlotControls({
                       </Link>
                     </Button>
                   )}
-                  {project.canRename && editing !== project.id && (
-                    <Button type="button" variant="outline" size="sm" onClick={() => begin(project)}>
+                  {project.canRename && editing?.id !== project.id && (
+                    <Button type="button" variant="outline" size="sm" disabled={saving} onClick={() => begin(project)}>
                       {ar ? "تعديل الاسم" : "Rename"}
                     </Button>
                   )}
                 </div>
               </div>
-              {editing === project.id && (
+              {editing?.id === project.id && (
                 <form onSubmit={save} className="mt-4 flex flex-wrap gap-2 border-t border-slate-100 pt-4">
                   <label className="min-w-[180px] flex-1 text-xs font-bold text-slate-600">
                     {ar ? "اسم المشروع المعروض" : "Project display name"}
-                    <Input required minLength={2} maxLength={80} value={value}
-                      onChange={(event) => setValue(event.target.value)} className="mt-1" />
+                    <Input required minLength={2} maxLength={80} value={value} disabled={saving}
+                      onChange={(event) => { if (!inFlight.current && currentEdit.current === editing) setValue(event.target.value); }} className="mt-1" />
                   </label>
                   <div className="flex items-end gap-2">
                     <Button type="submit" disabled={saving || value.trim().length < 2} size="sm">
                       {saving ? (ar ? "جارٍ الحفظ" : "Saving") : (ar ? "حفظ" : "Save")}
                     </Button>
                     <Button type="button" variant="outline" disabled={saving} size="sm"
-                      onClick={() => { setEditing(null); setError(""); }}>
+                      onClick={cancel}>
                       {ar ? "إلغاء" : "Cancel"}
                     </Button>
                   </div>
