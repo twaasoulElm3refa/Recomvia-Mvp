@@ -692,3 +692,119 @@ test("obsolete escalation failures do not overwrite a newer question and its sup
   await retry;
   assert.equal(harness.stored.length, 1);
 });
+
+
+function projectRenameHarness() {
+  const state = [];
+  const refs = [];
+  const pending = [];
+  let stateIndex = 0;
+  let refIndex = 0;
+  let refreshes = 0;
+  const fakeReact = {
+    ...React,
+    useState: (initial) => {
+      const index = stateIndex++;
+      if (!(index in state)) state[index] = initial;
+      return [state[index], (value) => {
+        state[index] = typeof value === "function" ? value(state[index]) : value;
+      }];
+    },
+    useRef: (initial) => refs[refIndex++] ??= { current: initial },
+  };
+  const js = ts.transpileModule(source("app/dashboard/project-slot-controls.tsx"), {
+    compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX, target: ts.ScriptTarget.ES2022 },
+  }).outputText;
+  const loadedModule = { exports: {} };
+  const fakeFetch = (url, options) => {
+    assert.equal(url, "/api/projects/rename");
+    assert.equal(options.method, "POST");
+    return new Promise((resolve) => pending.push({
+      body: JSON.parse(options.body),
+      finish: (payload, status = 200) => resolve(Response.json(payload, { status })),
+    }));
+  };
+  const projectMocks = {
+    ...mocks, react: fakeReact,
+    "next/navigation": { useRouter: () => ({ refresh: () => { refreshes++; } }) },
+    "@/components/ui/input": { Input: wrap },
+    "@/hooks/use-site-locale": { useSiteLocale: () => "ar" },
+  };
+  new Function("require", "module", "exports", "fetch", js)((id) =>
+    projectMocks[id] ?? require(id), loadedModule, loadedModule.exports, fakeFetch);
+  const initialProjects = ["one", "two"].map((id) => ({
+    id, displayName: id, withinPlanLimit: true, canRename: true, completedScans: 1,
+    createdAt: "2026-11-25T00:00:00Z",
+  }));
+  const render = () => {
+    stateIndex = 0;
+    refIndex = 0;
+    return loadedModule.exports.ProjectSlotControls({ initialProjects, projectLimit: 3, canMonitor: true });
+  };
+  const props = (predicate) => {
+    const node = findAssistantElement(render(), predicate);
+    assert.ok(node);
+    return node.props;
+  };
+  const rename = (index = 0) => {
+    const buttons = [];
+    function walk(node) {
+      if (!React.isValidElement(node)) return;
+      if (node.type === Button && node.props.children === "تعديل الاسم") buttons.push(node.props);
+      React.Children.toArray(node.props.children).forEach(walk);
+    }
+    walk(render());
+    assert.ok(buttons[index]);
+    return buttons[index];
+  };
+  return {
+    pending, rename, render, refreshes: () => refreshes,
+    editor: () => props((node) => node.props.maxLength === 80),
+    form: () => props((node) => node.type === "form"),
+    cancel: () => props((node) => node.type === Button && node.props.children === "إلغاء"),
+  };
+}
+
+test("project rename serializes requests and protects the active draft from switching or editing", async () => {
+  const h = projectRenameHarness();
+  h.rename().onClick();
+  h.editor().onChange({ target: { value: "مشروعي الجديد" } });
+  const submit = h.form().onSubmit;
+  const change = h.editor().onChange;
+  const event = { preventDefault() {} };
+  const first = submit(event);
+  await submit(event);
+  assert.equal(h.pending.length, 1);
+  assert.deepEqual(h.pending[0].body, { projectId: "one", expectedName: "one", displayName: "مشروعي الجديد" });
+  assert.equal(h.editor().disabled, true);
+  assert.equal(h.rename().disabled, true);
+  h.rename().onClick();
+  h.cancel().onClick();
+  change({ target: { value: "Unintended change" } });
+  assert.equal(h.editor().value, "مشروعي الجديد");
+  h.pending[0].finish({ projectId: "one", displayName: "مشروعي الجديد", projectKeyUnchanged: true, quotasReset: false });
+  await first;
+  assert.equal(h.refreshes(), 1);
+  h.rename().onClick();
+  assert.equal(h.editor().value, "مشروعي الجديد");
+  await submit(event);
+  assert.equal(h.pending.length, 1, "old edit callbacks cannot submit after reopening the same project");
+});
+
+test("project rename preserves a failed draft and accepts an intentional retry", async () => {
+  const h = projectRenameHarness();
+  h.rename().onClick();
+  h.editor().onChange({ target: { value: "اسم صالح" } });
+  const event = { preventDefault() {} };
+  const first = h.form().onSubmit(event);
+  h.pending[0].finish({ code: "conflict" }, 409);
+  await first;
+  assert.equal(h.editor().disabled, false);
+  assert.equal(h.editor().value, "اسم صالح");
+  assert.equal(h.refreshes(), 0);
+  const second = h.form().onSubmit(event);
+  assert.equal(h.pending.length, 2);
+  h.pending[1].finish({ projectId: "one", displayName: "اسم صالح", projectKeyUnchanged: true, quotasReset: false });
+  await second;
+  assert.equal(h.refreshes(), 1);
+});
