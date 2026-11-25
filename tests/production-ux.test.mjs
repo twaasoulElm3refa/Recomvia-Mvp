@@ -523,3 +523,118 @@ test("completed escalation does not dismiss a newer unanswered question", async 
     node.type === "form" && node.props.className.includes("space-y-3")));
   assert.equal(harness.stored.at(-1)[1].reference, "RCV-OLD");
 });
+
+
+function staffReplyHarness() {
+  const state = [];
+  const refs = [];
+  const pending = [];
+  let stateIndex = 0;
+  let refIndex = 0;
+  const fakeReact = {
+    ...React,
+    useState: (initial) => {
+      const index = stateIndex++;
+      if (!(index in state)) state[index] = initial;
+      return [state[index], (value) => {
+        state[index] = typeof value === "function" ? value(state[index]) : value;
+      }];
+    },
+    useRef: (initial) => refs[refIndex++] ??= { current: initial },
+    useMemo: (calculate) => calculate(),
+  };
+  const js = ts.transpileModule(source("app/support/inbox/support-inbox.tsx"), {
+    compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX, target: ts.ScriptTarget.ES2022 },
+  }).outputText;
+  const loadedModule = { exports: {} };
+  const fakeFetch = (url, options) => new Promise((resolve) => pending.push({
+    url, body: JSON.parse(options.body),
+    finish: (payload, status = 200) => resolve(Response.json(payload, { status })),
+  }));
+  const inboxMocks = {
+    ...mocks,
+    react: fakeReact,
+    "@/components/ui/badge": { Badge: wrap },
+    "@/components/ui/table": Object.fromEntries(["Table", "TableBody", "TableCell", "TableHead", "TableHeader", "TableRow"].map((key) => [key, wrap])),
+    "@/components/ui/dialog": { ...mocks["@/components/ui/dialog"], DialogFooter: wrap },
+    "@/components/ui/textarea": { Textarea: wrap },
+  };
+  new Function("require", "module", "exports", "fetch", js)((id) =>
+    inboxMocks[id] ?? require(id), loadedModule, loadedModule.exports, fakeFetch);
+  const initialTickets = ["one", "two"].map((id) => ({
+    id, publicId: "RCV-" + id, requesterName: "Test", requesterEmail: "test@example.org",
+    question: "Question " + id, status: "open", pageUrl: "/contact",
+    createdAt: "2026-11-25T00:00:00Z",
+  }));
+  const render = () => {
+    stateIndex = 0;
+    refIndex = 0;
+    return loadedModule.exports.SupportInbox({ initialTickets });
+  };
+  const element = (predicate) => {
+    const found = findAssistantElement(render(), predicate);
+    assert.ok(found);
+    return found.props;
+  };
+  // Ticket buttons appear in the same order as the two open tickets.
+  const ticketButton = (index) => {
+    const buttons = [];
+    function walk(node) {
+      if (!React.isValidElement(node)) return;
+      if (node.type === Button && node.props.className?.includes("rounded-xl font-bold")) buttons.push(node.props);
+      React.Children.toArray(node.props.children).forEach(walk);
+    }
+    walk(render());
+    assert.ok(buttons[index]);
+    return buttons[index];
+  };
+  const editor = () => element((node) => node.props.placeholder === "Write a clear, complete human reply…");
+  const dialog = () => element((node) => typeof node.props.onOpenChange === "function");
+  const publish = () => element((node) => node.type === Button && node.props.className === "rounded-xl bg-blue-600 font-bold");
+  const cancel = () => element((node) => node.type === Button && node.props.children === "Cancel");
+  return { pending, ticketButton, editor, dialog, publish, cancel };
+}
+
+test("staff reply saves only once and keeps the selected draft while the request is pending", async () => {
+  const harness = staffReplyHarness();
+  harness.ticketButton(0).onClick();
+  harness.editor().onChange({ target: { value: "رد واضح للعميل" } });
+  const submit = harness.publish().onClick;
+  submit();
+  submit();
+  assert.equal(harness.pending.length, 1);
+  assert.deepEqual(harness.pending[0].body, { reply: "رد واضح للعميل" });
+  assert.equal(harness.pending[0].url, "/api/support/tickets/one/reply");
+  assert.equal(harness.editor().disabled, true);
+  harness.cancel().onClick();
+  harness.dialog().onOpenChange(false);
+  harness.ticketButton(1).onClick();
+  harness.editor().onChange({ target: { value: "Unintended edit" } });
+  assert.equal(harness.dialog().open, true);
+  assert.equal(harness.editor().value, "رد واضح للعميل");
+  harness.pending[0].finish({});
+  await settleAssistantFetch();
+  assert.equal(harness.dialog().open, false);
+  submit();
+  assert.equal(harness.pending.length, 1, "a stale callback cannot republish a completed reply");
+});
+
+test("staff reply preserves the draft on failure and permits a deliberate retry", async () => {
+  const harness = staffReplyHarness();
+  harness.ticketButton(0).onClick();
+  harness.editor().onChange({ target: { value: "  " } });
+  harness.publish().onClick();
+  assert.equal(harness.pending.length, 0);
+  harness.editor().onChange({ target: { value: "A valid human reply" } });
+  harness.publish().onClick();
+  harness.pending[0].finish({ error: "temporary failure" }, 503);
+  await settleAssistantFetch();
+  assert.equal(harness.dialog().open, true);
+  assert.equal(harness.editor().value, "A valid human reply");
+  assert.equal(harness.editor().disabled, false);
+  harness.publish().onClick();
+  assert.equal(harness.pending.length, 2);
+  harness.pending[1].finish({});
+  await settleAssistantFetch();
+  assert.equal(harness.dialog().open, false);
+});
