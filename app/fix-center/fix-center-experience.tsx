@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ArrowRight, CheckCircle2, ExternalLink, Eye, FileSearch, LockKeyhole, ShieldCheck } from "lucide-react";
 import { AppShell, StatusPill } from "@/app/components/app-shell";
 import { NavigationLink as Link } from "@/app/components/navigation-link";
@@ -103,6 +103,9 @@ export function FixCenterExperience({ scanId, targetName, hasWebsiteAudit, findi
   const [requestError, setRequestError] = useState("");
   const [decisionComment, setDecisionComment] = useState("");
   const [decisionSending, setDecisionSending] = useState(false);
+  const decisionInFlight = useRef(false);
+  const currentSelection = useRef<Finding | null>(null);
+  const confirmedDecisions = useRef(new Set<string>());
   const [decisionError, setDecisionError] = useState("");
   const [decisions, setDecisions] = useState<Record<string, string>>(() =>
     Object.fromEntries(reviewProposals.filter((item) => item.decision).map((item) => [item.proposalId, item.decision!])),
@@ -121,7 +124,12 @@ export function FixCenterExperience({ scanId, targetName, hasWebsiteAudit, findi
   const openEvidence = useCallback((issueId: string) => {
     const finding = unresolved.find((item) => item.id === issueId);
     if (!finding) throw new Error("Finding not present in this account's report.");
-    setSelected(finding);
+    if (decisionInFlight.current) throw new Error("Wait for the current proposal decision to finish.");
+    const selection = { ...finding };
+    currentSelection.current = selection;
+    setSelected(selection);
+    setDecisionComment("");
+    setDecisionError("");
     return {
       issueId: finding.id,
       scanId,
@@ -186,11 +194,13 @@ export function FixCenterExperience({ scanId, targetName, hasWebsiteAudit, findi
   const selectedDecision = selectedProposal ? decisions[selectedProposal.proposalId] ?? null : null;
 
   async function decideOnDraft(decision: "accepted_for_planning" | "changes_requested") {
-    if (!scanId || !selectedProposal || selectedDecision || decisionSending) return;
+    if (!scanId || !selected || currentSelection.current !== selected || !selectedProposal ||
+        selectedDecision || confirmedDecisions.current.has(selectedProposal.proposalId) || decisionInFlight.current) return;
     if (decision === "changes_requested" && decisionComment.trim().length < 10) {
       setDecisionError(t.decisionNote);
       return;
     }
+    decisionInFlight.current = true;
     setDecisionSending(true);
     setDecisionError("");
     try {
@@ -208,11 +218,13 @@ export function FixCenterExperience({ scanId, targetName, hasWebsiteAudit, findi
           result.decision.decision !== decision || result.applied !== false || result.creditsCharged !== 0) {
         throw new Error("Review decision not confirmed");
       }
+      confirmedDecisions.current.add(selectedProposal.proposalId);
       setDecisions((current) => ({ ...current, [selectedProposal.proposalId]: decision }));
       setDecisionComment("");
     } catch {
       setDecisionError(t.decisionError);
     } finally {
+      decisionInFlight.current = false;
       setDecisionSending(false);
     }
   }
@@ -292,7 +304,7 @@ export function FixCenterExperience({ scanId, targetName, hasWebsiteAudit, findi
                           <p className="mt-2 line-clamp-2 text-sm leading-6 text-slate-600" dir="auto">{item.explanation}</p>
                           <p className="mt-3 text-xs font-semibold text-slate-500">{item.category}</p>
                         </div>
-                        <Button variant="outline" className="shrink-0 rounded-xl" onClick={() => openEvidence(item.id)}>
+                        <Button variant="outline" className="shrink-0 rounded-xl" disabled={decisionSending} onClick={() => { if (!decisionInFlight.current) openEvidence(item.id); }}>
                           <Eye className="size-4" />{t.view}
                         </Button>
                       </CardContent>
@@ -311,7 +323,14 @@ export function FixCenterExperience({ scanId, targetName, hasWebsiteAudit, findi
           <Link href="/contact?product=fix-credits">{t.contact}<ArrowRight className="size-4" /></Link>
         </Button>
       </section>
-      <Dialog open={Boolean(selected)} onOpenChange={(open) => { if (!open) setSelected(null); }}>
+      <Dialog open={Boolean(selected)} onOpenChange={(open) => {
+        if (!open && !decisionInFlight.current) {
+          currentSelection.current = null;
+          setSelected(null);
+          setDecisionComment("");
+          setDecisionError("");
+        }
+      }}>
         <DialogContent className="max-h-[90vh] overflow-y-auto rounded-3xl sm:max-w-2xl">
           {selected && (
             <>
@@ -348,7 +367,9 @@ export function FixCenterExperience({ scanId, targetName, hasWebsiteAudit, findi
                   ) : (
                     <div className="space-y-3 rounded-xl border border-blue-200 bg-white p-3">
                       <p className="text-xs font-bold text-slate-700">{t.decisionSuccess}</p>
-                      <textarea value={decisionComment} onChange={(event) => setDecisionComment(event.target.value)}
+                      <textarea value={decisionComment} disabled={decisionSending} onChange={(event) => {
+                        if (!decisionInFlight.current && currentSelection.current === selected) setDecisionComment(event.target.value);
+                      }}
                         maxLength={800} placeholder={t.decisionNote} dir="auto"
                         className="min-h-20 w-full rounded-xl border border-slate-200 p-3 text-sm" />
                       {decisionError && <p role="alert" className="text-xs font-bold text-red-700">{decisionError}</p>}
