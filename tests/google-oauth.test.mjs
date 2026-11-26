@@ -269,6 +269,24 @@ test("Google sessions reject oversized and malformed cookies before crypto work"
   }
 });
 
+test("Google session verification fails closed when the deployment secret is unavailable", async () => {
+  const secret = credentials.AUTH_SECRET;
+  try {
+    mockSessionCookie = await auth.createSession({ sub: "user-456", email: "person@example.com", name: null });
+    assert.equal((await auth.getAuthenticatedUser())?.userId, "google:user-456");
+    for (const missingSecret of [undefined, "", "   "]) {
+      credentials.AUTH_SECRET = missingSecret;
+      assert.equal(await auth.getAuthenticatedUser(), null);
+      await assert.rejects(auth.createSession({ sub: "user-456", email: "person@example.com", name: null }), /Authentication is not configured/);
+    }
+    credentials.AUTH_SECRET = secret;
+    assert.equal((await auth.getAuthenticatedUser())?.userId, "google:user-456");
+  } finally {
+    credentials.AUTH_SECRET = secret;
+    mockSessionCookie = null;
+  }
+});
+
 test("Google session verifier rejects signed but invalid claims and extended lifetimes", async () => {
   const secret = credentials.AUTH_SECRET;
   const now = Math.floor(Date.now() / 1000);
