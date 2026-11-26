@@ -37,6 +37,27 @@ type KnowledgeResult = {
   suggestedQuestion?: string;
 };
 
+// API responses are runtime data, including when the assistant is used via
+// a browser tool. Only render grounded answers with local knowledge sources.
+function isKnowledgeResult(value: unknown): value is KnowledgeResult {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const data = value as Record<string, unknown>;
+  if (typeof data.answered !== "boolean" ||
+      (data.language !== "ar" && data.language !== "en") ||
+      typeof data.confidence !== "number" || !Number.isFinite(data.confidence) ||
+      data.confidence < 0 || data.confidence > 100) return false;
+  for (const key of ["answer", "title", "sourceUrl", "sourceLabel", "suggestedQuestion"]) {
+    if (data[key] !== undefined && typeof data[key] !== "string") return false;
+  }
+  if (data.sourceUrl !== undefined) {
+    const source = data.sourceUrl as string;
+    const prefix = data.language === "ar" ? "/ar" : "";
+    if (source !== source.trim() || !source.startsWith(prefix) ||
+        !/^\/(?:faq#[a-z0-9-]+|blog\/[a-z0-9-]+(?:#questions)?)$/.test(source.slice(prefix.length))) return false;
+  }
+  return !data.answered || (typeof data.answer === "string" && !!data.answer.trim() && typeof data.sourceUrl === "string");
+}
+
 type StoredTicket = {
   reference: string;
   accessKey: string;
@@ -161,8 +182,12 @@ export function KnowledgeAssistant() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ question: cleanQuestion }),
       });
-      const data = (await response.json()) as KnowledgeResult & { error?: string };
-      if (!response.ok) throw new Error(data.error || "The assistant could not answer right now.");
+      const data: unknown = await response.json();
+      if (!response.ok) {
+        const message = data && typeof data === "object" ? (data as { error?: unknown }).error : undefined;
+        throw new Error(typeof message === "string" && message ? message : "The assistant could not answer right now.");
+      }
+      if (!isKnowledgeResult(data)) throw new Error("The assistant could not answer right now.");
       if (requestId === latestQuestionRequest.current) {
         setResult(data);
         if (!data.answered) {

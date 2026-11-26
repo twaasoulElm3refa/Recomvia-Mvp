@@ -278,7 +278,7 @@ test("assistant ignores an older unsupported answer after a newer supported Arab
   const older = ask("An older question");
   const newer = ask("ما الفرق بين الباقات؟");
   assert.deepEqual(pending.map((entry) => entry.question), ["An older question", "ما الفرق بين الباقات؟"]);
-  const recent = { answered: true, answer: "إجابة موثقة", confidence: 1, language: "ar" };
+  const recent = { answered: true, answer: "إجابة موثقة", confidence: 90, language: "ar", sourceUrl: "/ar/faq#what-is-recomvia" };
   pending[1].finish(recent);
   assert.deepEqual(await newer, recent);
   assert.ok(writes.includes(false));
@@ -1410,4 +1410,39 @@ test("assistant rejects unrelated or malformed status replies and preserves the 
   assert.deepEqual(h.stored[0][1], { ...ticket, humanReply: valid.humanReply, updatedAt: valid.updatedAt });
   assert.ok(findAssistantElement(h.render(), (node) => node.props.children === valid.humanReply));
   assert.equal(findAssistantElement(h.render(), (node) => node.props.role === "alert"), undefined);
+});
+
+
+test("assistant rejects invalid knowledge responses and ungrounded links before display or tool return", async () => {
+  const h = assistantHarness();
+  const valid = { answered: true, answer: "إجابة موثقة", confidence: 90, language: "ar", sourceUrl: "/ar/faq#what-is-recomvia" };
+  for (const payload of [
+    null, [], {}, { ...valid, answered: "true" }, { ...valid, language: "xx" },
+    { ...valid, confidence: 101 }, { ...valid, confidence: "90" },
+    { ...valid, answer: {} }, { ...valid, answer: " " },
+    { ...valid, title: {} }, { ...valid, sourceLabel: [] }, { ...valid, sourceUrl: undefined },
+    { ...valid, sourceUrl: "javascript:alert(1)" },
+    { ...valid, sourceUrl: "//example.invalid/faq#test" },
+    { ...valid, sourceUrl: "/ar/blog/../contact" },
+    { ...valid, sourceUrl: "/faq#what-is-recomvia" },
+    { ...valid, sourceUrl: "/ar/faq#test\n" },
+  ]) {
+    const ask = h.ask("ما الفرق بين الباقات؟");
+    h.pending.at(-1).finish(payload);
+    assert.equal(await ask, null);
+    const tree = h.render();
+    assert.ok(findAssistantElement(tree, (node) => node.props.role === "alert"));
+    assert.equal(findAssistantElement(tree, (node) => node.props.children === valid.answer), undefined);
+    assert.equal(findAssistantElement(tree, (node) => node.props.href === valid.sourceUrl), undefined);
+  }
+  for (const reply of [
+    valid,
+    { ...valid, language: "en", answer: "Supported answer", sourceUrl: "/blog/example-article#questions" },
+    { answered: false, language: "ar", confidence: 0 },
+  ]) {
+    const ask = h.ask("ما الفرق بين الباقات؟");
+    h.pending.at(-1).finish(reply);
+    assert.deepEqual(await ask, reply);
+    assert.equal(findAssistantElement(h.render(), (node) => node.props.role === "alert"), undefined);
+  }
 });
