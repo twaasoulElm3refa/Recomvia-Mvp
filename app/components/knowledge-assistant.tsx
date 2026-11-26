@@ -60,6 +60,26 @@ const suggestionsAr = [
 
 const ticketStorageKey = "recomvia-support-ticket";
 
+// Browser storage is not a trusted source of typed data. Ignore damaged or
+// obsolete records instead of rendering objects or sending invalid credentials.
+function parseStoredTicket(saved: string): StoredTicket | null {
+  const value: unknown = JSON.parse(saved);
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const ticket = value as Partial<StoredTicket>;
+  if (
+    typeof ticket.reference !== "string" || !/^RCV-[A-Z0-9]+-[A-F0-9]{6}$/.test(ticket.reference) ||
+    typeof ticket.accessKey !== "string" || !/^[a-f0-9]{36}$/.test(ticket.accessKey) ||
+    typeof ticket.question !== "string" ||
+    (ticket.status !== "open" && ticket.status !== "answered") ||
+    (ticket.humanReply != null && typeof ticket.humanReply !== "string") ||
+    (ticket.updatedAt !== undefined && typeof ticket.updatedAt !== "string")
+  ) return null;
+  return {
+    reference: ticket.reference, accessKey: ticket.accessKey, question: ticket.question,
+    status: ticket.status, humanReply: ticket.humanReply, updatedAt: ticket.updatedAt,
+  };
+}
+
 export function KnowledgeAssistant() {
   const [open, setOpen] = useState(false);
   const [question, setQuestion] = useState("");
@@ -109,7 +129,8 @@ export function KnowledgeAssistant() {
       try {
         const saved = window.localStorage.getItem(ticketStorageKey);
         if (saved && !activeTicket.current) {
-          const restored = JSON.parse(saved) as StoredTicket;
+          const restored = parseStoredTicket(saved);
+          if (!restored) return;
           activeTicket.current = restored;
           setTicket(restored);
         }
