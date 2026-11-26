@@ -468,7 +468,7 @@ async function createAssistantTicket(harness, reference) {
   assert.ok(form);
   const sending = form.props.onSubmit({ preventDefault() {} });
   assert.equal(harness.pending.at(-1).url, "/api/support/tickets");
-  harness.pending.at(-1).finish({ reference, accessKey: reference + "-key", status: "open" }, 201);
+  harness.pending.at(-1).finish({ reference, accessKey: "a".repeat(36), status: "open" }, 201);
   await sending;
 }
 
@@ -479,7 +479,7 @@ function startAssistantTicketCheck(harness, reference) {
   button.props.onClick();
   const request = harness.pending.at(-1);
   assert.equal(request.url, "/api/support/tickets/status");
-  assert.deepEqual(request.body, { reference, accessKey: reference + "-key" });
+  assert.deepEqual(request.body, { reference, accessKey: "a".repeat(36) });
   return request;
 }
 
@@ -487,28 +487,28 @@ const settleAssistantFetch = () => new Promise((resolve) => setImmediate(resolve
 
 test("assistant does not restore an old ticket after a newer ticket is created", async () => {
   const harness = assistantHarness();
-  await createAssistantTicket(harness, "RCV-OLD");
-  const old = startAssistantTicketCheck(harness, "RCV-OLD");
-  await createAssistantTicket(harness, "RCV-NEW");
+  await createAssistantTicket(harness, "RCV-OLD-AAAAAA");
+  const old = startAssistantTicketCheck(harness, "RCV-OLD-AAAAAA");
+  await createAssistantTicket(harness, "RCV-NEW-BBBBBB");
   const count = harness.writes.length;
-  old.finish({ publicId: "RCV-OLD", status: "answered", humanReply: "رد قديم", updatedAt: "2026-11-26 09:00:00" });
+  old.finish({ publicId: "RCV-OLD-AAAAAA", status: "answered", humanReply: "رد قديم", updatedAt: "2026-11-26 09:00:00" });
   await settleAssistantFetch();
   assert.equal(harness.writes.length, count);
   assert.equal(harness.stored.length, 2);
-  assert.equal(harness.stored.at(-1)[1].reference, "RCV-NEW");
-  const current = startAssistantTicketCheck(harness, "RCV-NEW");
-  current.finish({ publicId: "RCV-NEW", status: "answered", humanReply: "رد جديد", updatedAt: "2026-11-26 09:00:00" });
+  assert.equal(harness.stored.at(-1)[1].reference, "RCV-NEW-BBBBBB");
+  const current = startAssistantTicketCheck(harness, "RCV-NEW-BBBBBB");
+  current.finish({ publicId: "RCV-NEW-BBBBBB", status: "answered", humanReply: "رد جديد", updatedAt: "2026-11-26 09:00:00" });
   await settleAssistantFetch();
   assert.equal(harness.stored.at(-1)[1].humanReply, "رد جديد");
-  assert.equal(harness.stored.at(-1)[1].reference, "RCV-NEW");
+  assert.equal(harness.stored.at(-1)[1].reference, "RCV-NEW-BBBBBB");
 });
 
 test("assistant ignores obsolete ticket status errors and preserves the latest loading state", async () => {
   const harness = assistantHarness();
-  await createAssistantTicket(harness, "RCV-OLD");
-  const old = startAssistantTicketCheck(harness, "RCV-OLD");
-  await createAssistantTicket(harness, "RCV-NEW");
-  const current = startAssistantTicketCheck(harness, "RCV-NEW");
+  await createAssistantTicket(harness, "RCV-OLD-AAAAAA");
+  const old = startAssistantTicketCheck(harness, "RCV-OLD-AAAAAA");
+  await createAssistantTicket(harness, "RCV-NEW-BBBBBB");
+  const current = startAssistantTicketCheck(harness, "RCV-NEW-BBBBBB");
   const count = harness.writes.length;
   old.finish({ error: "obsolete failure" }, 503);
   await settleAssistantFetch();
@@ -516,7 +516,7 @@ test("assistant ignores obsolete ticket status errors and preserves the latest l
   current.finish({ error: "current failure" }, 503);
   await settleAssistantFetch();
   assert.deepEqual(harness.writes.slice(count), ["current failure", false]);
-  assert.equal(harness.stored.at(-1)[1].reference, "RCV-NEW");
+  assert.equal(harness.stored.at(-1)[1].reference, "RCV-NEW-BBBBBB");
 });
 
 
@@ -532,12 +532,12 @@ test("assistant escalation sends one ticket even before rerender and after succe
   const first = form.props.onSubmit(event);
   await form.props.onSubmit(event);
   assert.equal(harness.pending.filter((entry) => entry.url === "/api/support/tickets").length, 1);
-  harness.pending.at(-1).finish({ reference: "RCV-ONE", accessKey: "one-key", status: "open" }, 201);
+  harness.pending.at(-1).finish({ reference: "RCV-ONE-CCCCCC", accessKey: "a".repeat(36), status: "open" }, 201);
   await first;
   await form.props.onSubmit(event);
   assert.equal(harness.pending.filter((entry) => entry.url === "/api/support/tickets").length, 1);
   assert.equal(harness.stored.length, 1);
-  await createAssistantTicket(harness, "RCV-NEXT");
+  await createAssistantTicket(harness, "RCV-NEXT-DDDDDD");
   assert.equal(harness.stored.length, 2, "a new question may create a new ticket");
 });
 
@@ -556,7 +556,7 @@ test("assistant escalation releases its lock after a rejected request", async ()
   assert.equal(harness.stored.length, 0);
   const retry = form.props.onSubmit(event);
   assert.equal(harness.pending.filter((entry) => entry.url === "/api/support/tickets").length, 2);
-  harness.pending.at(-1).finish({ reference: "RCV-RETRY", accessKey: "retry-key" }, 201);
+  harness.pending.at(-1).finish({ reference: "RCV-RETRY-EEEEEE", accessKey: "a".repeat(36), status: "open" }, 201);
   await retry;
   assert.equal(harness.stored.length, 1);
 });
@@ -573,11 +573,11 @@ test("completed escalation does not dismiss a newer unanswered question", async 
   const newer = harness.ask("لدي سؤال آخر حول حسابي");
   harness.pending.at(-1).finish({ answered: false, confidence: 0, language: "ar" });
   await newer;
-  request.finish({ reference: "RCV-OLD", accessKey: "old-key" }, 201);
+  request.finish({ reference: "RCV-OLD-AAAAAA", accessKey: "a".repeat(36), status: "open" }, 201);
   await first;
   assert.ok(findAssistantElement(harness.render(), (node) =>
     node.type === "form" && node.props.className.includes("space-y-3")));
-  assert.equal(harness.stored.at(-1)[1].reference, "RCV-OLD");
+  assert.equal(harness.stored.at(-1)[1].reference, "RCV-OLD-AAAAAA");
 });
 
 
@@ -717,9 +717,9 @@ test("assistant rejects stale escalation forms even when the new question has th
   assert.ok(current);
   const send = current.props.onSubmit({ preventDefault() {} });
   assert.equal(harness.pending.at(-1).url, "/api/support/tickets");
-  harness.pending.at(-1).finish({ reference: "RCV-CURRENT", accessKey: "current-key" }, 201);
+  harness.pending.at(-1).finish({ reference: "RCV-CURRENT-FFFFFF", accessKey: "a".repeat(36), status: "open" }, 201);
   await send;
-  assert.equal(harness.stored.at(-1)[1].reference, "RCV-CURRENT");
+  assert.equal(harness.stored.at(-1)[1].reference, "RCV-CURRENT-FFFFFF");
 });
 
 test("obsolete escalation failures do not overwrite a newer question and its support form", async () => {
@@ -744,7 +744,7 @@ test("obsolete escalation failures do not overwrite a newer question and its sup
   assert.ok(current);
   const retry = current.props.onSubmit({ preventDefault() {} });
   assert.equal(harness.pending.at(-1).body.question, "سؤال آخر حول الحساب");
-  harness.pending.at(-1).finish({ reference: "RCV-NEW", accessKey: "new-key" }, 201);
+  harness.pending.at(-1).finish({ reference: "RCV-NEW-BBBBBB", accessKey: "a".repeat(36), status: "open" }, 201);
   await retry;
   assert.equal(harness.stored.length, 1);
 });
@@ -1445,4 +1445,37 @@ test("assistant rejects invalid knowledge responses and ungrounded links before 
     assert.deepEqual(await ask, reply);
     assert.equal(findAssistantElement(h.render(), (node) => node.props.role === "alert"), undefined);
   }
+});
+
+
+test("assistant validates created ticket credentials before replacing a private ticket", async () => {
+  const previous = { reference: "RCV-ABC-123ABC", accessKey: "a".repeat(36), question: "Previous question", status: "answered", humanReply: "Previous private reply" };
+  const h = assistantHarness(JSON.stringify(previous));
+  h.restoreTicket();
+  const question = h.ask("I need help with my new report");
+  h.pending.at(-1).finish({ answered: false, confidence: 0, language: "en" });
+  await question;
+  const valid = { reference: "RCV-NEW-ABCDEF", accessKey: "b".repeat(36), status: "open" };
+  const form = () => findAssistantElement(h.render(), (node) =>
+    node.type === "form" && node.props.className.includes("space-y-3"));
+  for (const [payload, status] of [
+    [null, 201], [[], 201], [{}, 201], [{ ...valid, reference: {} }, 201],
+    [{ ...valid, reference: "RCV-BAD" }, 201], [{ ...valid, accessKey: [] }, 201],
+    [{ ...valid, accessKey: "short" }, 201], [{ ...valid, status: "answered" }, 201],
+    [{ ...valid, status: undefined }, 201], [valid, 200], [{ error: {} }, 503],
+  ]) {
+    const submit = form().props.onSubmit({ preventDefault() {} });
+    h.pending.at(-1).finish(payload, status);
+    await submit;
+    assert.equal(h.stored.length, 0);
+    assert.ok(findAssistantElement(h.render(), (node) => node.props.children === previous.humanReply));
+    assert.ok(findAssistantElement(h.render(), (node) => node.props.role === "alert"));
+    assert.ok(form(), "keep the draft available without automatic retry");
+  }
+  const submit = form().props.onSubmit({ preventDefault() {} });
+  h.pending.at(-1).finish(valid, 201);
+  await submit;
+  assert.equal(h.stored.length, 1);
+  assert.deepEqual(h.stored[0][1], { ...valid, question: "I need help with my new report" });
+  assert.equal(form(), undefined);
 });
