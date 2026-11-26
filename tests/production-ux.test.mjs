@@ -1342,3 +1342,38 @@ test("assistant restores a valid saved private ticket and checks only its saved 
   assert.equal(h.pending[0].url, "/api/support/tickets/status");
   assert.deepEqual(h.pending[0].body, { reference: ticket.reference, accessKey: ticket.accessKey });
 });
+
+
+test("assistant exposes accessible names and busy state throughout bilingual support escalation", async () => {
+  for (const [language, question, labels] of [
+    ["en", "Please help with my report", ["Name", "Email address", "Support question"]],
+    ["ar", "أحتاج مساعدة بشأن التقرير", ["الاسم", "البريد الإلكتروني", "سؤال الدعم"]],
+  ]) {
+    const h = assistantHarness();
+    const find = (predicate) => findAssistantElement(h.render(), predicate);
+    const field = (label) => find((node) => node.props["aria-label"] === label);
+    const mainForm = () => find((node) => node.type === "form" && node.props.className.includes("border-t"));
+    assert.equal(field("Ask a question").props.dir, "auto");
+    assert.equal(mainForm().props["aria-busy"], false);
+    const asking = h.ask(question);
+    assert.equal(mainForm().props["aria-busy"], true);
+    assert.ok(find((node) => node.props.role === "status"));
+    h.pending.at(-1).finish({ answered: false, confidence: 0, language });
+    await asking;
+    assert.equal(mainForm().props["aria-busy"], false);
+    assert.equal(field(labels[0]).props.autoComplete, "name");
+    assert.equal(field(labels[1]).props.autoComplete, "email");
+    assert.equal(field(labels[1]).props.dir, "ltr");
+    assert.equal(field(labels[2]).props.dir, "auto");
+    assert.equal(field(labels[2]).props.value, question);
+    const escalation = () => find((node) => node.type === "form" && node.props.className.includes("space-y-3"));
+    assert.equal(escalation().props["aria-busy"], false);
+    const sending = escalation().props.onSubmit({ preventDefault() {} });
+    assert.equal(escalation().props["aria-busy"], true);
+    h.pending.at(-1).finish({ error: "Try again" }, 503);
+    await sending;
+    assert.equal(escalation().props["aria-busy"], false);
+    assert.equal(field(labels[2]).props.value, question);
+    assert.ok(find((node) => node.props.role === "alert"));
+  }
+});

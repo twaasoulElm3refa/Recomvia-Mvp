@@ -335,7 +335,7 @@ export function KnowledgeAssistant() {
             <div className="mt-5 space-y-2">
               <p className="text-[11px] font-bold uppercase tracking-[.14em] text-slate-400">{pageArabic ? "جرّب سؤالًا" : "Try a question"}</p>
               {suggestions.map((item) => (
-                <button key={item} type="button" onClick={() => { setQuestion(item); void ask(item); }} className="flex w-full items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3 text-left text-sm font-semibold text-slate-700 transition hover:border-blue-300 hover:text-blue-700">
+                <button key={item} type="button" onClick={() => { setQuestion(item); void ask(item); }} className="flex w-full items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3 text-start text-sm font-semibold text-slate-700 transition hover:border-blue-300 hover:text-blue-700">
                   <span dir={/[\u0600-\u06ff]/.test(item) ? "rtl" : "ltr"}>{item}</span><ArrowRight className="size-4 shrink-0" />
                 </button>
               ))}
@@ -348,7 +348,7 @@ export function KnowledgeAssistant() {
             </div>
           )}
 
-          {asking && <div className="mt-4 flex items-center gap-2 rounded-2xl border border-blue-100 bg-blue-50 p-4 text-sm font-semibold text-blue-700"><Loader2 className="size-4 animate-spin" />{arabic ? "نبحث في المحتوى المعتمد…" : "Searching approved content…"}</div>}
+          {asking && <div role="status" className="mt-4 flex items-center gap-2 rounded-2xl border border-blue-100 bg-blue-50 p-4 text-sm font-semibold text-blue-700"><Loader2 className="size-4 animate-spin" />{arabic ? "نبحث في المحتوى المعتمد…" : "Searching approved content…"}</div>}
 
           {result?.answered && (
             <div className="mt-4 rounded-2xl border border-emerald-200 bg-white p-5 shadow-sm" dir={result.language === "ar" ? "rtl" : "ltr"}>
@@ -367,11 +367,11 @@ export function KnowledgeAssistant() {
           )}
 
           {showEscalation && (
-            <form onSubmit={sendToHuman} className="mt-4 space-y-3 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm" dir={arabic ? "rtl" : "ltr"}>
+            <form onSubmit={sendToHuman} aria-busy={sending} className="mt-4 space-y-3 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm" dir={arabic ? "rtl" : "ltr"}>
               <div><p className="font-extrabold text-slate-900">{arabic ? "إرسال إلى خدمة العملاء" : "Send to customer service"}</p><p className="mt-1 text-xs leading-5 text-slate-500">{arabic ? "سننشئ تذكرة خاصة برقم متابعة، وسيظهر الرد البشري داخل المساعد." : "We’ll create a private ticket with a tracking reference. The human reply will appear here."}</p></div>
-              <Input value={name} onChange={(event) => setName(event.target.value)} placeholder={arabic ? "الاسم" : "Name"} minLength={2} maxLength={80} required className="h-11 rounded-xl" />
-              <Input value={email} onChange={(event) => setEmail(event.target.value)} placeholder={arabic ? "البريد الإلكتروني" : "Email address"} type="email" required className="h-11 rounded-xl" dir="ltr" />
-              <Textarea value={supportQuestion} onChange={(event) => setSupportQuestion(event.target.value)} minLength={10} maxLength={2000} required className="min-h-28 rounded-xl" />
+              <Input aria-label={arabic ? "الاسم" : "Name"} autoComplete="name" value={name} onChange={(event) => setName(event.target.value)} placeholder={arabic ? "الاسم" : "Name"} minLength={2} maxLength={80} required className="h-11 rounded-xl" />
+              <Input aria-label={arabic ? "البريد الإلكتروني" : "Email address"} autoComplete="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder={arabic ? "البريد الإلكتروني" : "Email address"} type="email" required className="h-11 rounded-xl" dir="ltr" />
+              <Textarea aria-label={arabic ? "سؤال الدعم" : "Support question"} dir="auto" value={supportQuestion} onChange={(event) => setSupportQuestion(event.target.value)} minLength={10} maxLength={2000} required className="min-h-28 rounded-xl" />
               <div className="sr-only" aria-hidden="true"><label>Company website<input tabIndex={-1} autoComplete="off" value={honeypot} onChange={(event) => setHoneypot(event.target.value)} /></label></div>
               <Button type="submit" disabled={sending} className="h-11 w-full rounded-xl bg-blue-600 font-bold">{sending ? <><Loader2 className="size-4 animate-spin" />{arabic ? "جارٍ الإرسال…" : "Sending…"}</> : <><Send className="size-4" />{arabic ? "إنشاء تذكرة" : "Create support ticket"}</>}</Button>
             </form>
@@ -389,9 +389,9 @@ export function KnowledgeAssistant() {
           {error && <p className="mt-4 rounded-xl border border-red-200 bg-red-50 p-3 text-sm font-semibold text-red-700" role="alert">{error}</p>}
         </div>
 
-        <form onSubmit={submitQuestion} className="border-t border-slate-200 bg-white p-4">
+        <form onSubmit={submitQuestion} aria-busy={asking} className="border-t border-slate-200 bg-white p-4">
           <div className="flex gap-2">
-            <Input value={question} onChange={(event) => setQuestion(event.target.value)} placeholder="Ask a question / اكتب سؤالك" maxLength={600} className="h-11 rounded-xl" />
+            <Input aria-label={pageArabic ? "اكتب سؤالك" : "Ask a question"} dir="auto" value={question} onChange={(event) => setQuestion(event.target.value)} placeholder="Ask a question / اكتب سؤالك" maxLength={600} className="h-11 rounded-xl" />
             <Button type="submit" size="icon" disabled={asking || question.trim().length < 2} className="size-11 shrink-0 rounded-xl bg-blue-600" aria-label={pageArabic ? "أرسل السؤال" : "Send question"}><Send className="size-4" /></Button>
           </div>
           <p className="mt-2 text-center text-[11px] text-slate-400">{pageArabic ? "تعتمد الإجابات على محتوى Recomvia، وتُحال الأسئلة غير المدعومة إلى إنسان." : "Answers cite Recomvia content. Unsupported questions go to a human."}</p>
