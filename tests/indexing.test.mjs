@@ -167,3 +167,47 @@ test("pricing public links preserve the route language without changing private 
     }
   }
 });
+
+
+test("methodology calls to action preserve public locale and identify the private report accurately", () => {
+  const element = (type, props) => ({ type, props });
+  const PublicShell = () => null;
+  const Link = () => null;
+  const stub = () => null;
+  function load(path, dependencies = {}) {
+    const js = ts.transpileModule(readFileSync(path, "utf8"), {
+      compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX },
+    }).outputText;
+    const mod = { exports: {} };
+    new Function("require", "module", "exports", js)((name) => {
+      if (name === "react/jsx-runtime") return { jsx: element, jsxs: element, Fragment: Symbol.for("react.fragment") };
+      if (Object.hasOwn(dependencies, name)) return dependencies[name];
+      throw new Error("Unexpected import: " + name);
+    }, mod, mod.exports);
+    return mod.exports;
+  }
+  const { MethodologyContent } = load("app/methodology/methodology-content.tsx", {
+    "lucide-react": Object.fromEntries(["ArrowRight", "BarChart3", "Bot", "Check", "CircleAlert", "Clock3", "FileSearch", "Globe2", "Repeat2", "Scale", "ShieldCheck"].map((name) => [name, stub])),
+    "@/app/components/navigation-link": { NavigationLink: Link },
+    "@/app/components/public-shell": { PublicShell },
+    "@/components/ui/button": { Button: stub },
+    "@/components/ui/card": { Card: stub, CardContent: stub },
+    "@/lib/site-locale": load("lib/site-locale.ts"),
+  });
+  function links(node) {
+    if (Array.isArray(node)) return node.flatMap(links);
+    if (!node || typeof node !== "object" || !node.props) return [];
+    return [...(node.type === Link ? [node.props] : []), ...links(node.props.children)];
+  }
+  for (const [locale, home, runLabel, reportLabel] of [
+    ["en", "/", "Run free score", "View my report"],
+    ["ar", "/ar", "ابدأ الفحص المجاني", "اعرض تقريري"],
+  ]) {
+    const shell = MethodologyContent({ initialLocale: locale });
+    assert.equal(shell.props.initialLocale, locale);
+    const actions = links(shell.props.children(locale));
+    assert.deepEqual(actions.map(({ href }) => href), [home, "/report"]);
+    assert.equal(actions[0].children[0], runLabel);
+    assert.equal(actions[1].children, reportLabel);
+  }
+});
