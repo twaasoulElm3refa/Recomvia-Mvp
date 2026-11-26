@@ -927,7 +927,7 @@ test("monitoring controls never request a resume without the plan entitlement", 
 });
 
 
-function proposalDecisionHarness() {
+function proposalDecisionHarness(requestedFindingIds = ["one", "two"]) {
   const state = [];
   const refs = [];
   const pending = [];
@@ -952,10 +952,10 @@ function proposalDecisionHarness() {
   }).outputText;
   const loadedModule = { exports: {} };
   const fakeFetch = (url, options) => {
-    assert.equal(url, "/api/fix-proposals/decision");
+    assert.ok(["/api/fix-proposals/decision", "/api/fix-reviews"].includes(url));
     assert.equal(options.method, "POST");
     return new Promise((resolve) => pending.push({
-      body: JSON.parse(options.body),
+      url, body: JSON.parse(options.body),
       finish: (payload, status = 200) => resolve(Response.json(payload, { status })),
     }));
   };
@@ -983,7 +983,7 @@ function proposalDecisionHarness() {
     refIndex = 0;
     return loadedModule.exports.FixCenterExperience({
       scanId: "scan-1", targetName: "Example", hasWebsiteAudit: true, findings,
-      requestedFindingIds: ["one", "two"], reviewProposals, proposalHistory: [],
+      requestedFindingIds, reviewProposals, proposalHistory: [],
     });
   };
   const props = (predicate) => {
@@ -1008,6 +1008,8 @@ function proposalDecisionHarness() {
     comment: () => props((node) => node.type === "textarea"),
     changes: () => props((node) => node.type === Button && node.props.children === "اطلب تعديل المسودة"),
     accept: () => props((node) => node.type === Button && node.props.children === "أقبل المسودة لأغراض التخطيط فقط"),
+    review: () => props((node) => node.type === Button && ["اطلب مراجعة بشرية", "جارٍ إرسال الطلب…", "طُلِبت المراجعة"].includes(node.props.children)),
+    alert: () => findAssistantElement(render(), (node) => node.props.role === "alert")?.props.children,
   };
 }
 
@@ -1066,4 +1068,59 @@ test("planning decisions block duplicates and conflicting actions, preserve fail
   h.open(1).onClick();
   assert.equal(h.comment().value, "");
   assert.equal(h.changes().disabled, true);
+});
+
+
+test("human review requests serialize submissions and reject callbacks from closed evidence dialogs", async () => {
+  const h = proposalDecisionHarness([]);
+  h.open(0).onClick();
+  const stale = h.review().onClick;
+  h.dialog().onOpenChange(false);
+  h.open(1).onClick();
+  stale();
+  assert.equal(h.pending.length, 0);
+  h.dialog().onOpenChange(false);
+  h.open(0).onClick();
+  stale();
+  assert.equal(h.pending.length, 0, "reopening the same finding must not revive the old request");
+  const submit = h.review().onClick;
+  submit();
+  submit();
+  h.dialog().onOpenChange(false);
+  h.open(1).onClick();
+  h.accept().onClick();
+  assert.equal(h.pending.length, 1);
+  assert.equal(h.pending[0].url, "/api/fix-reviews");
+  assert.deepEqual(h.pending[0].body, { scanId: "scan-1", findingId: "one" });
+  assert.equal(h.review().disabled, true);
+  h.pending[0].finish({ request: { findingId: "one" }, executionEnabled: false, approved: false, creditsCharged: 0 }, 201);
+  await settleAssistantFetch();
+  submit();
+  assert.equal(h.pending.length, 1, "successful requests cannot be submitted again using a stale callback");
+  assert.equal(h.review().children, "طُلِبت المراجعة");
+  h.dialog().onOpenChange(false);
+  h.open(1).onClick();
+  assert.equal(h.review().disabled, false);
+});
+
+test("human review rejects unsafe confirmations, isolates errors and permits an intentional retry", async () => {
+  const h = proposalDecisionHarness([]);
+  h.open(0).onClick();
+  h.review().onClick();
+  h.pending[0].finish({ request: { findingId: "one" }, executionEnabled: false, approved: true, creditsCharged: 0 });
+  await settleAssistantFetch();
+  assert.equal(h.review().disabled, false);
+  assert.ok(h.alert());
+  h.dialog().onOpenChange(false);
+  h.open(1).onClick();
+  assert.equal(h.alert(), undefined);
+  h.dialog().onOpenChange(false);
+  h.open(0).onClick();
+  assert.equal(h.alert(), undefined);
+  h.review().onClick();
+  h.pending[1].finish({ request: { findingId: "one" }, executionEnabled: false, approved: false, creditsCharged: 0 }, 200);
+  await settleAssistantFetch();
+  assert.equal(h.review().children, "طُلِبت المراجعة");
+  assert.equal(h.alert(), undefined);
+  assert.equal(h.pending.length, 2);
 });
