@@ -1,10 +1,18 @@
 import { NextResponse } from "next/server";
-import { OAUTH_STATE_COOKIE, OAUTH_VERIFIER_COOKIE, getGoogleCallbackUrl, getGoogleCredentials, randomBase64Url, sha256Base64Url } from "@/app/auth";
+import { OAUTH_STATE_COOKIE, OAUTH_VERIFIER_COOKIE, authProvider, getAppOrigin, getGoogleCallbackUrl, getGoogleCredentials, randomBase64Url, sha256Base64Url } from "@/app/auth";
 
 export const dynamic = "force-dynamic";
 export const runtime = "edge";
 
 export async function GET(request: Request) {
+  // Hosted Sites must not start a second identity provider, even if Google
+  // credentials happen to be present in the deployment environment.
+  if (authProvider() !== "google") {
+    const response = NextResponse.redirect(new URL("/auth/start", getAppOrigin(request)));
+    response.headers.set("Cache-Control", "private, no-store, max-age=0");
+    response.headers.set("X-Content-Type-Options", "nosniff");
+    return response;
+  }
   const { clientId } = getGoogleCredentials();
   const state = randomBase64Url();
   const verifier = randomBase64Url(48);
