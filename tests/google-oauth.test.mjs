@@ -174,9 +174,34 @@ test("signout returns to the request origin", async () => {
   assert.equal(response.location, origin);
   assert.equal(response.headers.get("Cache-Control"), "private, no-store, max-age=0");
   assert.equal(response.headers.get("X-Content-Type-Options"), "nosniff");
-  assert.deepEqual(response.cookies.get(auth.SESSION_COOKIE).options, {
-    httpOnly: true, secure: true, sameSite: "lax", path: "/", maxAge: 0,
-  });
+  for (const name of [auth.SESSION_COOKIE, auth.OAUTH_STATE_COOKIE, auth.OAUTH_VERIFIER_COOKIE]) {
+    assert.equal(response.cookies.get(name).value, "");
+    assert.deepEqual(response.cookies.get(name).options, {
+      httpOnly: true, secure: true, sameSite: "lax", path: "/", maxAge: 0,
+    });
+  }
+});
+
+test("signout cancels pending Google OAuth before a later callback can exchange tokens", async () => {
+  const origin = "https://recomvia.test";
+  const started = await start.GET(request(origin + "/auth/google"));
+  const { request: pending } = callbackRequest(origin, started);
+  const browserCookies = new Map(started.cookies.values);
+  const signedOut = await signout.GET(request(origin + "/auth/signout"));
+  for (const [name, cookie] of signedOut.cookies.values) {
+    if (cookie.options.maxAge === 0) browserCookies.delete(name);
+  }
+  const originalFetch = globalThis.fetch;
+  let calls = 0;
+  globalThis.fetch = async () => { calls++; throw new Error("Abandoned OAuth must not contact Google"); };
+  try {
+    const response = await callback.GET(request(pending.url, browserCookies));
+    assert.equal(response.location, origin + "/?auth_error=invalid_oauth_state");
+    assert.equal(response.cookies.get(auth.SESSION_COOKIE), undefined);
+    assert.equal(calls, 0);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });
 
 test("standalone login entry uses Google without accepting identity headers", async () => {
