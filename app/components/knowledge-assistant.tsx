@@ -259,13 +259,23 @@ export function KnowledgeAssistant() {
           companyWebsite: honeypot,
         }),
       });
-      const data = (await response.json()) as { reference?: string; accessKey?: string; status?: string; error?: string };
-      if (!response.ok || !data.reference || !data.accessKey) throw new Error(data.error || "The request could not be sent.");
+      const data = (await response.json()) as { reference?: unknown; accessKey?: unknown; status?: unknown; error?: unknown } | null;
+      if (!response.ok) {
+        throw new Error(typeof data?.error === "string" && data.error ? data.error : "The request could not be sent.");
+      }
+      // Accept only the server's actual creation contract. Malformed
+      // credentials must never replace an existing private ticket or be saved.
+      if (response.status !== 201 || !data ||
+          typeof data.reference !== "string" || !/^RCV-[A-Z0-9]+-[A-F0-9]{6}$/.test(data.reference) ||
+          typeof data.accessKey !== "string" || !/^[a-f0-9]{36}$/.test(data.accessKey) ||
+          data.status !== "open") {
+        throw new Error("The support request could not be confirmed.");
+      }
       const stored: StoredTicket = {
         reference: data.reference,
         accessKey: data.accessKey,
         question: supportQuestion,
-        status: data.status || "open",
+        status: data.status,
       };
       // Invalidate a lookup for the previous ticket before replacing it.
       ++latestTicketStatusRequest.current;
