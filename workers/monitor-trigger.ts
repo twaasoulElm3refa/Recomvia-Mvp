@@ -1,5 +1,37 @@
 type MonitorEnv = { RECOMVIA_ORIGIN: string; MONITORING_SECRET: string };
 
+// A monitoring tick returns only a count and a short status. Bound the actual
+// decoded body, even if the upstream omits or misstates Content-Length.
+const MAX_RESPONSE_BYTES = 4096;
+async function readMonitorResponse(response: Response): Promise<unknown> {
+  const length = response.headers.get("content-length");
+  const mime = response.headers.get("content-type")?.split(";")[0].trim().toLowerCase();
+  if (!response.body || mime !== "application/json" ||
+      (length !== null && (!/^\d+$/.test(length) || Number(length) > MAX_RESPONSE_BYTES))) {
+    void response.body?.cancel().catch(() => {});
+    throw new Error("Invalid monitoring response");
+  }
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder("utf-8", { fatal: true });
+  let bytes = 0, text = "";
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      bytes += value.byteLength;
+      if (bytes > MAX_RESPONSE_BYTES) throw new Error("Oversized response");
+      text += decoder.decode(value, { stream: true });
+    }
+    return JSON.parse(text + decoder.decode()) as unknown;
+  } catch {
+    // JSON parsing and stream errors can contain arbitrary upstream data.
+    void reader.cancel().catch(() => {});
+    throw new Error("Invalid monitoring response");
+  } finally {
+    reader.releaseLock();
+  }
+}
+
 // One leased project per tick. No public HTTP handler and no customer data in logs.
 export async function triggerMonitoring(env: MonitorEnv, transport: typeof fetch = fetch) {
   const origin = new URL(env.RECOMVIA_ORIGIN);
@@ -11,10 +43,13 @@ export async function triggerMonitoring(env: MonitorEnv, transport: typeof fetch
     redirect: "error",
     signal: AbortSignal.timeout(600_000),
   });
-  if (!response.ok) throw new Error(`Monitoring endpoint returned HTTP ${response.status}`);
+  if (!response.ok) {
+    void response.body?.cancel().catch(() => {});
+    throw new Error(`Monitoring endpoint returned HTTP ${response.status}`);
+  }
   // The endpoint leases at most one job. A malformed success response must
   // not hide an incompatible deployment or mark a failed tick as healthy.
-  const result: unknown = await response.json();
+  const result = await readMonitorResponse(response);
   if (!result || typeof result !== "object" || Array.isArray(result))
     throw new Error("Invalid monitoring response");
   const { processed, status } = result as { processed?: unknown; status?: unknown };
