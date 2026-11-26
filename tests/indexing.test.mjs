@@ -120,3 +120,50 @@ test("contact structured data uses the canonical URL of each language route", ()
     assert.equal(schema.about["@id"], base + "/#organization");
   }
 });
+
+
+test("pricing public links preserve the route language without changing private destinations or payment gates", () => {
+  const element = (type, props) => ({ type, props });
+  const PublicShell = () => null;
+  const Link = () => null;
+  const Button = () => null;
+  const icon = () => null;
+  function load(path, dependencies = {}) {
+    const js = ts.transpileModule(readFileSync(path, "utf8"), {
+      compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX },
+    }).outputText;
+    const mod = { exports: {} };
+    new Function("require", "module", "exports", js)((name) => {
+      if (name === "react/jsx-runtime") return { jsx: element, jsxs: element };
+      if (Object.hasOwn(dependencies, name)) return dependencies[name];
+      throw new Error("Unexpected dependency: " + name);
+    }, mod, mod.exports);
+    return mod.exports;
+  }
+  const { PricingContent } = load("app/pricing/pricing-content.tsx", {
+    "lucide-react": { ArrowRight: icon, Check: icon, Coins: icon, Layers3: icon },
+    "@/app/components/navigation-link": { NavigationLink: Link },
+    "@/app/components/public-shell": { PublicShell },
+    "@/components/ui/button": { Button },
+    "@/lib/plans": load("lib/plans.ts"),
+    "@/lib/site-locale": load("lib/site-locale.ts"),
+  });
+  function collect(node, type) {
+    if (Array.isArray(node)) return node.flatMap((child) => collect(child, type));
+    if (!node || typeof node !== "object" || !node.props) return [];
+    return [...(node.type === type ? [node.props] : []), ...collect(node.props.children, type)];
+  }
+  for (const locale of ["en", "ar"]) {
+    const prefix = locale === "ar" ? "/ar" : "";
+    const publicLinks = [prefix || "/", prefix + "/contact?product=fix-credits", prefix + "/billing-policy"];
+    for (const paymentsEnabled of [false, true]) {
+      const shell = PricingContent({ initialLocale: locale, paymentsEnabled });
+      assert.equal(shell.props.initialLocale, locale);
+      const main = shell.props.children(locale);
+      const links = collect(main, Link).map((props) => props.href);
+      const privateLinks = paymentsEnabled ? ["/dashboard", "/subscriptions?plan=essential", "/subscriptions?plan=growth", "/subscriptions?plan=pro"] : [];
+      assert.deepEqual(links.sort(), [...publicLinks, ...privateLinks].sort());
+      assert.equal(collect(main, Button).filter((props) => props.disabled === true).length, paymentsEnabled ? 0 : 4);
+    }
+  }
+});

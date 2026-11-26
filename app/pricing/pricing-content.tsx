@@ -5,6 +5,7 @@ import { NavigationLink as Link } from "@/app/components/navigation-link";
 import { PublicShell, type LocalizedMetadata } from "@/app/components/public-shell";
 import { Button } from "@/components/ui/button";
 import { PLAN_CATALOG } from "@/lib/plans";
+import { publicHrefForLocale } from "@/lib/site-locale";
 
 const pageMetadata: LocalizedMetadata = {
   en: { title: "Recomvia Pricing — Reports, Monitoring & Fix Credits", description: "One free score, a $4.99 initial report, and monthly plans at $24, $49 and $99. Compare detailed and advanced analysis for one or three projects." },
@@ -61,7 +62,7 @@ export function PricingContent({ paymentsEnabled, initialLocale = "en" }: { paym
         <div className="grid items-stretch gap-5 sm:grid-cols-2 xl:grid-cols-5">
           {PLAN_CATALOG.map((plan) => {
             const highlighted = plan.id === "growth";
-            const action = plan.id === "free" ? { href: "/", label: t.start }
+            const action = plan.id === "free" ? { href: publicHrefForLocale("/", locale), label: t.start }
               : plan.id === "starter" ? { href: "/dashboard", label: t.unlockStarter }
               : { href: `/subscriptions?plan=${plan.id}`, label: plan.id === "essential" ? t.subscribeEssential : plan.id === "growth" ? t.subscribeGrowth : t.subscribePro };
             return <article id={plan.id} key={plan.id} className={`relative flex scroll-mt-24 flex-col rounded-3xl border p-6 ${highlighted ? "border-blue-600 bg-[#07111f] text-white ring-4 ring-blue-100" : "border-slate-200 bg-white"}`}>
@@ -93,8 +94,8 @@ export function PricingContent({ paymentsEnabled, initialLocale = "en" }: { paym
           <p className="mt-5 text-sm leading-7 text-slate-500">{t.saved}</p>
         </div>
         <div className="mt-8 grid gap-6 lg:grid-cols-2">
-          <section className="rounded-3xl bg-[#07111f] p-7 text-white"><Coins className="size-7 text-cyan-300" aria-hidden="true" /><h2 className="mt-4 text-2xl font-extrabold">{t.creditsTitle}</h2><p className="mt-4 text-sm leading-7 text-slate-300">{t.creditsText}</p><p className="mt-4 text-xs leading-6 text-slate-400">{t.creditNotice}</p><Button asChild className="mt-6 rounded-xl bg-white text-[#07111f] hover:bg-slate-100"><Link href="/contact?product=fix-credits">{t.creditRequest}</Link></Button></section>
-          <section className="rounded-3xl border border-slate-200 p-7"><Layers3 className="size-7 text-blue-600" aria-hidden="true" /><h2 className="mt-4 text-2xl font-extrabold">{t.differenceTitle}</h2><p className="mt-4 text-sm leading-8 text-slate-600">{t.difference}</p><Link href="/billing-policy" className="mt-6 inline-flex text-sm font-bold text-blue-700 underline underline-offset-4">{t.billing}</Link></section>
+          <section className="rounded-3xl bg-[#07111f] p-7 text-white"><Coins className="size-7 text-cyan-300" aria-hidden="true" /><h2 className="mt-4 text-2xl font-extrabold">{t.creditsTitle}</h2><p className="mt-4 text-sm leading-7 text-slate-300">{t.creditsText}</p><p className="mt-4 text-xs leading-6 text-slate-400">{t.creditNotice}</p><Button asChild className="mt-6 rounded-xl bg-white text-[#07111f] hover:bg-slate-100"><Link href={publicHrefForLocale("/contact?product=fix-credits", locale)}>{t.creditRequest}</Link></Button></section>
+          <section className="rounded-3xl border border-slate-200 p-7"><Layers3 className="size-7 text-blue-600" aria-hidden="true" /><h2 className="mt-4 text-2xl font-extrabold">{t.differenceTitle}</h2><p className="mt-4 text-sm leading-8 text-slate-600">{t.difference}</p><Link href={publicHrefForLocale("/billing-policy", locale)} className="mt-6 inline-flex text-sm font-bold text-blue-700 underline underline-offset-4">{t.billing}</Link></section>
         </div>
       </section>
     </main>;
