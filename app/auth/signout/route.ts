@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { SESSION_COOKIE, authProvider, getAppOrigin, signOutPath } from "@/app/auth";
+import { OAUTH_STATE_COOKIE, OAUTH_VERIFIER_COOKIE, SESSION_COOKIE, authProvider, getAppOrigin, signOutPath } from "@/app/auth";
 
 export const dynamic = "force-dynamic";
 export const runtime = "edge";
@@ -13,7 +13,10 @@ export async function GET(request: Request) {
   response.headers.set("Cache-Control", "private, no-store, max-age=0");
   response.headers.set("X-Content-Type-Options", "nosniff");
   if (!chatgpt) {
-    response.cookies.set(SESSION_COOKIE, "", { httpOnly: true, secure: true, sameSite: "lax", path: "/", maxAge: 0 });
+    // Signing out also abandons any unfinished Google sign-in in this browser.
+    for (const name of [SESSION_COOKIE, OAUTH_STATE_COOKIE, OAUTH_VERIFIER_COOKIE]) {
+      response.cookies.set(name, "", { httpOnly: true, secure: true, sameSite: "lax", path: "/", maxAge: 0 });
+    }
   }
   return response;
 }
