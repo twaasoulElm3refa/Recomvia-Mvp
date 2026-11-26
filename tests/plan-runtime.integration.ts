@@ -406,6 +406,32 @@ test("monitor trigger refuses missing configuration and uses the protected endpo
   assert.equal(calls, 1);
 });
 
+test("monitor trigger accepts only an idle or completed single-job response", async () => {
+  const config = { RECOMVIA_ORIGIN: "https://recomvia.test", MONITORING_SECRET: secret };
+  for (const body of [{ processed: 0 }, { processed: 1, status: "completed" }]) {
+    await triggerMonitoring(config, async () => Response.json(body));
+  }
+  for (const body of [null, [], {}, { processed: "0" }, { processed: false },
+    { processed: 0, status: "completed" }, { processed: 2, status: "completed" },
+    { processed: -1, status: "completed" }, { processed: 1.5, status: "completed" },
+    { processed: 1 }, { processed: 1, status: {} }]) {
+    await assert.rejects(triggerMonitoring(config, async () => Response.json(body)), /Invalid monitoring response/);
+  }
+});
+
+test("monitor trigger reports failed jobs without logging untrusted status text", async () => {
+  const config = { RECOMVIA_ORIGIN: "https://recomvia.test", MONITORING_SECRET: secret };
+  for (const status of ["monitor_failed", "subscription_required", "private_customer_data"]) {
+    await assert.rejects(
+      triggerMonitoring(config, async () => Response.json({ processed: 1, status })),
+      { message: "Monitoring job did not complete" },
+    );
+  }
+  await assert.rejects(triggerMonitoring(config, async () => new Response("not JSON", { status: 200 })));
+  await assert.rejects(triggerMonitoring(config, async () => new Response("unavailable", { status: 503 })),
+    /Monitoring endpoint returned HTTP 503/);
+});
+
 test("a repeated provider model cannot masquerade as multiple independent models", async () => {
   await setup("essential", async () => {
     const body = await read(await POST(request(person)));
