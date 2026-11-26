@@ -397,6 +397,7 @@ test("Google callback bounds both identity provider requests with separate 10-se
     };
     globalThis.fetch = async (url, options) => {
       assert.equal(options.signal, signals[signals.length - 1], `Missing timeout on ${url}`);
+      assert.equal(options.redirect, "error", `Provider redirects must be blocked on ${url}`);
       if (url === "https://oauth2.googleapis.com/token") {
         return { ok: true, json: async () => ({ access_token: "test-token" }) };
       }
@@ -577,5 +578,37 @@ test("auth entry always resolves the current provider and prevents cached redire
     }
   } finally {
     credentials.AUTH_PROVIDER = "google";
+  }
+});
+
+
+test("Google OAuth rejects redirects at either provider endpoint without following them or creating a session", async () => {
+  const origin = "https://recomvia-staging.recomvia.workers.dev";
+  const originalFetch = globalThis.fetch;
+  const tokenUrl = "https://oauth2.googleapis.com/token";
+  const profileUrl = "https://openidconnect.googleapis.com/v1/userinfo";
+  try {
+    for (const redirectingUrl of [tokenUrl, profileUrl]) {
+      const started = await start.GET(request(origin + "/auth/google"));
+      const { request: incoming } = callbackRequest(origin, started);
+      const calls = [];
+      globalThis.fetch = async (url, options) => {
+        calls.push(url);
+        assert.equal(options.redirect, "error");
+        // Fetch with redirect:error rejects an HTTP redirect before following it.
+        if (url === redirectingUrl) throw new TypeError("Unexpected redirect");
+        if (url === tokenUrl) return { ok: true, json: async () => ({ access_token: "test-token" }) };
+        throw new Error("Unexpected provider request");
+      };
+      const response = await callback.GET(incoming);
+      assert.equal(response.location, origin + "/?auth_error=authentication_failed");
+      assert.equal(response.headers.get("Cache-Control"), "no-store");
+      assert.equal(response.cookies.get(auth.SESSION_COOKIE), undefined);
+      assert.equal(response.cookies.get(auth.OAUTH_STATE_COOKIE).options.maxAge, 0);
+      assert.equal(response.cookies.get(auth.OAUTH_VERIFIER_COOKIE).options.maxAge, 0);
+      assert.deepEqual(calls, redirectingUrl === tokenUrl ? [tokenUrl] : [tokenUrl, profileUrl]);
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
   }
 });
