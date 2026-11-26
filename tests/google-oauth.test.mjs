@@ -612,3 +612,40 @@ test("Google OAuth rejects redirects at either provider endpoint without followi
     globalThis.fetch = originalFetch;
   }
 });
+
+test("Google OAuth start safely rejects missing credentials and recovers after configuration", async () => {
+  const origin = "https://recomvia-staging.recomvia.workers.dev";
+  const originalFetch = globalThis.fetch;
+  let calls = 0;
+  globalThis.fetch = async () => { calls++; throw new Error("Login start must not contact the provider"); };
+  try {
+    for (const key of ["GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "AUTH_SECRET"]) {
+      const configured = credentials[key];
+      try {
+        for (const missing of [undefined, "", "   "]) {
+          credentials[key] = missing;
+          const response = await start.GET(request(origin + "/auth/google"));
+          assert.equal(response.location, origin + "/?auth_error=authentication_failed");
+          assert.equal(response.headers.get("Cache-Control"), "no-store");
+          assert.equal(response.headers.get("X-Content-Type-Options"), "nosniff");
+          assert.equal(response.cookies.get(auth.SESSION_COOKIE), undefined);
+          for (const name of [auth.OAUTH_STATE_COOKIE, auth.OAUTH_VERIFIER_COOKIE]) {
+            assert.equal(response.cookies.get(name).value, "");
+            assert.deepEqual(response.cookies.get(name).options, {
+              httpOnly: true, secure: true, sameSite: "lax", path: "/", maxAge: 0,
+            });
+          }
+        }
+      } finally {
+        credentials[key] = configured;
+      }
+    }
+    const restored = await start.GET(request(origin + "/auth/google"));
+    assert.equal(new URL(restored.location).origin, "https://accounts.google.com");
+    assert.equal(restored.cookies.get(auth.OAUTH_STATE_COOKIE).options.maxAge, 600);
+    assert.equal(restored.cookies.get(auth.OAUTH_VERIFIER_COOKIE).options.maxAge, 600);
+    assert.equal(calls, 0);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
