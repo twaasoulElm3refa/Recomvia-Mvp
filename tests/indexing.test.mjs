@@ -73,3 +73,50 @@ test("sitemap pairs every public English and Arabic URL with reciprocal hreflang
     assert.ok(!/\/(api|dashboard|report|fix-center|auth|subscriptions)(\/|$)/.test(new URL(row.url).pathname), `private route in sitemap: ${row.url}`);
   }
 });
+
+
+test("contact structured data uses the canonical URL of each language route", () => {
+  const base = "https://recomvia.test";
+  const element = (type, props) => ({ type, props });
+  const PublicShell = () => null;
+  const ContactForm = () => null;
+  const icon = () => null;
+  function load(path, dependencies) {
+    const js = ts.transpileModule(readFileSync(path, "utf8"), {
+      compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX },
+    }).outputText;
+    const mod = { exports: {} };
+    new Function("require", "module", "exports", js)((name) => {
+      if (name === "react/jsx-runtime") return { jsx: element, jsxs: element };
+      if (name === "@/lib/articles" || name === "@/lib/site-config") return { SITE_URL: base };
+      if (Object.hasOwn(dependencies, name)) return dependencies[name];
+      throw new Error("Unexpected dependency: " + name);
+    }, mod, mod.exports);
+    return mod.exports;
+  }
+  const { ContactContent } = load("app/contact/contact-content.tsx", {
+    "lucide-react": { Bot: icon, Headphones: icon, MessagesSquare: icon, ShieldCheck: icon },
+    "@/app/components/public-shell": { PublicShell },
+    "./contact-form": { ContactForm },
+  });
+  for (const [locale, path, dependency, expectedPath] of [
+    ["en", "app/contact/page.tsx", "./contact-content", "/contact"],
+    ["ar", "app/ar/contact/page.tsx", "@/app/contact/contact-content", "/ar/contact"],
+  ]) {
+    const page = load(path, { [dependency]: { ContactContent } });
+    const route = page.default();
+    const shell = ContactContent(route.props);
+    assert.equal(shell.type, PublicShell);
+    assert.equal(shell.props.initialLocale, locale);
+    const main = shell.props.children(locale);
+    const script = main.props.children.find((child) => child.type === "script");
+    assert.equal(script.props.type, "application/ld+json");
+    const schema = JSON.parse(script.props.dangerouslySetInnerHTML.__html);
+    assert.equal(schema["@type"], "ContactPage");
+    assert.equal(schema.inLanguage, locale);
+    assert.equal(schema.url, base + expectedPath);
+    assert.equal(schema.url, page.metadata.alternates.canonical);
+    assert.equal(schema.url, page.metadata.openGraph.url);
+    assert.equal(schema.about["@id"], base + "/#organization");
+  }
+});

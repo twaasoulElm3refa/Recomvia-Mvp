@@ -26,7 +26,7 @@ const copy = {
 export function ContactContent({ initialLocale = "en" }: { initialLocale?: "en" | "ar" }) {
   return <PublicShell pageMetadata={pageMetadata} initialLocale={initialLocale}>{locale => {
     const t = copy[locale];
-    const schema = { "@context": "https://schema.org", "@type": "ContactPage", name: locale === "ar" ? "اتصل بـ Recomvia" : "Contact Recomvia", url: `${SITE_URL}/contact`, about: { "@id": `${SITE_URL}/#organization` }, inLanguage: locale };
+    const schema = { "@context": "https://schema.org", "@type": "ContactPage", name: locale === "ar" ? "اتصل بـ Recomvia" : "Contact Recomvia", url: `${SITE_URL}${locale === "ar" ? "/ar/contact" : "/contact"}`, about: { "@id": `${SITE_URL}/#organization` }, inLanguage: locale };
     return <main>
       <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(schema).replace(/</g, "\\u003c") }} />
       <section className="relative overflow-hidden border-b border-slate-200 bg-[#07111f] text-white"><div className="signal-grid absolute inset-0 opacity-20" /><div className="relative mx-auto max-w-[1000px] px-5 py-16 sm:px-8 sm:py-20"><p className="text-sm font-bold uppercase tracking-[.16em] text-cyan-300">{t.eyebrow}</p><h1 className="mt-4 max-w-4xl text-4xl font-extrabold tracking-[-.05em] sm:text-6xl">{t.title}</h1><p className="mt-5 max-w-3xl text-lg leading-8 text-slate-300">{t.intro}</p></div></section>
