@@ -111,3 +111,91 @@ test("valid streamed UTF-8 JSON still creates a planning-only review", async () 
   assert.equal(result.creditsCharged, 0);
   assert.deepEqual(writes, [["customer-1", "scan-1", "finding_1"]]);
 });
+
+
+test("review upload deadline is not extended by chunks or slow upstream cancellation", async (t) => {
+  const before = writes.length;
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  let controller;
+  let cancelled = false;
+  let finishCleanup;
+  const cleanup = new Promise((resolve) => { finishCleanup = resolve; });
+  const body = new ReadableStream({
+    start(value) {
+      controller = value;
+      value.enqueue(new TextEncoder().encode(valid.slice(0, 12)));
+    },
+    cancel() { cancelled = true; return cleanup; },
+  });
+  const pending = POST(request(body));
+  try {
+    await new Promise((resolve) => setImmediate(resolve));
+    t.mock.timers.tick(4999);
+    assert.equal(cancelled, false);
+    controller.enqueue(new TextEncoder().encode(valid.slice(12)));
+    await new Promise((resolve) => setImmediate(resolve));
+    t.mock.timers.tick(1);
+    const response = await Promise.race([pending, new Promise((resolve) => setImmediate(() => resolve(null)))]);
+    assert.equal(cancelled, true);
+    assert.ok(response, "deadline must not await upstream cancellation");
+    assert.equal(response.status, 408);
+    assert.deepEqual(await response.json(), { code: "invalid_request" });
+    privateResponse(response);
+    assert.equal(body.locked, false);
+    assert.equal(writes.length, before);
+  } finally {
+    if (!cancelled) controller.close();
+    finishCleanup();
+    await pending;
+    t.mock.timers.reset();
+  }
+});
+
+test("review rejects malformed and oversized streams without awaiting cancellation", async () => {
+  const before = writes.length;
+  for (const [bytes, status] of [[new Uint8Array([0xff]), 400], [new Uint8Array(501), 413]]) {
+    let controller;
+    let cancelled = false;
+    let finishCleanup;
+    const cleanup = new Promise((resolve) => { finishCleanup = resolve; });
+    const body = new ReadableStream({
+      start(value) { controller = value; value.enqueue(bytes); },
+      cancel() { cancelled = true; return cleanup; },
+    });
+    const pending = POST(request(body));
+    try {
+      const response = await Promise.race([pending, new Promise((resolve) => setImmediate(() => resolve(null)))]);
+      assert.equal(cancelled, true);
+      assert.ok(response, "invalid stream must not await upstream cancellation");
+      assert.equal(response.status, status);
+      privateResponse(response);
+      assert.equal(body.locked, false);
+      assert.equal(writes.length, before);
+    } finally {
+      if (!cancelled) controller.close();
+      finishCleanup();
+      await pending;
+    }
+  }
+});
+
+test("completed review clears its deadline without changing planning-only behavior", async (t) => {
+  const before = writes.length;
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  try {
+    const req = request(split(valid, 10));
+    const response = await POST(req);
+    assert.equal(response.status, 201);
+    privateResponse(response);
+    const result = await response.json();
+    assert.equal(result.executionEnabled, false);
+    assert.equal(result.approved, false);
+    assert.equal(result.creditsCharged, 0);
+    assert.equal(req.body.locked, false);
+    t.mock.timers.tick(5000);
+    assert.equal(writes.length, before + 1);
+    assert.deepEqual(writes.at(-1), ["customer-1", "scan-1", "finding_1"]);
+  } finally {
+    t.mock.timers.reset();
+  }
+});
