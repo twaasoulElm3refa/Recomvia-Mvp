@@ -457,3 +457,55 @@ test("Google callback rejects malformed identity claims without creating session
     globalThis.fetch = originalFetch;
   }
 });
+
+
+test("Sites blocks direct and stale Google OAuth routes before credentials or network access", async () => {
+  const origin = "https://recomvia-ai-visibility.omarghazi85.chatgpt.site";
+  const started = await start.GET(request(origin + "/auth/google"));
+  const { request: incoming } = callbackRequest(origin, started);
+  const originalFetch = globalThis.fetch;
+  const originalClientId = credentials.GOOGLE_CLIENT_ID;
+  let calls = 0;
+  credentials.AUTH_PROVIDER = "chatgpt";
+  credentials.GOOGLE_CLIENT_ID = "";
+  globalThis.fetch = async () => { calls++; throw new Error("Inactive provider must not contact Google"); };
+  try {
+    const direct = await start.GET(request(origin + "/auth/google"));
+    const stale = await callback.GET(incoming);
+    for (const response of [direct, stale]) {
+      assert.equal(response.location, origin + "/auth/start");
+      assert.equal(response.headers.get("Cache-Control"), "private, no-store, max-age=0");
+      assert.equal(response.headers.get("X-Content-Type-Options"), "nosniff");
+      assert.equal(response.cookies.get(auth.SESSION_COOKIE), undefined);
+    }
+    assert.equal(direct.cookies.get(auth.OAUTH_STATE_COOKIE), undefined);
+    assert.equal(direct.cookies.get(auth.OAUTH_VERIFIER_COOKIE), undefined);
+    assert.equal(stale.cookies.get(auth.OAUTH_STATE_COOKIE).options.maxAge, 0);
+    assert.equal(stale.cookies.get(auth.OAUTH_VERIFIER_COOKIE).options.maxAge, 0);
+    assert.equal(calls, 0);
+  } finally {
+    credentials.AUTH_PROVIDER = "google";
+    credentials.GOOGLE_CLIENT_ID = originalClientId;
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("auth entry always resolves the current provider and prevents cached redirects", async () => {
+  const origin = "https://recomvia.test";
+  try {
+    for (const [provider, path] of [
+      ["google", "/auth/google"],
+      ["chatgpt", "/signin-with-chatgpt?return_to=%2Fdashboard"],
+      ["google", "/auth/google"],
+    ]) {
+      credentials.AUTH_PROVIDER = provider;
+      const response = authStart.GET(request(origin + "/auth/start"));
+      assert.equal(response.location, origin + path);
+      assert.equal(response.headers.get("Cache-Control"), "private, no-store, max-age=0");
+      assert.equal(response.headers.get("X-Content-Type-Options"), "nosniff");
+      assert.equal(response.cookies.values.size, 0);
+    }
+  } finally {
+    credentials.AUTH_PROVIDER = "google";
+  }
+});
