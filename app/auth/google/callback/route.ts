@@ -36,6 +36,8 @@ export async function GET(request: NextRequest) {
     const { clientId, clientSecret } = getGoogleCredentials();
     const tokenResponse = await fetch("https://oauth2.googleapis.com/token", {
       method: "POST",
+      // Never forward OAuth credentials or the authorization code through redirects.
+      redirect: "error",
       headers: { "content-type": "application/x-www-form-urlencoded" },
       // A stalled identity provider must not hold the callback worker indefinitely.
       signal: AbortSignal.timeout(10_000),
@@ -47,7 +49,7 @@ export async function GET(request: NextRequest) {
     if (!tokenResponse.ok || typeof accessToken !== "string" ||
         accessToken.length < 1 || accessToken.length > 4_096 ||
         !/^[\x21-\x7e]+$/.test(accessToken)) return authError(appOrigin, "token_exchange_failed");
-    const profileResponse = await fetch("https://openidconnect.googleapis.com/v1/userinfo", { headers: { authorization: `Bearer ${accessToken}` }, signal: AbortSignal.timeout(10_000) });
+    const profileResponse = await fetch("https://openidconnect.googleapis.com/v1/userinfo", { headers: { authorization: `Bearer ${accessToken}` }, redirect: "error", signal: AbortSignal.timeout(10_000) });
     const profile = (await profileResponse.json()) as GoogleProfile;
     // Bound verified identity claims before signing a session or displaying them.
     // Regular Arabic and Latin display names remain valid; invisible controls do not.
