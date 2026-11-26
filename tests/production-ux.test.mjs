@@ -1124,3 +1124,130 @@ test("human review rejects unsafe confirmations, isolates errors and permits an 
   assert.equal(h.alert(), undefined);
   assert.equal(h.pending.length, 2);
 });
+
+
+function staffProposalHarness() {
+  const state = [];
+  const refs = [];
+  const pending = [];
+  let stateIndex = 0;
+  let refIndex = 0;
+  let refreshes = 0;
+  const fakeReact = {
+    ...React,
+    useState: (initial) => {
+      const index = stateIndex++;
+      if (!(index in state)) state[index] = initial;
+      return [state[index], (value) => {
+        state[index] = typeof value === "function" ? value(state[index]) : value;
+      }];
+    },
+    useRef: (initial) => refs[refIndex++] ??= { current: initial },
+  };
+  const Input = () => null;
+  const Textarea = () => null;
+  const js = ts.transpileModule(source("app/support/fix-reviews/proposal-form.tsx"), {
+    compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX, target: ts.ScriptTarget.ES2022 },
+  }).outputText;
+  const loadedModule = { exports: {} };
+  const fakeFetch = (url, options) => new Promise((resolve) => pending.push({
+    url, body: JSON.parse(options.body),
+    finish: (payload, status = 201) => resolve(Response.json(payload, { status })),
+  }));
+  const formMocks = {
+    ...mocks, react: fakeReact,
+    "next/navigation": { useRouter: () => ({ refresh: () => { refreshes++; } }) },
+    "@/components/ui/input": { Input },
+    "@/components/ui/textarea": { Textarea },
+  };
+  new Function("require", "module", "exports", "fetch", js)((id) =>
+    formMocks[id] ?? require(id), loadedModule, loadedModule.exports, fakeFetch);
+  const render = () => {
+    stateIndex = 0;
+    refIndex = 0;
+    return loadedModule.exports.FixProposalForm({ fixId: "review_one", currentVersion: 2 });
+  };
+  const fields = () => {
+    const found = [];
+    function walk(node) {
+      if (!React.isValidElement(node)) return;
+      if (node.type === Input || node.type === Textarea) found.push(node.props);
+      React.Children.toArray(node.props.children).forEach(walk);
+    }
+    walk(render());
+    assert.equal(found.length, 4);
+    return found;
+  };
+  const submit = () => render().props.onSubmit;
+  const fill = (values) => values.forEach((value, index) => fields()[index].onChange({ target: { value } }));
+  const button = () => findAssistantElement(render(), (node) => node.type === Button).props;
+  const confirmation = (version = 3) => ({
+    proposal: { fixId: "review_one", version }, applied: false, approved: false, creditsCharged: 0,
+  });
+  return { pending, fields, submit, fill, button, confirmation, refreshes: () => refreshes };
+}
+
+const staffDraftValues = ["نطاق التغيير", "نص مقترح للتعديل", "سبب واضح للتعديل", "خطة تراجع واضحة"];
+const staffSubmitEvent = { preventDefault() {} };
+
+test("staff proposal draft saves once, protects edits and permits a deliberate new version", async () => {
+  const h = staffProposalHarness();
+  h.fill(staffDraftValues);
+  const submit = h.submit();
+  const oldEdit = h.fields()[0].onChange;
+  const first = submit(staffSubmitEvent);
+  await submit(staffSubmitEvent);
+  assert.equal(h.pending.length, 1);
+  assert.equal(h.pending[0].url, "/api/fix-proposals");
+  assert.deepEqual(h.pending[0].body, {
+    fixId: "review_one", scope: staffDraftValues[0], proposedText: staffDraftValues[1],
+    rationale: staffDraftValues[2], rollbackPlan: staffDraftValues[3],
+  });
+  assert.ok(h.fields().every((field) => field.disabled));
+  assert.equal(h.button().disabled, true);
+  oldEdit({ target: { value: "Unintended edit" } });
+  assert.deepEqual(h.fields().map((field) => field.value), staffDraftValues);
+  h.pending[0].finish(h.confirmation());
+  await first;
+  assert.equal(h.refreshes(), 1);
+  assert.deepEqual(h.fields().map((field) => field.value), ["", "", "", ""]);
+  oldEdit({ target: { value: "Stale edit" } });
+  await submit(staffSubmitEvent);
+  assert.equal(h.pending.length, 1);
+  assert.equal(h.fields()[0].value, "");
+  h.fill(staffDraftValues);
+  const next = h.submit()(staffSubmitEvent);
+  assert.equal(h.pending.length, 2);
+  h.pending[1].finish(h.confirmation(4));
+  await next;
+  assert.equal(h.refreshes(), 2);
+});
+
+test("staff proposal preserves drafts on failure or unsafe confirmation and permits retry", async () => {
+  const h = staffProposalHarness();
+  h.fill(["    ", ...staffDraftValues.slice(1)]);
+  await h.submit()(staffSubmitEvent);
+  assert.equal(h.pending.length, 0);
+  h.fill(staffDraftValues);
+  const invalid = [
+    [{ code: "temporarily_unavailable" }, 503],
+    [{ ...h.confirmation(), creditsCharged: 1 }, 201],
+    [{ ...h.confirmation(), approved: true }, 201],
+    [{ ...h.confirmation(), applied: true }, 201],
+    [{ ...h.confirmation(), proposal: { fixId: "review_other", version: 3 } }, 201],
+    [h.confirmation(2), 201],
+  ];
+  for (const [payload, status] of invalid) {
+    const save = h.submit()(staffSubmitEvent);
+    h.pending.at(-1).finish(payload, status);
+    await save;
+    assert.deepEqual(h.fields().map((field) => field.value), staffDraftValues);
+    assert.ok(h.fields().every((field) => !field.disabled));
+    assert.equal(h.refreshes(), 0);
+  }
+  const retry = h.submit()(staffSubmitEvent);
+  h.pending.at(-1).finish(h.confirmation());
+  await retry;
+  assert.equal(h.refreshes(), 1);
+  assert.deepEqual(h.fields().map((field) => field.value), ["", "", "", ""]);
+});
