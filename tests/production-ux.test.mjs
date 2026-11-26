@@ -24,6 +24,7 @@ const plans = load("lib/plans.ts");
 const mocks = {
   "lucide-react": icons,
   "@/lib/plans": plans,
+  "@/lib/site-locale": load("lib/site-locale.ts"),
   "@/app/components/navigation-link": { NavigationLink: Link },
   "@/app/components/public-shell": { PublicShell: ({ children }) => children(locale) },
   "@/components/ui/button": { Button },
@@ -40,13 +41,13 @@ for (const lang of ["en", "ar"]) {
         const html = renderToStaticMarkup(React.createElement(component, { paymentsEnabled: enabled, locale: lang }));
         if (!enabled) {
           assert.equal((html.match(/<button disabled=""/g) || []).length, 4);
-          assert.match(html, /href="\/"/);
+          assert.ok(html.includes(`href="${component === PricingContent && lang === "ar" ? "/ar" : "/"}"`));
           assert.doesNotMatch(html, /href="\/subscriptions\?/);
           assert.ok(html.includes(lang === "ar" ? "الدفع الإلكتروني غير متاح مؤقتًا." : "Online payments are temporarily unavailable."));
         } else {
           assert.doesNotMatch(html, /<button disabled=""/);
           for (const plan of ["essential", "growth", "pro"]) assert.ok(html.includes(`/subscriptions?plan=${plan}`));
-          assert.match(html, /href="\/"/);
+          assert.ok(html.includes(`href="${component === PricingContent && lang === "ar" ? "/ar" : "/"}"`));
           assert.doesNotMatch(html, /Online payments are temporarily unavailable\.|الدفع الإلكتروني غير متاح مؤقتًا\./);
         }
       }
