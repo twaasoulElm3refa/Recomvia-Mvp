@@ -491,13 +491,13 @@ test("assistant does not restore an old ticket after a newer ticket is created",
   const old = startAssistantTicketCheck(harness, "RCV-OLD");
   await createAssistantTicket(harness, "RCV-NEW");
   const count = harness.writes.length;
-  old.finish({ status: "answered", humanReply: "رد قديم" });
+  old.finish({ publicId: "RCV-OLD", status: "answered", humanReply: "رد قديم", updatedAt: "2026-11-26 09:00:00" });
   await settleAssistantFetch();
   assert.equal(harness.writes.length, count);
   assert.equal(harness.stored.length, 2);
   assert.equal(harness.stored.at(-1)[1].reference, "RCV-NEW");
   const current = startAssistantTicketCheck(harness, "RCV-NEW");
-  current.finish({ status: "answered", humanReply: "رد جديد" });
+  current.finish({ publicId: "RCV-NEW", status: "answered", humanReply: "رد جديد", updatedAt: "2026-11-26 09:00:00" });
   await settleAssistantFetch();
   assert.equal(harness.stored.at(-1)[1].humanReply, "رد جديد");
   assert.equal(harness.stored.at(-1)[1].reference, "RCV-NEW");
@@ -1376,4 +1376,38 @@ test("assistant exposes accessible names and busy state throughout bilingual sup
     assert.equal(field(labels[2]).props.value, question);
     assert.ok(find((node) => node.props.role === "alert"));
   }
+});
+
+
+test("assistant rejects unrelated or malformed status replies and preserves the previous private reply", async () => {
+  const ticket = { reference: "RCV-ABC-123ABC", accessKey: "a".repeat(36), question: "A support question", status: "answered", humanReply: "Original reply", updatedAt: "2026-11-25 09:00:00" };
+  const h = assistantHarness(JSON.stringify(ticket));
+  h.restoreTicket();
+  const valid = { publicId: ticket.reference, status: "answered", humanReply: "New verified reply", updatedAt: "2026-11-26 09:00:00" };
+  const check = async (payload) => {
+    const button = findAssistantElement(h.render(), (node) =>
+      node.props.variant === "outline" && typeof node.props.onClick === "function");
+    assert.ok(button);
+    assert.equal(button.props.disabled, false);
+    button.props.onClick();
+    assert.deepEqual(h.pending.at(-1).body, { reference: ticket.reference, accessKey: ticket.accessKey });
+    h.pending.at(-1).finish(payload);
+    await settleAssistantFetch();
+  };
+  for (const payload of [
+    null, [], {}, { ...valid, publicId: "RCV-OTHER-123ABC" },
+    { ...valid, status: "unknown" }, { ...valid, humanReply: { unsafe: true } },
+    { ...valid, humanReply: undefined }, { ...valid, updatedAt: 42 },
+    { ...valid, updatedAt: "" },
+  ]) {
+    await check(payload);
+    assert.equal(h.stored.length, 0);
+    assert.ok(findAssistantElement(h.render(), (node) => node.props.children === ticket.humanReply));
+    assert.ok(findAssistantElement(h.render(), (node) => node.props.role === "alert"));
+  }
+  await check(valid);
+  assert.equal(h.stored.length, 1);
+  assert.deepEqual(h.stored[0][1], { ...ticket, humanReply: valid.humanReply, updatedAt: valid.updatedAt });
+  assert.ok(findAssistantElement(h.render(), (node) => node.props.children === valid.humanReply));
+  assert.equal(findAssistantElement(h.render(), (node) => node.props.role === "alert"), undefined);
 });
