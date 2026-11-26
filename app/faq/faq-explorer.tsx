@@ -5,7 +5,7 @@ import { Search, SlidersHorizontal } from "lucide-react";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { readStoredSiteLocale, SITE_LOCALE_EVENT, storeSiteLocale, type SiteLocale } from "@/lib/site-locale";
+import { pageDisplayLocale, readStoredSiteLocale, SITE_LOCALE_EVENT, storeSiteLocale, type SiteLocale } from "@/lib/site-locale";
 
 export type PublicFaq = {
   id: string;
@@ -35,7 +35,7 @@ export function FaqExplorer({ entries, initialLocale = "en" }: { entries: Public
   useEffect(() => {
     const syncLocale = () => {
       const pathname = window.location.pathname;
-      setLanguage(pathname === "/ar/faq" ? "ar" : pathname === "/faq" ? "en" : readStoredSiteLocale("en"));
+      setLanguage(pageDisplayLocale(pathname, readStoredSiteLocale(initialLocale)));
     };
     const timer = window.setTimeout(syncLocale, 0);
     window.addEventListener(SITE_LOCALE_EVENT, syncLocale);
@@ -45,11 +45,13 @@ export function FaqExplorer({ entries, initialLocale = "en" }: { entries: Public
       window.removeEventListener(SITE_LOCALE_EVENT, syncLocale);
       window.removeEventListener("storage", syncLocale);
     };
-  }, []);
+  }, [initialLocale]);
 
   function chooseLanguage(locale: SiteLocale) {
+    if (locale === language) return;
     storeSiteLocale(locale);
-    window.location.assign(locale === "ar" ? "/ar/faq" : "/faq");
+    const path = locale === "ar" ? "/ar/faq" : "/faq";
+    window.location.assign(`${path}${window.location.search}${window.location.hash}`);
   }
 
   const filtered = useMemo(() => {
@@ -62,22 +64,22 @@ export function FaqExplorer({ entries, initialLocale = "en" }: { entries: Public
   }, [category, entries, query]);
 
   return (
-    <div lang={language}>
+    <div lang={language} dir={language === "ar" ? "rtl" : "ltr"}>
       <div className="rounded-[24px] border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
         <div className="flex flex-col gap-3 sm:flex-row">
           <div className="relative flex-1">
-            <Search className="absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-slate-400" />
-            <Input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={language === "ar" ? "ابحث في الأسئلة والإجابات…" : "Search questions and answers…"} className="h-12 rounded-xl border-slate-200 pl-10" dir={language === "ar" ? "rtl" : "ltr"} />
+            <Search aria-hidden="true" className="absolute start-3.5 top-1/2 size-4 -translate-y-1/2 text-slate-400" />
+            <Input aria-label={language === "ar" ? "ابحث في الأسئلة والإجابات" : "Search questions and answers"} value={query} onChange={(event) => setQuery(event.target.value)} placeholder={language === "ar" ? "ابحث في الأسئلة والإجابات…" : "Search questions and answers…"} className="h-12 rounded-xl border-slate-200 ps-10" dir={language === "ar" ? "rtl" : "ltr"} />
           </div>
           <div className="flex rounded-xl bg-slate-100 p-1">
-            <Button type="button" variant="ghost" onClick={() => chooseLanguage("ar")} className={`h-10 flex-1 rounded-lg px-5 font-bold sm:flex-none ${language === "ar" ? "bg-white text-blue-700 shadow-sm" : "text-slate-500"}`}>العربية</Button>
-            <Button type="button" variant="ghost" onClick={() => chooseLanguage("en")} className={`h-10 flex-1 rounded-lg px-5 font-bold sm:flex-none ${language === "en" ? "bg-white text-blue-700 shadow-sm" : "text-slate-500"}`}>English</Button>
+            <Button type="button" variant="ghost" aria-pressed={language === "ar"} onClick={() => chooseLanguage("ar")} className={`h-10 flex-1 rounded-lg px-5 font-bold sm:flex-none ${language === "ar" ? "bg-white text-blue-700 shadow-sm" : "text-slate-500"}`}>العربية</Button>
+            <Button type="button" variant="ghost" aria-pressed={language === "en"} onClick={() => chooseLanguage("en")} className={`h-10 flex-1 rounded-lg px-5 font-bold sm:flex-none ${language === "en" ? "bg-white text-blue-700 shadow-sm" : "text-slate-500"}`}>English</Button>
           </div>
         </div>
         <div className="mt-4 flex items-center gap-2 overflow-x-auto pb-1">
-          <SlidersHorizontal className="mr-1 size-4 shrink-0 text-slate-400" />
+          <SlidersHorizontal aria-hidden="true" className="me-1 size-4 shrink-0 text-slate-400" />
           {categories.map((item) => (
-            <button key={item} type="button" onClick={() => setCategory(item)} className={`shrink-0 rounded-full border px-3 py-1.5 text-xs font-bold transition ${category === item ? "border-blue-600 bg-blue-600 text-white" : "border-slate-200 bg-white text-slate-600 hover:border-blue-300"}`}>
+            <button key={item} type="button" aria-pressed={category === item} onClick={() => setCategory(item)} className={`shrink-0 rounded-full border px-3 py-1.5 text-xs font-bold transition ${category === item ? "border-blue-600 bg-blue-600 text-white" : "border-slate-200 bg-white text-slate-600 hover:border-blue-300"}`}>
               {language === "ar" ? categoryLabels[item] : item}
             </button>
           ))}
@@ -102,7 +104,7 @@ export function FaqExplorer({ entries, initialLocale = "en" }: { entries: Public
           <div className="py-16 text-center"><p className="font-extrabold text-slate-900">{language === "ar" ? "لا توجد إجابة مطابقة" : "No matching answer"}</p><p className="mt-2 text-sm text-slate-500">{language === "ar" ? "اسأل مساعد Recomvia ليبحث في المدونة أيضًا أو يحوّل السؤال إلى إنسان." : "Ask the Recomvia Assistant to search the research library too, or route the question to a human."}</p></div>
         )}
       </div>
-      <p className="mt-4 text-center text-xs text-slate-400">{filtered.length} {language === "ar" ? "إجابة موثقة" : filtered.length === 1 ? "documented answer" : "documented answers"}</p>
+      <p role="status" aria-live="polite" className="mt-4 text-center text-xs text-slate-400">{filtered.length} {language === "ar" ? "إجابة موثقة" : filtered.length === 1 ? "documented answer" : "documented answers"}</p>
     </div>
   );
 }

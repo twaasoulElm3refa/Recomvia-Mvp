@@ -211,3 +211,107 @@ test("methodology calls to action preserve public locale and identify the privat
     assert.equal(actions[1].children, reportLabel);
   }
 });
+
+
+test("FAQ search announces results and language controls preserve canonical deep links", () => {
+  const element = (type, props) => ({ type, props });
+  const Button = () => null;
+  const Input = () => null;
+  const stub = () => null;
+  const entries = [
+    { id: "measurement", category: "Measurement", question: "What is visibility?", answer: "Evidence", questionAr: "ما الظهور؟", answerAr: "الأدلة" },
+    { id: "billing", category: "Billing", question: "What is the price?", answer: "Plans", questionAr: "ما السعر؟", answerAr: "الباقات" },
+  ];
+  let cursor = 0;
+  let effect;
+  const state = [];
+  const react = {
+    useState(initial) {
+      const index = cursor++;
+      if (!(index in state)) state[index] = initial;
+      return [state[index], (value) => { state[index] = value; }];
+    },
+    useMemo: (compute) => compute(),
+    useEffect: (callback) => { effect = callback; },
+  };
+  function load(path, dependencies = {}) {
+    const js = ts.transpileModule(readFileSync(path, "utf8"), {
+      compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX },
+    }).outputText;
+    const mod = { exports: {} };
+    new Function("require", "module", "exports", js)((name) => {
+      if (name === "react/jsx-runtime") return { jsx: element, jsxs: element, Fragment: Symbol.for("react.fragment") };
+      if (Object.hasOwn(dependencies, name)) return dependencies[name];
+      throw new Error("Unexpected import: " + name);
+    }, mod, mod.exports);
+    return mod.exports;
+  }
+  const stored = [];
+  const locale = load("lib/site-locale.ts");
+  const { FaqExplorer } = load("app/faq/faq-explorer.tsx", {
+    react,
+    "lucide-react": { Search: stub, SlidersHorizontal: stub },
+    "@/components/ui/accordion": { Accordion: stub, AccordionContent: stub, AccordionItem: stub, AccordionTrigger: stub },
+    "@/components/ui/button": { Button },
+    "@/components/ui/input": { Input },
+    "@/lib/site-locale": { ...locale, readStoredSiteLocale: () => "en", storeSiteLocale: (value) => stored.push(value) },
+  });
+  const assigned = [];
+  const listeners = new Map();
+  const previousWindow = Object.getOwnPropertyDescriptor(globalThis, "window");
+  const location = { pathname: "/ar/faq/", search: "?source=blog", hash: "#billing", assign: (href) => assigned.push(href) };
+  Object.defineProperty(globalThis, "window", { configurable: true, value: {
+    location, setTimeout: (callback) => { callback(); return 1; }, clearTimeout: () => {},
+    addEventListener: (name, callback) => listeners.set(name, callback),
+    removeEventListener: (name) => listeners.delete(name),
+  } });
+  function nodes(node) {
+    if (Array.isArray(node)) return node.flatMap(nodes);
+    if (!node || typeof node !== "object" || !node.props) return [];
+    return [node, ...nodes(node.props.children)];
+  }
+  function render(initialLocale = "ar") {
+    cursor = 0;
+    return FaqExplorer({ entries, initialLocale });
+  }
+  try {
+    const first = render();
+    assert.equal(first.props.dir, "rtl");
+    const cleanup = effect();
+    const tree = nodes(render());
+    assert.equal(state[0], "ar", "trailing slash must not let stored English override Arabic route");
+    const search = tree.find((node) => node.type === Input).props;
+    assert.equal(search["aria-label"], "ابحث في الأسئلة والإجابات");
+    assert.match(search.className, /ps-10/);
+    const languageButtons = tree.filter((node) => node.type === Button);
+    assert.deepEqual(languageButtons.map((node) => node.props["aria-pressed"]), [true, false]);
+    languageButtons[0].props.onClick();
+    assert.deepEqual(assigned, [], "clicking current language must not reload or clear search");
+    assert.deepEqual(stored, []);
+    const filters = tree.filter((node) => node.type === "button");
+    assert.deepEqual(filters.map((node) => node.props["aria-pressed"]), [true, false, false]);
+    filters[2].props.onClick();
+    const filtered = nodes(render());
+    assert.deepEqual(filtered.filter((node) => node.type === "button").map((node) => node.props["aria-pressed"]), [false, false, true]);
+    const result = filtered.find((node) => node.props.role === "status");
+    assert.equal(result.props["aria-live"], "polite");
+    assert.equal(result.props.children[0], 1);
+    search.onChange({ target: { value: "no matching phrase" } });
+    assert.equal(nodes(render()).find((node) => node.props.role === "status").props.children[0], 0);
+    languageButtons[1].props.onClick();
+    assert.deepEqual(stored, ["en"]);
+    assert.deepEqual(assigned, ["/faq?source=blog#billing"]);
+    location.pathname = "/faq/";
+    listeners.get(locale.SITE_LOCALE_EVENT)();
+    const english = render("en");
+    assert.equal(english.props.dir, "ltr");
+    const englishNodes = nodes(english);
+    assert.equal(englishNodes.find((node) => node.type === Input).props["aria-label"], "Search questions and answers");
+    assert.deepEqual(englishNodes.filter((node) => node.type === Button).map((node) => node.props["aria-pressed"]), [false, true]);
+    cleanup();
+    assert.equal(listeners.size, 0);
+  } finally {
+    if (previousWindow) Object.defineProperty(globalThis, "window", previousWindow);
+    else Reflect.deleteProperty(globalThis, "window");
+  }
+});
