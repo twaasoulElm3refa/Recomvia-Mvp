@@ -315,3 +315,54 @@ test("FAQ search announces results and language controls preserve canonical deep
     else Reflect.deleteProperty(globalThis, "window");
   }
 });
+
+
+test("privacy, terms and billing policy contact links retain the canonical public language", () => {
+  const element = (type, props) => ({ type, props });
+  const PublicShell = () => null;
+  const Link = () => null;
+  const base = "https://recomvia.test";
+  function load(path, dependencies = {}) {
+    const js = ts.transpileModule(readFileSync(path, "utf8"), {
+      compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX },
+    }).outputText;
+    const mod = { exports: {} };
+    new Function("require", "module", "exports", js)((name) => {
+      if (name === "react/jsx-runtime") return { jsx: element, jsxs: element, Fragment: Symbol.for("react.fragment") };
+      if (name === "@/lib/articles" || name === "@/lib/site-config") return { SITE_URL: base };
+      if (Object.hasOwn(dependencies, name)) return dependencies[name];
+      throw new Error("Unexpected dependency: " + name);
+    }, mod, mod.exports);
+    return mod.exports;
+  }
+  const { PolicyPage } = load("app/components/policy-page.tsx", {
+    "@/app/components/navigation-link": { NavigationLink: Link },
+    "@/app/components/public-shell": { PublicShell },
+    "@/lib/site-locale": load("lib/site-locale.ts"),
+  });
+  function collect(node) {
+    if (Array.isArray(node)) return node.flatMap(collect);
+    if (!node || typeof node !== "object" || !node.props) return [];
+    return [...(node.type === Link ? [node.props] : []), ...collect(node.props.children)];
+  }
+  for (const policy of ["privacy", "terms", "billing-policy"]) {
+    const copy = load("app/" + policy + "/policy-copy.ts");
+    for (const locale of ["en", "ar"]) {
+      const prefix = locale === "ar" ? "/ar" : "";
+      const page = load("app" + prefix + "/" + policy + "/page.tsx", {
+        "@/app/components/policy-page": { PolicyPage },
+        [locale === "ar" ? "@/app/" + policy + "/policy-copy" : "./policy-copy"]: copy,
+      });
+      const route = page.default();
+      const shell = PolicyPage(route.props);
+      assert.equal(shell.props.initialLocale, locale);
+      assert.equal(page.metadata.alternates.canonical, base + prefix + "/" + policy);
+      const links = collect(shell.props.children(locale));
+      assert.ok(links.length > 0, policy + " must offer a support contact");
+      for (const link of links) {
+        assert.equal(link.href, prefix + "/contact", policy + " " + locale);
+        assert.ok(link.children.trim().length > 0);
+      }
+    }
+  }
+});
