@@ -52,7 +52,7 @@ function isKnowledgeResult(value: unknown): value is KnowledgeResult {
   if (data.sourceUrl !== undefined) {
     const source = data.sourceUrl as string;
     const prefix = data.language === "ar" ? "/ar" : "";
-    if (!source.startsWith(prefix) ||
+    if (source !== source.trim() || !source.startsWith(prefix) ||
         !/^\/(?:faq#[a-z0-9-]+|blog\/[a-z0-9-]+(?:#questions)?)$/.test(source.slice(prefix.length))) return false;
   }
   return !data.answered || (typeof data.answer === "string" && !!data.answer.trim() && typeof data.sourceUrl === "string");
