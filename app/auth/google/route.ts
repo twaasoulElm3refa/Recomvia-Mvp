@@ -13,7 +13,20 @@ export async function GET(request: Request) {
     response.headers.set("X-Content-Type-Options", "nosniff");
     return response;
   }
-  const { clientId } = getGoogleCredentials();
+  let clientId: string;
+  try {
+    ({ clientId } = getGoogleCredentials());
+  } catch {
+    // An unconfigured standalone deployment must not produce a server error
+    // or leave a previously started OAuth exchange usable.
+    const response = NextResponse.redirect(new URL("/?auth_error=authentication_failed", getAppOrigin(request)));
+    response.headers.set("Cache-Control", "no-store");
+    response.headers.set("X-Content-Type-Options", "nosniff");
+    for (const name of [OAUTH_STATE_COOKIE, OAUTH_VERIFIER_COOKIE]) {
+      response.cookies.set(name, "", { httpOnly: true, secure: true, sameSite: "lax", path: "/", maxAge: 0 });
+    }
+    return response;
+  }
   const state = randomBase64Url();
   const verifier = randomBase64Url(48);
   const authorizationUrl = new URL("https://accounts.google.com/o/oauth2/v2/auth");
