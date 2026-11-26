@@ -210,7 +210,9 @@ test("staff inbox never renders legacy non-local support source links", () => {
 });
 
 
-function assistantHarness() {
+function assistantHarness(savedTicket) {
+  const effects = [];
+  const timers = [];
   const writes = [];
   const pending = [];
   const stored = [];
@@ -227,7 +229,7 @@ function assistantHarness() {
       return [state[index], (value) => { state[index] = value; writes.push(value); }];
     },
     useRef: (initial) => refs[refIndex++] ??= { current: initial },
-    useEffect: () => {},
+    useEffect: (effect) => { effects.push(effect); },
     useCallback: (callback) => { ask = callback; return callback; },
   };
   const js = ts.transpileModule(source("app/components/knowledge-assistant.tsx"), {
@@ -253,15 +255,22 @@ function assistantHarness() {
     return mocks[id] ?? require(id);
   }, loadedModule, loadedModule.exports, fakeFetch, {
     location: { pathname: "/ar/contact", search: "" },
-    localStorage: { setItem: (key, value) => stored.push([key, JSON.parse(value)]) },
+    localStorage: { getItem: () => savedTicket ?? null, setItem: (key, value) => stored.push([key, JSON.parse(value)]) },
+    setTimeout: (callback) => { timers.push(callback); return timers.length; },
+    clearTimeout: () => {},
   });
   const render = () => {
     stateIndex = 0;
     refIndex = 0;
+    effects.length = 0;
     return loadedModule.exports.KnowledgeAssistant();
   };
   render();
-  return { ask, writes, pending, stored, render };
+  const restoreTicket = () => {
+    effects[1]();
+    timers.shift()();
+  };
+  return { ask, writes, pending, stored, render, restoreTicket };
 }
 
 test("assistant ignores an older unsupported answer after a newer supported Arabic answer", async () => {
@@ -1297,4 +1306,39 @@ test("staff proposal preserves drafts on failure or unsafe confirmation and perm
   await retry;
   assert.equal(h.refreshes(), 1);
   assert.deepEqual(h.fields().map((field) => field.value), ["", "", "", ""]);
+});
+
+
+test("assistant ignores malformed stored tickets without rendering a reply or offering a status lookup", () => {
+  const valid = { reference: "RCV-ABC-123ABC", accessKey: "a".repeat(36), question: "A support question", status: "answered", humanReply: "A reply" };
+  for (const saved of [
+    "{bad json", "null", "[]", "42", JSON.stringify({}),
+    JSON.stringify({ ...valid, reference: {} }),
+    JSON.stringify({ ...valid, accessKey: "bad-key" }),
+    JSON.stringify({ ...valid, status: "unknown" }),
+    JSON.stringify({ ...valid, humanReply: { unsafe: true } }),
+    JSON.stringify({ ...valid, updatedAt: 42 }),
+  ]) {
+    const h = assistantHarness(saved);
+    h.restoreTicket();
+    assert.equal(findAssistantElement(h.render(), (node) =>
+      node.props.variant === "outline" && typeof node.props.onClick === "function"), undefined);
+    assert.equal(h.pending.length, 0);
+    assert.equal(h.stored.length, 0, "do not overwrite browser storage");
+  }
+});
+
+test("assistant restores a valid saved private ticket and checks only its saved credentials", () => {
+  const ticket = { reference: "RCV-ABC-123ABC", accessKey: "a".repeat(36), question: "A support question", status: "answered", humanReply: "رد موثوق" };
+  const h = assistantHarness(JSON.stringify(ticket));
+  h.restoreTicket();
+  const tree = h.render();
+  assert.ok(findAssistantElement(tree, (node) => node.props.children === ticket.humanReply));
+  const button = findAssistantElement(tree, (node) =>
+    node.props.variant === "outline" && typeof node.props.onClick === "function");
+  assert.ok(button);
+  button.props.onClick();
+  assert.equal(h.pending.length, 1);
+  assert.equal(h.pending[0].url, "/api/support/tickets/status");
+  assert.deepEqual(h.pending[0].body, { reference: ticket.reference, accessKey: ticket.accessKey });
 });
