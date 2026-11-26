@@ -203,3 +203,96 @@ test("legitimate Arabic proposal text with line breaks and tabs is retained exac
       rationale: arabic.rationale, rollbackPlan: arabic.rollbackPlan },
   ]);
 });
+
+
+test("staff proposal upload has a single deadline even when chunks arrive or cancellation stalls", async (t) => {
+  const initialWorkspaces = workspaces;
+  const initialSaves = saves.length;
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  let controller;
+  let cancelled = false;
+  let finishCleanup;
+  const cleanup = new Promise((resolve) => { finishCleanup = resolve; });
+  const body = new ReadableStream({
+    start(value) {
+      controller = value;
+      value.enqueue(new TextEncoder().encode(valid.slice(0, 12)));
+    },
+    cancel() { cancelled = true; return cleanup; },
+  });
+  const pending = POST(request(body));
+  try {
+    await new Promise((resolve) => setImmediate(resolve));
+    t.mock.timers.tick(4999);
+    assert.equal(cancelled, false);
+    controller.enqueue(new TextEncoder().encode(valid.slice(12)));
+    await new Promise((resolve) => setImmediate(resolve));
+    t.mock.timers.tick(1);
+    const response = await Promise.race([pending, new Promise((resolve) => setImmediate(() => resolve(null)))]);
+    assert.equal(cancelled, true);
+    assert.ok(response, "deadline must not await upstream cancellation");
+    assert.equal(response.status, 408);
+    assert.deepEqual(await response.json(), { code: "invalid_request" });
+    assertPrivate(response);
+    assert.equal(body.locked, false);
+    assert.equal(workspaces, initialWorkspaces);
+    assert.equal(saves.length, initialSaves);
+  } finally {
+    if (!cancelled) controller.close();
+    finishCleanup();
+    await pending;
+    t.mock.timers.reset();
+  }
+});
+
+test("staff proposal rejects invalid or oversized streams even when cancellation stalls", async () => {
+  const initialWorkspaces = workspaces;
+  const initialSaves = saves.length;
+  for (const [bytes, status] of [[new Uint8Array([0xff]), 400], [new Uint8Array(24577), 413]]) {
+    let controller;
+    let cancelled = false;
+    let finishCleanup;
+    const cleanup = new Promise((resolve) => { finishCleanup = resolve; });
+    const body = new ReadableStream({
+      start(value) { controller = value; value.enqueue(bytes); },
+      cancel() { cancelled = true; return cleanup; },
+    });
+    const pending = POST(request(body));
+    try {
+      const response = await Promise.race([pending, new Promise((resolve) => setImmediate(() => resolve(null)))]);
+      assert.equal(cancelled, true);
+      assert.ok(response, "invalid stream must not await upstream cancellation");
+      assert.equal(response.status, status);
+      assertPrivate(response);
+      assert.equal(body.locked, false);
+      assert.equal(workspaces, initialWorkspaces);
+      assert.equal(saves.length, initialSaves);
+    } finally {
+      if (!cancelled) controller.close();
+      finishCleanup();
+      await pending;
+    }
+  }
+});
+
+test("completed staff proposal clears its deadline and remains a free planning draft", async (t) => {
+  const initialWorkspaces = workspaces;
+  const initialSaves = saves.length;
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  try {
+    const req = request(chunked(valid, 12));
+    const response = await POST(req);
+    assert.equal(response.status, 201);
+    assertPrivate(response);
+    assert.deepEqual(await response.json(), {
+      proposal: { id: "proposal_1", version: 1 },
+      applied: false, approved: false, creditsCharged: 0,
+    });
+    assert.equal(req.body.locked, false);
+    t.mock.timers.tick(5000);
+    assert.equal(workspaces, initialWorkspaces + 1);
+    assert.equal(saves.length, initialSaves + 1);
+  } finally {
+    t.mock.timers.reset();
+  }
+});
