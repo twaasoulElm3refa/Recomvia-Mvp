@@ -278,10 +278,17 @@ export function KnowledgeAssistant() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ reference: currentTicket.reference, accessKey: currentTicket.accessKey }),
       });
-      const data = (await response.json()) as { status?: string; humanReply?: string | null; updatedAt?: string; error?: string };
-      if (!response.ok) throw new Error(data.error || "The ticket could not be checked.");
+      const data = (await response.json()) as { publicId?: unknown; status?: unknown; humanReply?: unknown; updatedAt?: unknown; error?: unknown } | null;
+      if (!response.ok) throw new Error(typeof data?.error === "string" ? data.error : "The ticket could not be checked.");
       if (requestId !== latestTicketStatusRequest.current) return;
-      const updated = { ...currentTicket, status: data.status || currentTicket.status, humanReply: data.humanReply, updatedAt: data.updatedAt };
+      // Never replace a private reply with a malformed or unrelated response.
+      if (!data || data.publicId !== currentTicket.reference ||
+          (data.status !== "open" && data.status !== "answered") ||
+          (data.humanReply !== null && typeof data.humanReply !== "string") ||
+          typeof data.updatedAt !== "string" || !data.updatedAt.trim()) {
+        throw new Error("The ticket could not be checked.");
+      }
+      const updated: StoredTicket = { ...currentTicket, status: data.status, humanReply: data.humanReply, updatedAt: data.updatedAt };
       activeTicket.current = updated;
       setTicket(updated);
       try {
