@@ -330,6 +330,7 @@ function contactHarness() {
     assert.equal(url, "/api/support/tickets");
     assert.equal(options.method, "POST");
     return new Promise((resolve) => pending.push({
+      body: JSON.parse(options.body),
       finish: (payload, status = 201) => resolve(Response.json(payload, { status })),
     }));
   };
@@ -393,6 +394,51 @@ test("contact form unlocks after a rejected submission for deliberate retry", as
   assert.equal(stored.length, 1);
 });
 
+
+test("contact form protects every editable field during a pending ticket and preserves it on failure", async () => {
+  const { render, pending, stored } = contactHarness();
+  const event = { preventDefault() {} };
+  const find = (tree, predicate) => {
+    const node = findAssistantElement(tree, predicate);
+    assert.ok(node);
+    return node.props;
+  };
+  const fields = (tree) => [
+    find(tree, (node) => node.props.placeholder === "اكتب اسمك"),
+    find(tree, (node) => node.props.type === "email"),
+    find(tree, (node) => typeof node.props.onValueChange === "function"),
+    find(tree, (node) => node.props.placeholder === "اكتب ما تحتاج إليه"),
+    find(tree, (node) => node.type === "input" && node.props.tabIndex === -1),
+  ];
+  const edit = (field, value) => field.onValueChange
+    ? field.onValueChange(value)
+    : field.onChange({ target: { value } });
+  const values = ["Test Sender", "test@example.org", "Technical support", "My original support message", ""];
+  fields(render()).forEach((field, i) => edit(field, values[i]));
+  const before = render();
+  const staleFields = fields(before);
+  const submission = before.props.onSubmit(event);
+  // Even queued callbacks from before the disabled rerender cannot mutate the draft.
+  staleFields.forEach((field) => edit(field, "changed"));
+  const busy = render();
+  assert.equal(busy.props["aria-busy"], true);
+  assert.ok(fields(busy).every((field) => field.disabled === true));
+  assert.deepEqual(fields(busy).map((field) => field.value), values);
+  assert.equal(pending[0].body.question, "[Technical support] My original support message");
+  pending[0].finish({ error: "unavailable" }, 503);
+  await submission;
+  const failed = render();
+  assert.equal(failed.props["aria-busy"], false);
+  assert.ok(fields(failed).every((field) => field.disabled === false));
+  assert.deepEqual(fields(failed).map((field) => field.value), values);
+  assert.equal(stored.length, 0);
+  edit(fields(failed)[3], "My revised support message");
+  const retry = render().props.onSubmit(event);
+  assert.equal(pending[1].body.question, "[Technical support] My revised support message");
+  pending[1].finish({ reference: "RCV-RETRY", accessKey: "retry-key" });
+  await retry;
+  assert.equal(stored[0][1].question, "[Technical support] My revised support message");
+});
 
 function findAssistantElement(node, predicate) {
   if (!React.isValidElement(node)) return undefined;
