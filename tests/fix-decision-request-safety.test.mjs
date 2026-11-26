@@ -175,3 +175,85 @@ test("fix decision comments preserve legitimate Arabic line breaks and internal 
     "owner", "scan_1", "proposal_123", "changes_requested", comment,
   ]);
 });
+
+
+test("fix decision upload deadline covers partial chunks and slow cancellation without writes", async (t) => {
+  const before = writes.length;
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  let controller;
+  let cancelled = false;
+  let finishCleanup;
+  const cleanup = new Promise((resolve) => { finishCleanup = resolve; });
+  const body = new ReadableStream({
+    start(value) {
+      controller = value;
+      value.enqueue(new TextEncoder().encode(valid.slice(0, 20)));
+    },
+    cancel() { cancelled = true; return cleanup; },
+  });
+  const pending = POST(request(body));
+  try {
+    await new Promise((resolve) => setImmediate(resolve));
+    t.mock.timers.tick(4999);
+    assert.equal(cancelled, false);
+    controller.enqueue(new TextEncoder().encode(valid.slice(20)));
+    await new Promise((resolve) => setImmediate(resolve));
+    t.mock.timers.tick(1);
+    const response = await Promise.race([pending, new Promise((resolve) => setImmediate(() => resolve(null)))]);
+    assert.equal(cancelled, true);
+    assert.ok(response, "deadline must not await upstream cancellation");
+    assert.equal(response.status, 408);
+    assert.equal(response.headers.get("Cache-Control"), "no-store");
+    assert.equal(response.headers.get("X-Content-Type-Options"), "nosniff");
+    assert.equal(body.locked, false);
+    assert.equal(writes.length, before);
+  } finally {
+    if (!cancelled) controller.close();
+    finishCleanup();
+    await pending;
+    t.mock.timers.reset();
+  }
+});
+
+test("fix decision cancels invalid UTF-8 and oversized streams without awaiting cleanup", async () => {
+  const before = writes.length;
+  for (const [bytes, status] of [[new Uint8Array([0xff]), 400], [new Uint8Array(4097), 413]]) {
+    let controller;
+    let cancelled = false;
+    let finishCleanup;
+    const cleanup = new Promise((resolve) => { finishCleanup = resolve; });
+    const body = new ReadableStream({
+      start(value) { controller = value; value.enqueue(bytes); },
+      cancel() { cancelled = true; return cleanup; },
+    });
+    const pending = POST(request(body));
+    try {
+      const response = await Promise.race([pending, new Promise((resolve) => setImmediate(() => resolve(null)))]);
+      assert.equal(cancelled, true);
+      assert.ok(response, "rejected upload must not await upstream cancellation");
+      assert.equal(response.status, status);
+      assert.equal(body.locked, false);
+      assert.equal(writes.length, before);
+    } finally {
+      if (!cancelled) controller.close();
+      finishCleanup();
+      await pending;
+    }
+  }
+});
+
+test("completed fix decision clears the upload deadline and records only once", async (t) => {
+  const before = writes.length;
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  try {
+    const body = chunked(valid, 20);
+    const response = await POST(request(body));
+    assert.equal(response.status, 201);
+    assert.equal(body.locked, false);
+    t.mock.timers.tick(5000);
+    assert.equal(writes.length, before + 1);
+    assert.equal((await response.json()).creditsCharged, 0);
+  } finally {
+    t.mock.timers.reset();
+  }
+});
