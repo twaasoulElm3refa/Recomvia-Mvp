@@ -108,6 +108,9 @@ async function verifySession(value: string): Promise<SessionPayload | null> {
   const [encodedPayload, signature, extra] = value.split(".");
   if (!encodedPayload || !/^[A-Za-z0-9_-]+$/.test(encodedPayload) ||
       !signature || !/^[A-Za-z0-9_-]{43}$/.test(signature) || extra !== undefined) return null;
+  // A stale browser cookie must not turn an unconfigured deployment into a 500.
+  // Only session verification fails closed; creating new sessions still requires a secret.
+  if (!env.AUTH_SECRET?.trim()) return null;
   if (!constantTimeEqual(signature, await sign(encodedPayload))) return null;
   try {
     const payload = JSON.parse(new TextDecoder().decode(decodeBase64Url(encodedPayload))) as SessionPayload;
