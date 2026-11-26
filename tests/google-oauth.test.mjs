@@ -242,6 +242,33 @@ test("Sites login preserves the authenticated platform user and redirects safely
   }
 });
 
+test("Sites authentication rejects network paths exposed by normalization", () => {
+  const provider = credentials.AUTH_PROVIDER;
+  credentials.AUTH_PROVIDER = "chatgpt";
+  try {
+    for (const path of [
+      "//outside.example",
+      "/a/..//outside.example",
+      "/%2e%2e//outside.example",
+      "/a/../\\outside.example",
+      "/%2Foutside.example",
+      "/%5coutside.example",
+    ]) {
+      assert.equal(auth.signInPath(path), "/signin-with-chatgpt?return_to=%2F", path);
+      assert.equal(auth.signOutPath(path), "/signout-with-chatgpt?return_to=%2F", path);
+    }
+    for (const [path, expected] of [
+      ["/a/../dashboard", "/dashboard"],
+      ["/ar/blog?from=%2Fdashboard#intro", "/ar/blog?from=%2Fdashboard#intro"],
+    ]) {
+      assert.equal(auth.signInPath(path), "/signin-with-chatgpt?return_to=" + encodeURIComponent(expected));
+      assert.equal(auth.signOutPath(path), "/signout-with-chatgpt?return_to=" + encodeURIComponent(expected));
+    }
+  } finally {
+    credentials.AUTH_PROVIDER = provider;
+  }
+});
+
 test("Google sessions reject oversized and malformed cookies before crypto work", async () => {
   const secret = credentials.AUTH_SECRET;
   try {

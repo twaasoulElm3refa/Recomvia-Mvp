@@ -36,6 +36,9 @@ function safeReturnPath(value: string) {
   try {
     const url = new URL(value, "https://app.local");
     if (url.origin !== "https://app.local") return "/";
+    // Dot-segment normalization can turn a local-looking path into a network-path
+    // reference. Validate the normalized output before handing it to the host.
+    if (/^\/(?:\/|%2f|%5c)/i.test(url.pathname)) return "/";
     if (["/signin-with-chatgpt", "/signout-with-chatgpt", "/callback"].includes(url.pathname)) return "/";
     return `${url.pathname}${url.search}${url.hash}`;
   } catch { return "/"; }
