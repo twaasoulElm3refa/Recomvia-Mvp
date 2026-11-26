@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { OAUTH_STATE_COOKIE, OAUTH_VERIFIER_COOKIE, SESSION_COOKIE, SESSION_MAX_AGE, constantTimeEqual, createSession, getAppOrigin, getGoogleCallbackUrl, getGoogleCredentials } from "@/app/auth";
+import { OAUTH_STATE_COOKIE, OAUTH_VERIFIER_COOKIE, SESSION_COOKIE, SESSION_MAX_AGE, authProvider, constantTimeEqual, createSession, getAppOrigin, getGoogleCallbackUrl, getGoogleCredentials } from "@/app/auth";
 
 export const dynamic = "force-dynamic";
 export const runtime = "edge";
@@ -9,6 +9,15 @@ type GoogleProfile = { sub?: unknown; email?: unknown; email_verified?: unknown;
 
 export async function GET(request: NextRequest) {
   const appOrigin = getAppOrigin(request);
+  // Ignore stale callbacks after a provider change without exchanging tokens
+  // or replacing any existing authenticated identity.
+  if (authProvider() !== "google") {
+    const response = NextResponse.redirect(new URL("/auth/start", appOrigin));
+    response.headers.set("Cache-Control", "private, no-store, max-age=0");
+    response.headers.set("X-Content-Type-Options", "nosniff");
+    clearOAuthCookies(response);
+    return response;
+  }
   const params = request.nextUrl.searchParams;
   const code = params.get("code");
   const state = params.get("state");
