@@ -43,19 +43,31 @@ export async function POST(request: Request) {
     const decoder = new TextDecoder("utf-8", { fatal: true });
     let bytes = 0;
     let payload = "";
+    let timedOut = false;
+    // Bound the complete draft upload before performing any workspace or proposal writes.
+    const timer = setTimeout(() => {
+      timedOut = true;
+      void reader.cancel().catch(() => undefined);
+    }, 5_000);
     try {
       while (true) {
         const { done, value } = await reader.read();
+        if (timedOut) return json({ code: "invalid_request" }, 408);
         if (done) break;
         bytes += value.byteLength;
         if (bytes > maxBodyBytes) {
-          await reader.cancel().catch(() => undefined);
+          void reader.cancel().catch(() => undefined);
           return json({ code: "invalid_request" }, 413);
         }
         payload += decoder.decode(value, { stream: true });
       }
       payload += decoder.decode();
+    } catch (error) {
+      if (timedOut) return json({ code: "invalid_request" }, 408);
+      void reader.cancel().catch(() => undefined);
+      throw error;
     } finally {
+      clearTimeout(timer);
       reader.releaseLock();
     }
     body = JSON.parse(payload);
