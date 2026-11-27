@@ -75,6 +75,8 @@ export async function setMonitoringScheduleState(
 
   // Resume only after a future slot, never immediately from an overdue schedule.
   // An already-leased run may finish; pausing prevents *future* job claims.
+  // In this transaction, changes() reflects the preceding guarded UPDATE.
+  // A concurrent request that loses that update must not write an audit event.
   const [updated] = await databaseRef.batch([
     databaseRef.prepare(`
       UPDATE monitoring_schedules SET state = ?,
@@ -103,6 +105,7 @@ export async function setMonitoringScheduleState(
       FROM monitoring_schedules m
       JOIN organization_members member ON member.organization_id = m.organization_id
       WHERE m.id = ? AND member.user_id = ? AND m.state = ?
+        AND changes() = 1
     `).bind(
       createId("audit"), userId, action === "pause" ? "monitoring_paused" : "monitoring_resumed",
       JSON.stringify({ executionTriggered: false, action }), scheduleId, userId, desired,
