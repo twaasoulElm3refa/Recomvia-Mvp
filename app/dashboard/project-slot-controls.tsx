@@ -44,7 +44,10 @@ export function ProjectSlotControls({
     event.preventDefault();
     if (!editing || currentEdit.current !== editing || inFlight.current) return;
     const project = projects.find((item) => item.id === editing.id);
-    if (!project || !project.canRename || value.trim().length < 2 || value.trim().length > 80) return;
+    const requestedName = value.trim();
+    if (!project || !project.canRename || requestedName.length < 2 || requestedName.length > 80) return;
+    // The server normalizes accepted display names to NFC before saving.
+    const expectedDisplayName = requestedName.normalize("NFC");
     inFlight.current = true;
     setSaving(true);
     setError("");
@@ -53,19 +56,19 @@ export function ProjectSlotControls({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          projectId: project.id, expectedName: project.displayName, displayName: value.trim(),
+          projectId: project.id, expectedName: project.displayName, displayName: requestedName,
         }),
       });
       const body: {
         projectId?: string; displayName?: string; projectKeyUnchanged?: boolean;
         quotasReset?: boolean; code?: string;
       } = await response.json();
-      if (!response.ok || body.projectId !== project.id || !body.displayName ||
+      if (!response.ok || body.projectId !== project.id || body.displayName !== expectedDisplayName ||
           body.projectKeyUnchanged !== true || body.quotasReset !== false) {
         throw new Error(body.code || "rename_failed");
       }
       setProjects((current) => current.map((item) =>
-        item.id === project.id ? { ...item, displayName: body.displayName! } : item));
+        item.id === project.id ? { ...item, displayName: expectedDisplayName } : item));
       currentEdit.current = null;
       setEditing(null);
       router.refresh();
