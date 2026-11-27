@@ -55,8 +55,17 @@ export function SupportInbox({ initialTickets }: { initialTickets: SupportTicket
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ reply }),
       });
-      const data = (await response.json()) as { error?: string };
-      if (!response.ok) throw new Error(data.error || "Reply could not be saved.");
+      const data: unknown = await response.json();
+      const confirmation = data && typeof data === "object" && !Array.isArray(data)
+        ? data as Record<string, unknown> : null;
+      if (!response.ok) {
+        const message = confirmation?.error;
+        throw new Error(typeof message === "string" && message.trim() ? message : "Reply could not be saved.");
+      }
+      // A generic 2xx response is not evidence that the reply was persisted.
+      if (response.status !== 200 || confirmation?.ok !== true || confirmation.status !== "answered") {
+        throw new Error("Reply could not be confirmed. Your draft has been retained.");
+      }
       const updated: SupportTicket = { ...selected, humanReply: reply.trim(), status: "answered", answeredAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
       setTickets((current) => current.map((ticket) => ticket.id === selected.id ? updated : ticket));
       activeReply.current = null;
