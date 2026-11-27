@@ -154,7 +154,7 @@ export function SupportInbox({ initialTickets }: { initialTickets: SupportTicket
             <TableBody>{visible.map((ticket) => <TableRow key={ticket.id}>
               <TableCell className="px-5 align-top"><p className="font-mono text-xs font-bold text-blue-700">{ticket.publicId}</p><p className="mt-1 text-xs text-slate-400">{formatDate(ticket.createdAt)}</p></TableCell>
               <TableCell className="align-top"><p className="font-bold text-slate-900">{ticket.requesterName}</p><CustomerEmail email={ticket.requesterEmail} /></TableCell>
-              <TableCell className="max-w-[480px] whitespace-normal align-top"><p className="line-clamp-3 text-sm leading-6 text-slate-700">{ticket.question}</p><SourcePageLink pageUrl={ticket.pageUrl} /></TableCell>
+              <TableCell className="max-w-[480px] whitespace-normal align-top"><p dir="auto" className="line-clamp-3 [overflow-wrap:anywhere] text-sm leading-6 text-slate-700">{ticket.question}</p><SourcePageLink pageUrl={ticket.pageUrl} /></TableCell>
               <TableCell className="align-top"><Badge variant="outline" className={ticket.status === "answered" ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "border-amber-200 bg-amber-50 text-amber-700"}>{ticket.status}</Badge></TableCell>
               <TableCell className="pr-5 text-right align-top"><Button type="button" variant={ticket.status === "open" ? "default" : "outline"} onClick={() => startReply(ticket)} disabled={saving} className={`rounded-xl font-bold ${ticket.status === "open" ? "bg-blue-600" : ""}`}><MessageSquareReply className="size-4" />{ticket.status === "open" ? "Reply" : "Edit reply"}</Button></TableCell>
             </TableRow>)}</TableBody>
@@ -163,10 +163,10 @@ export function SupportInbox({ initialTickets }: { initialTickets: SupportTicket
       </div>
 
       <Dialog open={Boolean(selected)} onOpenChange={(value) => { if (!value) dismissReply(); }}>
-        <DialogContent className="sm:max-w-2xl">
+        <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-2xl">
           <DialogHeader><DialogTitle>Reply to {selected?.publicId}</DialogTitle><DialogDescription>The visitor can retrieve this reply securely from the Recomvia Assistant using the ticket credentials stored in their browser.</DialogDescription></DialogHeader>
-          {selected && <div className="rounded-xl border border-slate-200 bg-slate-50 p-4"><p className="text-xs font-bold uppercase tracking-[.12em] text-slate-400">Customer question</p><p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-slate-700">{selected.question}</p></div>}
-          <Textarea aria-label="Human reply" value={reply} disabled={saving} aria-invalid={showReplyValidation} aria-describedby={showReplyValidation ? "staff-reply-validation" : undefined} onChange={(event) => {
+          {selected && <div className="min-w-0 rounded-xl border border-slate-200 bg-slate-50 p-4"><p className="text-xs font-bold uppercase tracking-[.12em] text-slate-400">Customer question</p><p dir="auto" className="mt-2 whitespace-pre-wrap [overflow-wrap:anywhere] text-sm leading-6 text-slate-700">{selected.question}</p></div>}
+          <Textarea dir="auto" aria-label="Human reply" value={reply} disabled={saving} aria-invalid={showReplyValidation} aria-describedby={showReplyValidation ? "staff-reply-validation" : undefined} onChange={(event) => {
             if (!selected || activeReply.current !== selected || replyInFlight.current) return;
             currentDraft.current = event.target.value;
             setReply(event.target.value);
