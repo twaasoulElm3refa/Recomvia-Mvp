@@ -650,7 +650,9 @@ function staffReplyHarness() {
   const dialog = () => element((node) => typeof node.props.onOpenChange === "function");
   const publish = () => element((node) => node.type === Button && node.props.className === "rounded-xl bg-blue-600 font-bold");
   const cancel = () => element((node) => node.type === Button && node.props.children === "Cancel");
-  return { pending, ticketButton, editor, dialog, publish, cancel };
+  const filterButton = (value) => element((node) => node.type === Button && node.props.children === value);
+  const summary = () => element((node) => node.props.role === "status");
+  return { pending, ticketButton, editor, dialog, publish, cancel, filterButton, summary };
 }
 
 test("staff reply saves only once and keeps the selected draft while the request is pending", async () => {
@@ -1760,4 +1762,30 @@ test("staff inbox strips legacy URL secrets before serializing client props", as
   assert.doesNotMatch(JSON.stringify(props), /private-token|private-fragment|private-email|example\.invalid/);
   assert.deepEqual(props.map((row) => row.question), rows.map((row) => row.question));
   assert.deepEqual(rows.map((row) => row.pageUrl), inputs.map(([original]) => original));
+});
+
+
+test("staff inbox exposes filter selection, loaded counts and a named reply editor", async () => {
+  const h = staffReplyHarness();
+  const filters = ["open", "answered", "all"];
+  const pressed = () => filters.map((value) => h.filterButton(value)["aria-pressed"]);
+  const count = () => h.summary().children.join("");
+  assert.deepEqual(pressed(), [true, false, false]);
+  assert.equal(count(), "Showing 2 of 2 loaded tickets");
+  h.filterButton("answered").onClick();
+  assert.deepEqual(pressed(), [false, true, false]);
+  assert.equal(count(), "Showing 0 of 2 loaded tickets");
+  h.filterButton("all").onClick();
+  assert.deepEqual(pressed(), [false, false, true]);
+  assert.equal(count(), "Showing 2 of 2 loaded tickets");
+  h.filterButton("open").onClick();
+  h.ticketButton(0).onClick();
+  assert.equal(h.editor()["aria-label"], "Human reply");
+  h.editor().onChange({ target: { value: "A helpful response." } });
+  h.publish().onClick();
+  h.pending[0].finish({ ok: true, status: "answered" });
+  await settleAssistantFetch();
+  assert.equal(count(), "Showing 1 of 2 loaded tickets");
+  h.filterButton("answered").onClick();
+  assert.equal(count(), "Showing 1 of 2 loaded tickets");
 });
