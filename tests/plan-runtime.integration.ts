@@ -6,6 +6,7 @@ import { createFixture, state, userA } from "./target-runtime-fixture";
 import { getReportForUser } from "../db/product";
 import type { StoredScan } from "../db/product";
 import { triggerMonitoring } from "../workers/monitor-trigger";
+import { monitoringScanStatus } from "../lib/monitoring-scan-status";
 import { OpenRouterEngineAdapter } from "../lib/ai-engines/openrouter-engine-adapter";
 
 type Db = ReturnType<typeof createFixture>;
@@ -392,6 +393,32 @@ test("expiry pauses monitoring without a provider call; downgrade cannot expose 
     const locked = await GET(new Request(`https://recomvia.test/api/scans?scan=${body.scan.id}`));
     assert.ok(!JSON.stringify(await locked.json()).includes("insights"));
   });
+});
+
+test("monitor classifies completed scans without parsing the private report body", async () => {
+  let cancelled = false;
+  const report = new ReadableStream<Uint8Array>({
+    start(controller) { controller.enqueue(new TextEncoder().encode("private report")); },
+    cancel() { cancelled = true; },
+  });
+  assert.equal(await monitoringScanStatus(new Response(report, { status: 201 })), "completed");
+  assert.equal(cancelled, true);
+});
+
+test("monitor persists only recognized failure codes, never a forged completion", async () => {
+  for (const [body, status, expected] of [
+    [{ code: "subscription_required" }, 403, "subscription_required"],
+    [{ status: "needs_confirmation" }, 202, "needs_confirmation"],
+    [{ code: "identity_unresolved", status: "needs_clarification" }, 202, "identity_unresolved"],
+    [{ code: "scan_limit" }, 429, "scan_limit"],
+    [{ code: "completed" }, 500, "monitor_failed"],
+    [{ status: "private customer data" }, 422, "monitor_failed"],
+    [{ code: { secret: "private" } }, 500, "monitor_failed"],
+    [null, 500, "monitor_failed"],
+  ] as const) {
+    assert.equal(await monitoringScanStatus(Response.json(body, { status })), expected);
+  }
+  assert.equal(await monitoringScanStatus(new Response("not JSON", { status: 500 })), "monitor_failed");
 });
 
 test("monitor trigger refuses missing configuration and uses the protected endpoint without redirects", async () => {
