@@ -124,6 +124,7 @@ export function KnowledgeAssistant() {
   const lastSubmittedQuestionRequest = useRef<number | null>(null);
   const activeTicket = useRef<StoredTicket | null>(null);
   const latestTicketStatusRequest = useRef(0);
+  const ticketStatusInFlight = useRef(false);
 
   useEffect(() => {
     const root = document.documentElement;
@@ -287,6 +288,7 @@ export function KnowledgeAssistant() {
       };
       // Invalidate a lookup for the previous ticket before replacing it.
       ++latestTicketStatusRequest.current;
+      ticketStatusInFlight.current = false;
       activeTicket.current = stored;
       setChecking(false);
       setTicketError("");
@@ -312,7 +314,9 @@ export function KnowledgeAssistant() {
 
   async function checkTicket() {
     const currentTicket = activeTicket.current;
-    if (!currentTicket) return;
+    // Ignore queued clicks from obsolete cards and duplicate clicks before React rerenders.
+    if (!currentTicket || ticket !== currentTicket || ticketStatusInFlight.current) return;
+    ticketStatusInFlight.current = true;
     const requestId = ++latestTicketStatusRequest.current;
     setChecking(true);
     setTicketError("");
@@ -345,7 +349,10 @@ export function KnowledgeAssistant() {
         setTicketError(caught instanceof Error ? caught.message : "The ticket could not be checked.");
       }
     } finally {
-      if (requestId === latestTicketStatusRequest.current) setChecking(false);
+      if (requestId === latestTicketStatusRequest.current) {
+        ticketStatusInFlight.current = false;
+        setChecking(false);
+      }
     }
   }
 

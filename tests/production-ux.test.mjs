@@ -1879,3 +1879,47 @@ test("staff reply retains drafts on incidental dismissal but isolates tickets an
   assert.equal(h.editor().value, "Other ticket draft");
   assert.equal(h.pending.length, 1);
 });
+
+
+test("assistant serializes ticket status clicks and ignores obsolete ticket card handlers", async () => {
+  const h = assistantHarness();
+  const oldReference = "RCV-OLD-ABCDEF";
+  const newReference = "RCV-NEW-ABCDEF";
+  await createAssistantTicket(h, oldReference);
+  const button = () => findAssistantElement(h.render(), (node) =>
+    node.props.variant === "outline" && typeof node.props.onClick === "function").props;
+  const oldClick = button().onClick;
+  const count = h.pending.length;
+  oldClick();
+  oldClick();
+  assert.equal(h.pending.length, count + 1, "duplicate clicks before render must not fetch twice");
+  assert.equal(button().disabled, true);
+  h.pending.at(-1).finish({ error: "Temporary failure" }, 503);
+  await settleAssistantFetch();
+  assert.equal(button().disabled, false);
+  const older = startAssistantTicketCheck(h, oldReference);
+  await createAssistantTicket(h, newReference);
+  const before = h.pending.length;
+  oldClick();
+  assert.equal(h.pending.length, before, "obsolete card must not check a different ticket");
+  const currentClick = button().onClick;
+  currentClick();
+  currentClick();
+  assert.equal(h.pending.length, before + 1);
+  const current = h.pending.at(-1);
+  assert.equal(current.body.reference, newReference);
+  older.finish({ error: "Old failure" }, 503);
+  await settleAssistantFetch();
+  assert.equal(button().disabled, true, "obsolete completion must not unlock the current request");
+  currentClick();
+  assert.equal(h.pending.length, before + 1);
+  current.finish({ publicId: newReference, status: "answered", humanReply: "رد جديد", updatedAt: "2026-11-27 09:00:00" });
+  await settleAssistantFetch();
+  assert.equal(button().disabled, false);
+  assert.equal(h.stored.at(-1)[1].humanReply, "رد جديد");
+  currentClick();
+  assert.equal(h.pending.length, before + 1, "a handler from before the successful status update is stale");
+  startAssistantTicketCheck(h, newReference).finish({ publicId: newReference, status: "answered", humanReply: "رد أحدث", updatedAt: "2026-11-27 10:00:00" });
+  await settleAssistantFetch();
+  assert.equal(h.stored.at(-1)[1].humanReply, "رد أحدث");
+});
