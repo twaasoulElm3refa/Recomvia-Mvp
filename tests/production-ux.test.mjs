@@ -1479,3 +1479,58 @@ test("assistant validates created ticket credentials before replacing a private 
   assert.deepEqual(h.stored[0][1], { ...valid, question: "I need help with my new report" });
   assert.equal(form(), undefined);
 });
+
+
+test("assistant locks the submitted support draft, preserves it on failure and allows deliberate edits", async () => {
+  const h = assistantHarness();
+  const asked = h.ask("أحتاج مساعدة بشأن التقرير");
+  h.pending.at(-1).finish({ answered: false, confidence: 0, language: "ar" });
+  await asked;
+  const field = (label) => findAssistantElement(h.render(), (node) => node.props["aria-label"] === label).props;
+  const fields = () => [
+    field("الاسم"), field("البريد الإلكتروني"), field("سؤال الدعم"),
+    findAssistantElement(h.render(), (node) => node.type === "input" && node.props.tabIndex === -1).props,
+  ];
+  const submit = () => findAssistantElement(h.render(), (node) =>
+    node.type === "form" && node.props.className.includes("space-y-3")).props.onSubmit;
+  const original = ["Test Sender", "test@example.org", "تفاصيل المشكلة الأصلية", ""];
+  const edit = (props, value) => props.onChange({ target: { value } });
+  fields().forEach((props, i) => edit(props, original[i]));
+  const stale = fields();
+  const first = submit()({ preventDefault() {} });
+  stale.forEach((props) => edit(props, "unintended"));
+  assert.ok(fields().every((props) => props.disabled === true));
+  assert.deepEqual(fields().map((props) => props.value), original);
+  assert.deepEqual(h.pending.at(-1).body, {
+    name: original[0], email: original[1], question: original[2],
+    pageUrl: "/ar/contact", companyWebsite: "",
+  });
+  h.pending.at(-1).finish({ error: "Try again" }, 503);
+  await first;
+  assert.ok(fields().every((props) => props.disabled === false));
+  assert.deepEqual(fields().map((props) => props.value), original);
+  edit(fields()[2], "تفاصيل المشكلة بعد التعديل");
+  const retry = submit()({ preventDefault() {} });
+  assert.equal(h.pending.at(-1).body.question, "تفاصيل المشكلة بعد التعديل");
+  h.pending.at(-1).finish({ reference: "RCV-NEW-ABCDEF", accessKey: "b".repeat(36), status: "open" }, 201);
+  await retry;
+  assert.equal(h.stored.length, 1);
+  assert.equal(h.stored[0][1].question, "تفاصيل المشكلة بعد التعديل");
+});
+
+test("assistant ignores edit callbacks from obsolete escalation forms", async () => {
+  const h = assistantHarness();
+  const askUnsupported = async (question) => {
+    const asked = h.ask(question);
+    h.pending.at(-1).finish({ answered: false, confidence: 0, language: "en" });
+    await asked;
+  };
+  const field = () => findAssistantElement(h.render(), (node) => node.props["aria-label"] === "Support question").props;
+  await askUnsupported("First support question");
+  const stale = field();
+  await askUnsupported("Second support question");
+  stale.onChange({ target: { value: "Obsolete draft" } });
+  assert.equal(field().value, "Second support question");
+  field().onChange({ target: { value: "Current edited question" } });
+  assert.equal(field().value, "Current edited question");
+});
