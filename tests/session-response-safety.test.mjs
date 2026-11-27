@@ -8,9 +8,13 @@ const compiled = ts.transpileModule(source, {
   compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
 }).outputText;
 let currentUser = null;
+let authFailure = null;
 const loaded = { exports: {} };
 new Function("require", "module", "exports", compiled)((name) => {
-  if (name === "@/app/auth") return { getAuthenticatedUser: async () => currentUser };
+  if (name === "@/app/auth") return { getAuthenticatedUser: async () => {
+    if (authFailure) throw authFailure;
+    return currentUser;
+  } };
   throw new Error("Unexpected import: " + name);
 }, loaded, loaded.exports);
 const { GET } = loaded.exports;
@@ -33,4 +37,21 @@ test("authenticated session state never exposes user identity or caches the resp
   assert.equal(response.headers.get("Cache-Control"), "private, no-store, max-age=0");
   assert.equal(response.headers.get("X-Content-Type-Options"), "nosniff");
   currentUser = null;
+});
+
+test("identity service failures return private generic 503 and allow recovery", async () => {
+  currentUser = null;
+  authFailure = new Error("private@example.test session-token diagnostic");
+  try {
+    const response = await GET();
+    assert.equal(response.status, 503);
+    assert.deepEqual(await response.json(), { code: "temporarily_unavailable" });
+    assert.equal(response.headers.get("Cache-Control"), "private, no-store, max-age=0");
+    assert.equal(response.headers.get("X-Content-Type-Options"), "nosniff");
+  } finally {
+    authFailure = null;
+  }
+  const recovered = await GET();
+  assert.equal(recovered.status, 200);
+  assert.deepEqual(await recovered.json(), { signedIn: false });
 });
