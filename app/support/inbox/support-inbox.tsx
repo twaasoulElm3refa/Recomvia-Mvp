@@ -139,13 +139,13 @@ export function SupportInbox({ initialTickets }: { initialTickets: SupportTicket
       <div className="grid gap-4 sm:grid-cols-3">
         <div className="rounded-2xl border border-amber-200 bg-amber-50 p-5"><div className="flex items-center gap-2 text-sm font-bold text-amber-700"><Clock3 className="size-4" />Awaiting reply</div><p className="mt-3 text-3xl font-extrabold text-slate-900">{openCount}</p></div>
         <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-5"><div className="flex items-center gap-2 text-sm font-bold text-emerald-700"><CheckCircle2 className="size-4" />Answered</div><p className="mt-3 text-3xl font-extrabold text-slate-900">{tickets.length - openCount}</p></div>
-        <div className="rounded-2xl border border-blue-200 bg-blue-50 p-5"><div className="flex items-center gap-2 text-sm font-bold text-blue-700"><Inbox className="size-4" />Total retained</div><p className="mt-3 text-3xl font-extrabold text-slate-900">{tickets.length}</p></div>
+        <div className="rounded-2xl border border-blue-200 bg-blue-50 p-5"><div className="flex items-center gap-2 text-sm font-bold text-blue-700"><Inbox className="size-4" />Total loaded</div><p className="mt-3 text-3xl font-extrabold text-slate-900">{tickets.length}</p></div>
       </div>
 
       <div className="mt-6 overflow-hidden rounded-[24px] border border-slate-200 bg-white shadow-sm">
         <div className="flex flex-col gap-4 border-b border-slate-200 p-5 sm:flex-row sm:items-center sm:justify-between">
-          <div><h2 className="font-extrabold">Customer questions</h2><p className="mt-1 text-xs text-slate-500">Most recent 100 tickets · times shown in UTC</p></div>
-          <div className="flex rounded-xl bg-slate-100 p-1">{(["open", "answered", "all"] as const).map((item) => <Button key={item} type="button" variant="ghost" onClick={() => setFilter(item)} className={`h-9 rounded-lg px-4 text-xs font-bold capitalize ${filter === item ? "bg-white text-blue-700 shadow-sm" : "text-slate-500"}`}>{item}</Button>)}</div>
+          <div><h2 className="font-extrabold">Customer questions</h2><p role="status" className="mt-1 text-xs text-slate-500">Showing {visible.length} of {tickets.length} loaded tickets</p><p className="mt-1 text-xs text-slate-500">Up to 100 tickets, open first · times shown in UTC</p></div>
+          <div role="group" aria-label="Filter support tickets" className="flex rounded-xl bg-slate-100 p-1">{(["open", "answered", "all"] as const).map((item) => <Button key={item} type="button" variant="ghost" aria-pressed={filter === item} onClick={() => setFilter(item)} className={`h-9 rounded-lg px-4 text-xs font-bold capitalize ${filter === item ? "bg-white text-blue-700 shadow-sm" : "text-slate-500"}`}>{item}</Button>)}</div>
         </div>
 
         {visible.length ? (
@@ -166,7 +166,7 @@ export function SupportInbox({ initialTickets }: { initialTickets: SupportTicket
         <DialogContent className="sm:max-w-2xl">
           <DialogHeader><DialogTitle>Reply to {selected?.publicId}</DialogTitle><DialogDescription>The visitor can retrieve this reply securely from the Recomvia Assistant using the ticket credentials stored in their browser.</DialogDescription></DialogHeader>
           {selected && <div className="rounded-xl border border-slate-200 bg-slate-50 p-4"><p className="text-xs font-bold uppercase tracking-[.12em] text-slate-400">Customer question</p><p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-slate-700">{selected.question}</p></div>}
-          <Textarea value={reply} disabled={saving} aria-invalid={showReplyValidation} aria-describedby={showReplyValidation ? "staff-reply-validation" : undefined} onChange={(event) => {
+          <Textarea aria-label="Human reply" value={reply} disabled={saving} aria-invalid={showReplyValidation} aria-describedby={showReplyValidation ? "staff-reply-validation" : undefined} onChange={(event) => {
             if (!selected || activeReply.current !== selected || replyInFlight.current) return;
             currentDraft.current = event.target.value;
             setReply(event.target.value);
