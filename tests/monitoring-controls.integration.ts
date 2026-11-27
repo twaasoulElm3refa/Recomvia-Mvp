@@ -3,7 +3,7 @@ import test from "node:test";
 import { POST } from "../app/api/monitoring/control/route";
 import { ensureWorkspace } from "../db/product";
 import { claimMonitoringJob, scheduleMonitoring } from "../db/analysis";
-import { listMonitoringSchedulesForUser } from "../db/monitoring-controls";
+import { listMonitoringSchedulesForUser, setMonitoringScheduleState } from "../db/monitoring-controls";
 import { analysisPolicy, analysisProjectKey } from "../lib/analysis-policy";
 import { createFixture, state, userA, userB } from "./target-runtime-fixture";
 
@@ -118,6 +118,30 @@ test("an expired account can pause but not resume and cannot edit another accoun
     assert.equal((await POST(request("pause"))).status, 401);
     assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs").get()?.n, 1);
   } finally {
+    sqlite.close();
+  }
+});
+
+test("a monitoring control that loses the guarded update cannot append a duplicate audit event", async () => {
+  const { sqlite } = await seed();
+  const db = state.env.DB as { batch: (statements: unknown[]) => Promise<unknown> };
+  const originalBatch = db.batch.bind(db);
+  try {
+    // Simulate a different request committing the pause after this request's
+    // initial read but before its transaction starts.
+    db.batch = async (statements) => {
+      sqlite.prepare("UPDATE monitoring_schedules SET state = 'paused' WHERE id = ?").run(id);
+      return originalBatch(statements);
+    };
+    await assert.rejects(setMonitoringScheduleState(userA.userId, id, "pause", false), /not_found/);
+    assert.equal(sqlite.prepare("SELECT state FROM monitoring_schedules WHERE id = ?").get(id)?.state, "paused");
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs").get()?.n, 0);
+    db.batch = originalBatch;
+    // A subsequent genuine state change must still write its audit event.
+    assert.equal((await setMonitoringScheduleState(userA.userId, id, "resume", true)).changed, true);
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs").get()?.n, 1);
+  } finally {
+    db.batch = originalBatch;
     sqlite.close();
   }
 });
