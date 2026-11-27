@@ -406,6 +406,31 @@ test("monitor trigger refuses missing configuration and uses the protected endpo
   assert.equal(calls, 1);
 });
 
+test("monitor trigger rejects malformed or credential-bearing origins without disclosing configuration", async () => {
+  let calls = 0;
+  const transport: typeof fetch = async () => {
+    calls++;
+    return Response.json({ processed: 0 });
+  };
+  for (const origin of ["private malformed origin", "https://user:private@recomvia.test", "https://recomvia.test/?private=1"]) {
+    await assert.rejects(triggerMonitoring({ RECOMVIA_ORIGIN: origin, MONITORING_SECRET: secret }, transport),
+      { message: "Monitoring configuration is incomplete" });
+  }
+  assert.equal(calls, 0);
+});
+
+test("monitor trigger sanitizes transport failures without retrying potentially leased work", async () => {
+  const config = { RECOMVIA_ORIGIN: "https://recomvia.test", MONITORING_SECRET: secret };
+  for (const failure of [new Error("private upstream data " + secret), new DOMException("private URL", "TimeoutError")]) {
+    let calls = 0;
+    await assert.rejects(triggerMonitoring(config, async () => {
+      calls++;
+      throw failure;
+    }), { message: "Monitoring endpoint request failed" });
+    assert.equal(calls, 1);
+  }
+});
+
 test("monitor trigger accepts only an idle or completed single-job response", async () => {
   const config = { RECOMVIA_ORIGIN: "https://recomvia.test", MONITORING_SECRET: secret };
   for (const body of [{ processed: 0 }, { processed: 1, status: "completed" }]) {
