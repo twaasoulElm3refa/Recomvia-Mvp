@@ -432,6 +432,61 @@ test("monitor trigger reports failed jobs without logging untrusted status text"
     /Monitoring endpoint returned HTTP 503/);
 });
 
+test("monitor trigger bounds declared and actual response size and cancels rejected streams", async () => {
+  const config = { RECOMVIA_ORIGIN: "https://recomvia.test", MONITORING_SECRET: secret };
+  for (const declared of ["4097", "invalid", "1", undefined]) {
+    let cancelled = false;
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode('{"processed":0,"extra":"'));
+        controller.enqueue(new TextEncoder().encode("界".repeat(1500)));
+      },
+      cancel() { cancelled = true; },
+    });
+    const headers = new Headers({ "Content-Type": "application/json" });
+    if (declared !== undefined) headers.set("Content-Length", declared);
+    await assert.rejects(triggerMonitoring(config, async () => new Response(body, { headers })),
+      { message: "Invalid monitoring response" });
+    assert.equal(cancelled, true);
+    assert.equal(body.locked, false);
+  }
+});
+
+test("monitor trigger sanitizes malformed JSON, invalid UTF-8, and read errors", async () => {
+  const config = { RECOMVIA_ORIGIN: "https://recomvia.test", MONITORING_SECRET: secret };
+  const jsonHeaders = { "Content-Type": "application/json" };
+  const broken = new ReadableStream<Uint8Array>({
+    start(controller) { controller.error(new Error("private upstream data")); },
+  });
+  for (const response of [
+    new Response("private customer data", { headers: jsonHeaders }),
+    new Response(new Uint8Array([0xff, 0xfe]), { headers: jsonHeaders }),
+    new Response(broken, { headers: jsonHeaders }),
+    new Response('{"processed":0}', { headers: { "Content-Type": "text/html" } }),
+  ]) {
+    await assert.rejects(triggerMonitoring(config, async () => response),
+      { message: "Invalid monitoring response" });
+  }
+});
+
+test("monitor trigger accepts valid chunked UTF-8 without requiring Content-Length", async () => {
+  const config = { RECOMVIA_ORIGIN: "https://recomvia.test", MONITORING_SECRET: secret };
+  const bytes = new TextEncoder().encode(JSON.stringify({ processed: 1, status: "completed", note: "عربي" }));
+  const split = bytes.indexOf(0xd8) + 1;
+  assert.ok(split > 0);
+  const body = new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.enqueue(bytes.slice(0, split));
+      controller.enqueue(bytes.slice(split));
+      controller.close();
+    },
+  });
+  await triggerMonitoring(config, async () => new Response(body, {
+    headers: { "Content-Type": "application/json; charset=utf-8" },
+  }));
+  assert.equal(body.locked, false);
+});
+
 test("a repeated provider model cannot masquerade as multiple independent models", async () => {
   await setup("essential", async () => {
     const body = await read(await POST(request(person)));
