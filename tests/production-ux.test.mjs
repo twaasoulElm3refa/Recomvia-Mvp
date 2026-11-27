@@ -1624,3 +1624,48 @@ test("staff reply rejects invalid input locally and sends a corrected trimmed Ar
   await settleAssistantFetch();
   assert.equal(h.dialog().open, false);
 });
+
+
+test("staff reply ignores callbacks from closed dialogs including reopening the same ticket", async () => {
+  const h = staffReplyHarness();
+  h.ticketButton(0).onClick();
+  h.editor().onChange({ target: { value: "Old draft for first ticket" } });
+  const oldEdit = h.editor().onChange;
+  const oldSave = h.publish().onClick;
+  const oldClose = h.dialog().onOpenChange;
+  h.cancel().onClick();
+  for (const index of [1, 0]) {
+    h.ticketButton(index).onClick();
+    const draft = "رد جديد للعميل " + index;
+    h.editor().onChange({ target: { value: draft } });
+    oldEdit({ target: { value: "Stale edit" } });
+    oldSave();
+    oldClose(false);
+    assert.equal(h.dialog().open, true);
+    assert.equal(h.editor().value, draft);
+    assert.equal(h.pending.length, 0);
+    if (index === 1) h.cancel().onClick();
+  }
+  h.publish().onClick();
+  assert.equal(h.pending.length, 1);
+  assert.equal(h.pending[0].url, "/api/support/tickets/one/reply");
+  assert.deepEqual(h.pending[0].body, { reply: "رد جديد للعميل 0" });
+  h.pending[0].finish({ ok: true, status: "answered" });
+  await settleAssistantFetch();
+  assert.equal(h.dialog().open, false);
+});
+
+test("staff reply cannot publish a superseded draft within the current dialog", async () => {
+  const h = staffReplyHarness();
+  h.ticketButton(0).onClick();
+  h.editor().onChange({ target: { value: "First valid draft" } });
+  const stale = h.publish().onClick;
+  h.editor().onChange({ target: { value: "Corrected valid draft" } });
+  stale();
+  assert.equal(h.pending.length, 0);
+  h.publish().onClick();
+  assert.deepEqual(h.pending[0].body, { reply: "Corrected valid draft" });
+  h.pending[0].finish({ ok: true, status: "answered" });
+  await settleAssistantFetch();
+  assert.equal(h.dialog().open, false);
+});
