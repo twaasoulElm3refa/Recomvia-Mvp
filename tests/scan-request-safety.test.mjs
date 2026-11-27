@@ -9,18 +9,24 @@ const compiled = ts.transpileModule(source, {
 }).outputText;
 
 let authenticated = true;
+let authFailure = null;
+let reportFailure = null;
 let workspaceCalls = 0;
 let reportReads = [];
 const boundaryError = new Error("Scan workspace boundary reached");
 const loaded = { exports: {} };
 new Function("require", "module", "exports", compiled)((specifier) => {
   if (specifier === "@/app/auth") return {
-    getAuthenticatedUser: async () => authenticated ? { userId: "customer-1" } : null,
+    getAuthenticatedUser: async () => {
+      if (authFailure) throw authFailure;
+      return authenticated ? { userId: "customer-1" } : null;
+    },
   };
   if (specifier === "@/db/product") return {
     ensureWorkspace: async () => { workspaceCalls++; throw boundaryError; },
     getReportForUser: async (userId, scanId) => {
       reportReads.push([userId, scanId]);
+      if (reportFailure) throw reportFailure;
       return scanId === "scan_abc" ? { scan: { id: scanId }, entitlement: { reportLevel: "full" } } : null;
     },
   };
@@ -372,4 +378,49 @@ test("a completed scan upload clears its deadline before entering the workspace"
   } finally {
     t.mock.timers.reset();
   }
+});
+
+test("scan identity failures fail closed before private reads or provider work", async () => {
+  const before = workspaceCalls;
+  reportReads = [];
+  authFailure = new Error("private@example.test session-token diagnostic");
+  try {
+    for (const response of [
+      await GET(new Request("https://recomvia.test/api/scans?scan=scan_abc")),
+      await POST(request()),
+    ]) {
+      assert.equal(response.status, 503);
+      assert.deepEqual(await response.json(), { code: "temporarily_unavailable" });
+      assert.equal(response.headers.get("Cache-Control"), "no-store");
+      assert.equal(response.headers.get("X-Content-Type-Options"), "nosniff");
+    }
+    assert.deepEqual(reportReads, []);
+    assert.equal(workspaceCalls, before);
+  } finally {
+    authFailure = null;
+  }
+  const recovered = await GET(new Request("https://recomvia.test/api/scans?scan=scan_abc"));
+  assert.equal(recovered.status, 200);
+  assert.deepEqual(reportReads, [["customer-1", "scan_abc"]]);
+});
+
+test("private report store outages return generic non-cacheable 503 and recover", async () => {
+  reportReads = [];
+  const req = new Request("https://recomvia.test/api/scans?scan=scan_abc");
+  reportFailure = new Error("private database diagnostic for customer-1");
+  try {
+    const response = await GET(req);
+    assert.equal(response.status, 503);
+    assert.deepEqual(await response.json(), { code: "temporarily_unavailable" });
+    assert.equal(response.headers.get("Cache-Control"), "no-store");
+    assert.equal(response.headers.get("X-Content-Type-Options"), "nosniff");
+  } finally {
+    reportFailure = null;
+  }
+  const recovered = await GET(req);
+  assert.equal(recovered.status, 200);
+  assert.deepEqual(await recovered.json(), {
+    scan: { id: "scan_abc" }, entitlement: { reportLevel: "full" },
+  });
+  assert.deepEqual(reportReads, [["customer-1", "scan_abc"], ["customer-1", "scan_abc"]]);
 });
