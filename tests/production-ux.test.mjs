@@ -668,7 +668,7 @@ test("staff reply saves only once and keeps the selected draft while the request
   harness.editor().onChange({ target: { value: "Unintended edit" } });
   assert.equal(harness.dialog().open, true);
   assert.equal(harness.editor().value, "رد واضح للعميل");
-  harness.pending[0].finish({});
+  harness.pending[0].finish({ ok: true, status: "answered" });
   await settleAssistantFetch();
   assert.equal(harness.dialog().open, false);
   submit();
@@ -690,7 +690,30 @@ test("staff reply preserves the draft on failure and permits a deliberate retry"
   assert.equal(harness.editor().disabled, false);
   harness.publish().onClick();
   assert.equal(harness.pending.length, 2);
-  harness.pending[1].finish({});
+  harness.pending[1].finish({ ok: true, status: "answered" });
+  await settleAssistantFetch();
+  assert.equal(harness.dialog().open, false);
+});
+
+test("staff reply requires explicit confirmation and retains the draft for unconfirmed responses", async () => {
+  const harness = staffReplyHarness();
+  harness.ticketButton(0).onClick();
+  const draft = "رد موثق للعميل";
+  harness.editor().onChange({ target: { value: draft } });
+  for (const [payload, status] of [
+    [{}, 200], [null, 200], [{ ok: false, status: "answered" }, 200],
+    [{ ok: true, status: "open" }, 200], [{ ok: true, status: "answered" }, 202],
+    [{ error: { detail: "unexpected" } }, 503], [null, 503],
+  ]) {
+    harness.publish().onClick();
+    harness.pending.at(-1).finish(payload, status);
+    await settleAssistantFetch();
+    assert.equal(harness.dialog().open, true);
+    assert.equal(harness.editor().value, draft);
+    assert.equal(harness.editor().disabled, false);
+  }
+  harness.publish().onClick();
+  harness.pending.at(-1).finish({ ok: true, status: "answered" });
   await settleAssistantFetch();
   assert.equal(harness.dialog().open, false);
 });
