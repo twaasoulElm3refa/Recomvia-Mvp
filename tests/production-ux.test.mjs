@@ -1699,3 +1699,34 @@ test("staff inbox treats mailbox characters as address data and never mailto hea
     assert.doesNotMatch(render(email), /href="mailto:/, email);
   }
 });
+
+
+test("staff source links strip legacy private URL parameters and reject normalized network paths", () => {
+  const inboxMocks = {
+    ...mocks,
+    "@/components/ui/badge": { Badge: wrap },
+    "@/components/ui/table": Object.fromEntries(["Table", "TableBody", "TableCell", "TableHead", "TableHeader", "TableRow"].map((key) => [key, wrap])),
+    "@/components/ui/dialog": { ...mocks["@/components/ui/dialog"], DialogFooter: wrap },
+    "@/components/ui/textarea": { Textarea: () => null },
+  };
+  const { SupportInbox } = load("app/support/inbox/support-inbox.tsx", inboxMocks);
+  const render = (pageUrl) => renderToStaticMarkup(React.createElement(SupportInbox, {
+    initialTickets: [{ id: 1, publicId: "RCV-TEST", requesterName: "Test",
+      requesterEmail: "test@example.org", question: "Help with this report", status: "open",
+      createdAt: "2026-11-25T00:00:00Z", pageUrl }],
+  }));
+  for (const [source, expected] of [
+    ["/ar/contact?token=private-example&email=user%40example.org#secret", "/ar/contact"],
+    ["/blog?from=faq", "/blog"],
+    ["/ar/faq#section", "/ar/faq"],
+    ["/old/../ar/faq", "/ar/faq"],
+  ]) {
+    const markup = render(source);
+    assert.ok(markup.includes('href="' + expected + '"'), source);
+    assert.doesNotMatch(markup, /private-example|user%40example\.org|from=faq|#secret|#section/);
+  }
+  for (const source of ["//example.invalid", "/old/..//example.invalid", "/old/%2e%2e//example.invalid",
+    "/\\example.invalid", "/\n/example.invalid", "https://example.invalid"]) {
+    assert.doesNotMatch(render(source), /Source page/, source);
+  }
+});
