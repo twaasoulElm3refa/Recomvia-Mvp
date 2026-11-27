@@ -923,6 +923,26 @@ test("project rename rejects mismatched or malformed saved labels and accepts NF
 });
 
 
+test("project rename ignores obsolete cancel callbacks and preserves the active multilingual draft", () => {
+  const h = projectRenameHarness();
+  h.rename().onClick();
+  const oldCancel = h.cancel().onClick;
+  h.rename().onClick();
+  h.editor().onChange({ target: { value: "مشروع Two" } });
+  oldCancel();
+  assert.equal(h.editor().value, "مشروع Two");
+  const currentCancel = h.cancel().onClick;
+  currentCancel();
+  h.rename(1).onClick();
+  h.editor().onChange({ target: { value: "مشروع جديد" } });
+  currentCancel();
+  assert.equal(h.editor().value, "مشروع جديد");
+  h.cancel().onClick();
+  assert.ok(!findAssistantElement(h.render(), (node) => node.type === "form"));
+  assert.equal(h.pending.length, 0);
+  assert.equal(h.refreshes(), 0);
+});
+
 function monitoringControlHarness(canMonitor = true) {
   const state = [];
   const refs = [];
