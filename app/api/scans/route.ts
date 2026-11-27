@@ -84,19 +84,31 @@ async function readBoundedScanBody(request: Request): Promise<string | null | ty
 }
 
 export async function GET(request: Request) {
-  const user = await getAuthenticatedUser();
-  if (!user) return json({ code: "sign_in" }, 401);
-  const selectors = new URL(request.url).searchParams.getAll("scan");
-  // Report IDs must be unambiguous and bounded before an account-scoped database read.
-  if (selectors.length !== 1 || !/^[a-zA-Z0-9_-]{1,100}$/.test(selectors[0]))
-    return json({ code: "invalid_input" }, 400);
-  const report = await getReportForUser(user.userId, selectors[0]);
-  if (!report) return json({ code: "not_found" }, 404);
-  return json({ scan: report.scan, entitlement: report.entitlement });
+  try {
+    const user = await getAuthenticatedUser();
+    if (!user) return json({ code: "sign_in" }, 401);
+    const selectors = new URL(request.url).searchParams.getAll("scan");
+    // Report IDs must be unambiguous and bounded before an account-scoped database read.
+    if (selectors.length !== 1 || !/^[a-zA-Z0-9_-]{1,100}$/.test(selectors[0]))
+      return json({ code: "invalid_input" }, 400);
+    const report = await getReportForUser(user.userId, selectors[0]);
+    if (!report) return json({ code: "not_found" }, 404);
+    return json({ scan: report.scan, entitlement: report.entitlement });
+  } catch {
+    // Do not turn an identity or report-store outage into a missing report
+    // or expose private database/provider diagnostics through framework errors.
+    return json({ code: "temporarily_unavailable" }, 503);
+  }
 }
 
 export async function POST(request: Request) {
-  const user = await getAuthenticatedUser();
+  let user: AuthUser | null;
+  try {
+    user = await getAuthenticatedUser();
+  } catch {
+    // Fail closed before reading the body, accessing a workspace or starting a provider.
+    return json({ code: "temporarily_unavailable" }, 503);
+  }
   if (!user)
     return json(
       { code: "sign_in", error: "Sign in before starting an analysis." },
