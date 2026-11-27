@@ -90,7 +90,9 @@ function safePageUrl(value: string, origin: string) {
     // A same-origin absolute URL can normalize to a network-path reference.
     // Reject it before stripping the origin so the stored href remains local.
     if (url.pathname.startsWith("//")) return "";
-    return url.pathname + url.search;
+    // Query strings may carry private report parameters or authentication tokens.
+    // Only the source pathname is needed by support staff.
+    return url.pathname;
   } catch {
     return "";
   }

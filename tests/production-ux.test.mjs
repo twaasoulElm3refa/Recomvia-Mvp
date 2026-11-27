@@ -206,7 +206,9 @@ test("staff inbox never renders legacy non-local support source links", () => {
   for (const value of ["//evil.example/path", "/\\evil.example/path", "https://evil.example/path", "/\t/evil.example/path", "javascript:alert(1)"]) {
     assert.doesNotMatch(render(value), /Source page/, value);
   }
-  assert.match(render("/ar/contact?from=help"), /href="\/ar\/contact\?from=help"/);
+  const localMarkup = render("/ar/contact?from=help");
+  assert.match(localMarkup, /href="\/ar\/contact"/);
+  assert.doesNotMatch(localMarkup, /from=help/);
 });
 
 
@@ -1697,5 +1699,36 @@ test("staff inbox treats mailbox characters as address data and never mailto hea
   for (const email of ["test@example.org,other@example.org", "test\r\n@example.org",
     "test\u202e@example.org", "test", "@example.org", "test@", "test\ud800@example.org"]) {
     assert.doesNotMatch(render(email), /href="mailto:/, email);
+  }
+});
+
+
+test("staff source links strip legacy private URL parameters and reject normalized network paths", () => {
+  const inboxMocks = {
+    ...mocks,
+    "@/components/ui/badge": { Badge: wrap },
+    "@/components/ui/table": Object.fromEntries(["Table", "TableBody", "TableCell", "TableHead", "TableHeader", "TableRow"].map((key) => [key, wrap])),
+    "@/components/ui/dialog": { ...mocks["@/components/ui/dialog"], DialogFooter: wrap },
+    "@/components/ui/textarea": { Textarea: () => null },
+  };
+  const { SupportInbox } = load("app/support/inbox/support-inbox.tsx", inboxMocks);
+  const render = (pageUrl) => renderToStaticMarkup(React.createElement(SupportInbox, {
+    initialTickets: [{ id: 1, publicId: "RCV-TEST", requesterName: "Test",
+      requesterEmail: "test@example.org", question: "Help with this report", status: "open",
+      createdAt: "2026-11-25T00:00:00Z", pageUrl }],
+  }));
+  for (const [source, expected] of [
+    ["/ar/contact?token=private-example&email=user%40example.org#secret", "/ar/contact"],
+    ["/blog?from=faq", "/blog"],
+    ["/ar/faq#section", "/ar/faq"],
+    ["/old/../ar/faq", "/ar/faq"],
+  ]) {
+    const markup = render(source);
+    assert.ok(markup.includes('href="' + expected + '"'), source);
+    assert.doesNotMatch(markup, /private-example|user%40example\.org|from=faq|#secret|#section/);
+  }
+  for (const source of ["//example.invalid", "/old/..//example.invalid", "/old/%2e%2e//example.invalid",
+    "/\\example.invalid", "/\n/example.invalid", "https://example.invalid"]) {
+    assert.doesNotMatch(render(source), /Source page/, source);
   }
 });
