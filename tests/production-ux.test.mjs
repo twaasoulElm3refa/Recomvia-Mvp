@@ -1669,3 +1669,33 @@ test("staff reply cannot publish a superseded draft within the current dialog", 
   await settleAssistantFetch();
   assert.equal(h.dialog().open, false);
 });
+
+
+test("staff inbox treats mailbox characters as address data and never mailto headers", () => {
+  const inboxMocks = {
+    ...mocks,
+    "@/components/ui/badge": { Badge: wrap },
+    "@/components/ui/table": Object.fromEntries(["Table", "TableBody", "TableCell", "TableHead", "TableHeader", "TableRow"].map((key) => [key, wrap])),
+    "@/components/ui/dialog": { ...mocks["@/components/ui/dialog"], DialogFooter: wrap },
+    "@/components/ui/textarea": { Textarea: () => null },
+  };
+  const { SupportInbox } = load("app/support/inbox/support-inbox.tsx", inboxMocks);
+  const render = (requesterEmail) => renderToStaticMarkup(React.createElement(SupportInbox, {
+    initialTickets: [{ id: "ticket", publicId: "RCV-TEST", requesterName: "Test",
+      requesterEmail, question: "Help with this report", status: "open",
+      createdAt: "2026-11-25T00:00:00Z", pageUrl: "/contact" }],
+  }));
+  for (const [email, encoded] of [
+    ["test@example.org", "test@example.org"],
+    ["test+tag@example.org", "test%2Btag@example.org"],
+    ["test?bcc=other&subject=x#tag@example.org", "test%3Fbcc%3Dother%26subject%3Dx%23tag@example.org"],
+    ["test%0d%0a@example.org", "test%250d%250a@example.org"],
+    ["عميل@example.org", "%D8%B9%D9%85%D9%8A%D9%84@example.org"],
+  ]) {
+    assert.ok(render(email).includes('href="mailto:' + encoded + '"'), email);
+  }
+  for (const email of ["test@example.org,other@example.org", "test\r\n@example.org",
+    "test\u202e@example.org", "test", "@example.org", "test@", "test\ud800@example.org"]) {
+    assert.doesNotMatch(render(email), /href="mailto:/, email);
+  }
+});
