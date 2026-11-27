@@ -1534,3 +1534,48 @@ test("assistant ignores edit callbacks from obsolete escalation forms", async ()
   field().onChange({ target: { value: "Current edited question" } });
   assert.equal(field().value, "Current edited question");
 });
+
+
+test("assistant ticket status errors and question errors remain independent during concurrent requests", async () => {
+  const h = assistantHarness();
+  const reference = "RCV-TEST-ABCDEF";
+  await createAssistantTicket(h, reference);
+  const alert = (message) => findAssistantElement(h.render(), (node) =>
+    node.props.role === "alert" && node.props.children === message);
+  const check = startAssistantTicketCheck(h, reference);
+  const question = h.ask("Another question about the report");
+  h.pending.at(-1).finish({ error: "Question failed" }, 503);
+  await question;
+  assert.ok(alert("Question failed"));
+  check.finish({ error: "Ticket check failed" }, 503);
+  await settleAssistantFetch();
+  assert.ok(alert("Question failed"), "ticket lookup must not overwrite a question error");
+  assert.ok(alert("Ticket check failed"));
+
+  const retry = startAssistantTicketCheck(h, reference);
+  assert.ok(alert("Question failed"), "checking a ticket must not clear a question error");
+  assert.equal(alert("Ticket check failed"), undefined);
+  retry.finish({ publicId: reference, status: "open", humanReply: null, updatedAt: "2026-11-27 09:00:00" });
+  await settleAssistantFetch();
+  assert.ok(alert("Question failed"));
+  assert.equal(alert("Ticket check failed"), undefined);
+});
+
+test("assistant preserves ticket errors during new questions and clears them for a new ticket", async () => {
+  const h = assistantHarness();
+  await createAssistantTicket(h, "RCV-OLD-ABCDEF");
+  const check = startAssistantTicketCheck(h, "RCV-OLD-ABCDEF");
+  check.finish({ error: "Previous ticket unavailable" }, 503);
+  await settleAssistantFetch();
+  const alert = () => findAssistantElement(h.render(), (node) =>
+    node.props.role === "alert" && node.props.children === "Previous ticket unavailable");
+  assert.ok(alert());
+  const question = h.ask("ما الفرق بين الباقات؟");
+  assert.ok(alert(), "a new question must not hide a ticket error");
+  h.pending.at(-1).finish({ answered: true, answer: "إجابة موثقة", confidence: 90, language: "ar", sourceUrl: "/ar/faq#what-is-recomvia" });
+  await question;
+  assert.ok(alert());
+  await createAssistantTicket(h, "RCV-NEW-ABCDEF");
+  assert.equal(alert(), undefined);
+  assert.equal(h.stored.at(-1)[1].reference, "RCV-NEW-ABCDEF");
+});

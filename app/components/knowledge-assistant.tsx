@@ -116,6 +116,7 @@ export function KnowledgeAssistant() {
   const [sending, setSending] = useState(false);
   const [ticket, setTicket] = useState<StoredTicket | null>(null);
   const [checking, setChecking] = useState(false);
+  const [ticketError, setTicketError] = useState("");
   const [pageArabic, setPageArabic] = useState(false);
   const latestQuestionRequest = useRef(0);
   const escalationInFlight = useRef(false);
@@ -288,6 +289,7 @@ export function KnowledgeAssistant() {
       ++latestTicketStatusRequest.current;
       activeTicket.current = stored;
       setChecking(false);
+      setTicketError("");
       setTicket(stored);
       // The ticket is already saved on the server. Storage being blocked must
       // not turn a successful request into a false error or a duplicate.
@@ -313,7 +315,7 @@ export function KnowledgeAssistant() {
     if (!currentTicket) return;
     const requestId = ++latestTicketStatusRequest.current;
     setChecking(true);
-    setError("");
+    setTicketError("");
     try {
       const response = await fetch("/api/support/tickets/status", {
         method: "POST",
@@ -340,7 +342,7 @@ export function KnowledgeAssistant() {
       }
     } catch (caught) {
       if (requestId === latestTicketStatusRequest.current) {
-        setError(caught instanceof Error ? caught.message : "The ticket could not be checked.");
+        setTicketError(caught instanceof Error ? caught.message : "The ticket could not be checked.");
       }
     } finally {
       if (requestId === latestTicketStatusRequest.current) setChecking(false);
@@ -431,6 +433,7 @@ export function KnowledgeAssistant() {
               <div className="flex items-start justify-between gap-3"><div><p className="text-xs font-bold uppercase tracking-[.12em] text-blue-600">{pageArabic ? "الدعم البشري" : "Human support"}</p><p className="mt-1 font-mono text-sm font-extrabold text-slate-900">{ticket.reference}</p></div><span className={`rounded-full px-2.5 py-1 text-[11px] font-bold ${ticket.status === "answered" ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"}`}>{ticket.status === "answered" ? (pageArabic ? "تم الرد" : "Answered") : (pageArabic ? "بانتظار الرد" : "Waiting")}</span></div>
               <p className="mt-3 text-xs leading-5 text-slate-600">{pageArabic ? "احتفظ بهذا الرقم. يُحفظ مفتاح الوصول الخاص في هذا المتصفح فقط لتسهيل متابعة الحالة." : "Save this reference. Your private access key is stored only in this browser for convenient status checks."}</p>
               {ticket.humanReply ? <div className="mt-4 rounded-xl border border-emerald-200 bg-white p-4"><p className="text-xs font-bold text-emerald-700">{pageArabic ? "رد خدمة العملاء" : "Human reply"}</p><p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-slate-700">{ticket.humanReply}</p></div> : <div className="mt-3 flex items-center gap-2 text-xs font-semibold text-slate-600"><Clock3 className="size-3.5" />{pageArabic ? "سيظهر الرد هنا بعد أن يجيب الفريق." : "A reply will appear here after the team answers."}</div>}
+              {ticketError && <p className="mt-3 rounded-xl border border-red-200 bg-red-50 p-3 text-sm font-semibold text-red-700" role="alert">{ticketError}</p>}
               <Button type="button" variant="outline" onClick={() => void checkTicket()} disabled={checking} className="mt-4 h-10 w-full rounded-xl border-blue-200 bg-white font-bold text-blue-700">{checking ? <><Loader2 className="size-4 animate-spin" />{pageArabic ? "جارٍ التحقق…" : "Checking…"}</> : (pageArabic ? "تحقق من الرد البشري" : "Check for a human reply")}</Button>
             </div>
           )}
