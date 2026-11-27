@@ -893,6 +893,36 @@ test("project rename preserves a failed draft and accepts an intentional retry",
 });
 
 
+test("project rename rejects mismatched or malformed saved labels and accepts NFC confirmation", async () => {
+  const h = projectRenameHarness();
+  const draft = "  مشروع Cafe\u0301  ";
+  const requested = draft.trim();
+  const normalized = requested.normalize("NFC");
+  assert.notEqual(requested, normalized);
+  h.rename().onClick();
+  h.editor().onChange({ target: { value: draft } });
+  const event = { preventDefault() {} };
+  const confirmation = { projectId: "one", projectKeyUnchanged: true, quotasReset: false };
+  for (const displayName of [undefined, null, 123, {}, [normalized], "Different project", requested]) {
+    const pending = h.form().onSubmit(event);
+    h.pending.at(-1).finish({ ...confirmation, displayName });
+    await pending;
+    assert.equal(h.refreshes(), 0);
+    assert.equal(h.editor().value, draft);
+    assert.equal(h.editor().disabled, false);
+  }
+  const retry = h.form().onSubmit(event);
+  assert.deepEqual(h.pending.at(-1).body, {
+    projectId: "one", expectedName: "one", displayName: requested,
+  });
+  h.pending.at(-1).finish({ ...confirmation, displayName: normalized });
+  await retry;
+  assert.equal(h.refreshes(), 1);
+  h.rename().onClick();
+  assert.equal(h.editor().value, normalized);
+});
+
+
 function monitoringControlHarness(canMonitor = true) {
   const state = [];
   const refs = [];
