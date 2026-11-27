@@ -206,7 +206,9 @@ test("staff inbox never renders legacy non-local support source links", () => {
   for (const value of ["//evil.example/path", "/\\evil.example/path", "https://evil.example/path", "/\t/evil.example/path", "javascript:alert(1)"]) {
     assert.doesNotMatch(render(value), /Source page/, value);
   }
-  assert.match(render("/ar/contact?from=help"), /href="\/ar\/contact\?from=help"/);
+  const localMarkup = render("/ar/contact?from=help");
+  assert.match(localMarkup, /href="\/ar\/contact"/);
+  assert.doesNotMatch(localMarkup, /from=help/);
 });
 
 
