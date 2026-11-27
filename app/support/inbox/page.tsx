@@ -15,9 +15,24 @@ export const metadata: Metadata = {
   robots: { index: false, follow: false },
 };
 
+// Remove historical URL parameters before crossing the server/client boundary.
+function sourcePathForClient(value: string): string {
+  if (!/^\/(?!\/)/.test(value) || /[\\\u0000-\u001f\u007f]/.test(value)) return "";
+  try {
+    const origin = "https://recomvia.invalid";
+    const url = new URL(value, origin);
+    return url.origin === origin && !url.pathname.startsWith("//") ? url.pathname : "";
+  } catch {
+    return "";
+  }
+}
+
 export default async function SupportInboxPage() {
   const user = await requireAuthenticatedUser();
   if (!env.RECOMVIA_ADMIN_USER_ID || user.userId !== env.RECOMVIA_ADMIN_USER_ID) notFound();
-  const tickets = await listSupportTickets();
+  const tickets = (await listSupportTickets()).map((ticket) => ({
+    ...ticket,
+    pageUrl: sourcePathForClient(ticket.pageUrl),
+  }));
   return <AppShell title="Human support inbox" description="Questions the grounded assistant could not answer. Review the original question and publish a reply that the visitor can retrieve privately."><><Link href="/support/fix-reviews" className="mb-6 inline-block text-sm font-bold text-blue-700 underline">Fix Review Queue · طلبات مراجعة الإصلاح</Link><SupportInbox initialTickets={tickets} /></></AppShell>;
 }
