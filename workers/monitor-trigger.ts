@@ -34,15 +34,28 @@ async function readMonitorResponse(response: Response): Promise<unknown> {
 
 // One leased project per tick. No public HTTP handler and no customer data in logs.
 export async function triggerMonitoring(env: MonitorEnv, transport: typeof fetch = fetch) {
-  const origin = new URL(env.RECOMVIA_ORIGIN);
+  let origin: URL;
+  try {
+    origin = new URL(env.RECOMVIA_ORIGIN);
+  } catch {
+    // URL parser errors can contain the supplied configuration.
+    throw new Error("Monitoring configuration is incomplete");
+  }
   if (origin.protocol !== "https:" || origin.username || origin.password || origin.pathname !== "/" || origin.search || origin.hash || !env.MONITORING_SECRET || env.MONITORING_SECRET.length < 32)
     throw new Error("Monitoring configuration is incomplete");
-  const response = await transport(new URL("/api/internal/monitor", origin), {
-    method: "POST",
-    headers: { Authorization: `Bearer ${env.MONITORING_SECRET}` },
-    redirect: "error",
-    signal: AbortSignal.timeout(600_000),
-  });
+  let response: Response;
+  try {
+    response = await transport(new URL("/api/internal/monitor", origin), {
+      method: "POST",
+      headers: { Authorization: `Bearer ${env.MONITORING_SECRET}` },
+      redirect: "error",
+      signal: AbortSignal.timeout(600_000),
+    });
+  } catch {
+    // Transport errors can include private URLs or credentials. Do not log
+    // upstream messages or retry a request that may already have leased a job.
+    throw new Error("Monitoring endpoint request failed");
+  }
   if (!response.ok) {
     void response.body?.cancel().catch(() => {});
     throw new Error(`Monitoring endpoint returned HTTP ${response.status}`);
