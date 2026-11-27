@@ -1,4 +1,5 @@
 import { env } from "cloudflare:workers";
+import { monitoringScanStatus } from "@/lib/monitoring-scan-status";
 import { claimMonitoringJob, releaseMonitoringJob } from "@/db/analysis";
 import { ensureWorkspace } from "@/db/product";
 import { runScanForUser } from "@/app/api/scans/route";
@@ -33,8 +34,7 @@ export async function POST(request: Request) {
       const input = JSON.parse(job.inputJson) as TargetInput;
       const target = JSON.parse(job.targetJson) as AnalysisTarget;
       const result = await runScanForUser(user, { input: input.input, kind: input.kind, context: input.context, language: input.language }, { monitoring: true, confirmedTarget: target });
-      const body = await result.json() as { code?: string; status?: string };
-      status = result.status === 201 ? "completed" : body.code || body.status || "monitor_failed";
+      status = await monitoringScanStatus(result);
       pause = ["subscription_required", "project_limit", "needs_confirmation", "identity_unresolved", "plan_changed"].includes(status);
     }
   } catch { status = "monitor_failed"; }

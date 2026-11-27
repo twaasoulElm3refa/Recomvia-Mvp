@@ -9,10 +9,21 @@ const compiled = ts.transpileModule(source, {
   compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
 }).outputText;
 
+// Load the real classifier so route-level regression tests exercise its contract.
+const classifier = { exports: {} };
+const classifierSource = readFileSync("lib/monitoring-scan-status.ts", "utf8");
+const classifierCompiled = ts.transpileModule(classifierSource, {
+  compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
+}).outputText;
+new Function("module", "exports", classifierCompiled)(classifier, classifier.exports);
+
 const env = { MONITORING_SECRET: "s".repeat(48) };
 let claimCalls = 0;
 let scanCalls = 0;
 let digests = 0;
+let pendingJob = null;
+let scanResponse = null;
+const releases = [];
 const crypto = {
   subtle: {
     digest: (...args) => {
@@ -24,15 +35,19 @@ const crypto = {
 const loaded = { exports: {} };
 new Function("require", "module", "exports", "crypto", compiled)((name) => {
   if (name === "cloudflare:workers") return { env };
+  if (name === "@/lib/monitoring-scan-status") return classifier.exports;
   if (name === "@/db/analysis") return {
-    claimMonitoringJob: async () => { claimCalls++; return null; },
-    releaseMonitoringJob: async () => { throw new Error("unexpected release"); },
+    claimMonitoringJob: async () => { claimCalls++; return pendingJob; },
+    releaseMonitoringJob: async (job, status, pause) => {
+      assert.equal(job, pendingJob);
+      releases.push({ status, pause });
+    },
   };
   if (name === "@/db/product") return {
-    ensureWorkspace: async () => { throw new Error("unexpected workspace"); },
+    ensureWorkspace: async () => { assert.ok(pendingJob); return { organizationId: pendingJob.organizationId }; },
   };
   if (name === "@/app/api/scans/route") return {
-    runScanForUser: async () => { scanCalls++; throw new Error("unexpected scan"); },
+    runScanForUser: async () => { scanCalls++; assert.ok(scanResponse); return scanResponse; },
   };
   throw new Error("Unexpected import: " + name);
 }, loaded, loaded.exports, crypto);
@@ -88,4 +103,31 @@ test("correct scheduled-worker Bearer token preserves idle success contract", as
   assert.deepEqual(await response.json(), { processed: 0 });
   assert.equal(claimCalls, 1);
   assert.equal(scanCalls, 0);
+});
+
+test("authenticated monitoring releases a claimed job with only a trusted result and pause policy", async () => {
+  pendingJob = {
+    userId: "test-user", email: "test@example.invalid", displayName: "Test",
+    organizationId: "test-org",
+    inputJson: JSON.stringify({ input: "Example", kind: "entity", language: "en" }),
+    targetJson: "{}",
+  };
+  try {
+    for (const [body, httpStatus, status, pause] of [
+      [{ code: "completed" }, 500, "monitor_failed", false],
+      [{ code: "subscription_required" }, 403, "subscription_required", true],
+      [{ privateReport: "not returned" }, 201, "completed", false],
+    ]) {
+      scanResponse = Response.json(body, { status: httpStatus });
+      const before = releases.length;
+      const response = await POST(request("Bearer " + env.MONITORING_SECRET));
+      privateResponse(response, 200);
+      assert.deepEqual(await response.json(), { processed: 1, status });
+      assert.equal(releases.length, before + 1);
+      assert.deepEqual(releases.at(-1), { status, pause });
+    }
+  } finally {
+    pendingJob = null;
+    scanResponse = null;
+  }
 });
