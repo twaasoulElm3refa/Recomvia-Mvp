@@ -35,7 +35,7 @@ export function ProjectSlotControls({
     setError("");
   }
   function cancel() {
-    if (inFlight.current) return;
+    if (!editing || currentEdit.current !== editing || inFlight.current) return;
     currentEdit.current = null;
     setEditing(null);
     setError("");
