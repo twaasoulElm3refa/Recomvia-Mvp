@@ -22,6 +22,7 @@ export function ProjectSlotControls({
   const currentEdit = useRef<{ id: string } | null>(null);
   const inFlight = useRef(false);
   const [value, setValue] = useState("");
+  const currentValue = useRef("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const count = projects.filter((item) => item.withinPlanLimit).length;
@@ -31,6 +32,7 @@ export function ProjectSlotControls({
     const edit = { id: project.id };
     currentEdit.current = edit;
     setEditing(edit);
+    currentValue.current = project.displayName;
     setValue(project.displayName);
     setError("");
   }
@@ -43,6 +45,8 @@ export function ProjectSlotControls({
   async function save(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!editing || currentEdit.current !== editing || inFlight.current) return;
+    // A submit captured before the latest input event must not save an older draft.
+    if (currentValue.current !== value) return;
     const project = projects.find((item) => item.id === editing.id);
     const requestedName = value.trim();
     if (!project || !project.canRename || requestedName.length < 2 || requestedName.length > 80) return;
@@ -143,7 +147,12 @@ export function ProjectSlotControls({
                   <label className="min-w-[180px] flex-1 text-xs font-bold text-slate-600">
                     {ar ? "اسم المشروع المعروض" : "Project display name"}
                     <Input required minLength={2} maxLength={80} value={value} disabled={saving}
-                      onChange={(event) => { if (!inFlight.current && currentEdit.current === editing) setValue(event.target.value); }} className="mt-1" />
+                      onChange={(event) => {
+                        if (!inFlight.current && currentEdit.current === editing) {
+                          currentValue.current = event.target.value;
+                          setValue(event.target.value);
+                        }
+                      }} className="mt-1" />
                   </label>
                   <div className="flex items-end gap-2">
                     <Button type="submit" disabled={saving || value.trim().length < 2} size="sm">
