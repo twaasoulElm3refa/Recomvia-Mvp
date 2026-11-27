@@ -1,4 +1,4 @@
-import { getAuthenticatedUser } from "@/app/auth";
+import { getAuthenticatedUser, type AuthUser } from "@/app/auth";
 import { getEntitlementForUser } from "@/db/product";
 import { MonitoringControlError, setMonitoringScheduleState } from "@/db/monitoring-controls";
 
@@ -8,7 +8,13 @@ const respond = (data: unknown, status: number) => Response.json(data, {
 });
 
 export async function POST(request: Request) {
-  const user = await getAuthenticatedUser();
+  let user: AuthUser | null;
+  try {
+    user = await getAuthenticatedUser();
+  } catch {
+    // Fail closed before reading the upload or changing a monitoring schedule.
+    return respond({ code: "temporarily_unavailable" }, 503);
+  }
   if (!user) return respond({ code: "sign_in" }, 401);
   const origin = request.headers.get("origin");
   if (!origin || origin !== new URL(request.url).origin) return respond({ code: "invalid_origin" }, 403);
