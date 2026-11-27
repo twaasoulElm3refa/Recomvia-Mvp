@@ -1732,3 +1732,32 @@ test("staff source links strip legacy private URL parameters and reject normaliz
     assert.doesNotMatch(render(source), /Source page/, source);
   }
 });
+
+
+test("staff inbox strips legacy URL secrets before serializing client props", async () => {
+  const inputs = [
+    ["/ar/contact?token=private-token#private-fragment", "/ar/contact"],
+    ["/old/../ar/faq?email=private-email", "/ar/faq"],
+    ["/dashboard", "/dashboard"],
+    ["/old/%2e%2e//example.invalid", ""],
+    ["//example.invalid", ""],
+    ["/\\example.invalid", ""],
+    ["https://example.invalid/?token=private-token", ""],
+  ];
+  const rows = inputs.map(([pageUrl], index) => ({ id: index + 1, pageUrl, question: "A valid question" }));
+  const { default: InboxPage } = load("app/support/inbox/page.tsx", {
+    "cloudflare:workers": { env: { RECOMVIA_ADMIN_USER_ID: "staff" } },
+    "next/navigation": { notFound: () => { throw new Error("not_found"); } },
+    "@/app/auth": { requireAuthenticatedUser: async () => ({ userId: "staff" }) },
+    "@/app/components/app-shell": { AppShell: wrap },
+    "@/app/components/navigation-link": { NavigationLink: Link },
+    "@/db/support": { listSupportTickets: async () => rows },
+    "./support-inbox": { SupportInbox: () => null },
+  });
+  const element = await InboxPage();
+  const props = element.props.children.props.children[1].props.initialTickets;
+  assert.deepEqual(props.map((row) => row.pageUrl), inputs.map(([, expected]) => expected));
+  assert.doesNotMatch(JSON.stringify(props), /private-token|private-fragment|private-email|example\.invalid/);
+  assert.deepEqual(props.map((row) => row.question), rows.map((row) => row.question));
+  assert.deepEqual(rows.map((row) => row.pageUrl), inputs.map(([original]) => original));
+});
