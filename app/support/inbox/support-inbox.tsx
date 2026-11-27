@@ -9,6 +9,27 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Textarea } from "@/components/ui/textarea";
 import type { SupportTicket } from "@/db/support";
 
+// Treat the stored mailbox as data, never as mailto query parameters or recipients.
+function mailboxHref(email: string): string | null {
+  const at = email.indexOf("@");
+  if (at < 1 || at !== email.lastIndexOf("@") || at === email.length - 1 ||
+      /[\s,;<>()[\]:"\\\u0000-\u001f\u007f\u061c\u200e-\u200f\u202a-\u202e\u2066-\u2069]/u.test(email)) return null;
+  try {
+    return "mailto:" + encodeURIComponent(email.slice(0, at)) + "@" + encodeURIComponent(email.slice(at + 1));
+  } catch {
+    // Malformed legacy Unicode must not break the entire staff inbox.
+    return null;
+  }
+}
+
+function CustomerEmail({ email }: { email: string }) {
+  const href = mailboxHref(email);
+  const style = "mt-1 flex items-center gap-1 break-all text-xs text-slate-500";
+  return href
+    ? <a href={href} className={style + " hover:text-blue-700"}><Mail className="size-3" />{email}</a>
+    : <span className={style}>{email}</span>;
+}
+
 function formatDate(value: string) {
   try {
     const normalized = /(?:Z|[+-]\d\d:\d\d)$/.test(value) ? value : `${value.replace(" ", "T")}Z`;
@@ -117,7 +138,7 @@ export function SupportInbox({ initialTickets }: { initialTickets: SupportTicket
             <TableHeader><TableRow className="bg-slate-50"><TableHead className="px-5">Ticket</TableHead><TableHead>Customer</TableHead><TableHead className="min-w-[320px]">Question</TableHead><TableHead>Status</TableHead><TableHead className="pr-5 text-right">Action</TableHead></TableRow></TableHeader>
             <TableBody>{visible.map((ticket) => <TableRow key={ticket.id}>
               <TableCell className="px-5 align-top"><p className="font-mono text-xs font-bold text-blue-700">{ticket.publicId}</p><p className="mt-1 text-xs text-slate-400">{formatDate(ticket.createdAt)}</p></TableCell>
-              <TableCell className="align-top"><p className="font-bold text-slate-900">{ticket.requesterName}</p><a href={`mailto:${ticket.requesterEmail}`} className="mt-1 flex items-center gap-1 text-xs text-slate-500 hover:text-blue-700"><Mail className="size-3" />{ticket.requesterEmail}</a></TableCell>
+              <TableCell className="align-top"><p className="font-bold text-slate-900">{ticket.requesterName}</p><CustomerEmail email={ticket.requesterEmail} /></TableCell>
               <TableCell className="max-w-[480px] whitespace-normal align-top"><p className="line-clamp-3 text-sm leading-6 text-slate-700">{ticket.question}</p>{/^\/(?!\/)/.test(ticket.pageUrl) && !/[\\\u0000-\u001f\u007f]/.test(ticket.pageUrl) && <a href={ticket.pageUrl} target="_blank" rel="noreferrer" className="mt-2 inline-flex items-center gap-1 text-xs font-bold text-blue-700">Source page <ExternalLink className="size-3" /></a>}</TableCell>
               <TableCell className="align-top"><Badge variant="outline" className={ticket.status === "answered" ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "border-amber-200 bg-amber-50 text-amber-700"}>{ticket.status}</Badge></TableCell>
               <TableCell className="pr-5 text-right align-top"><Button type="button" variant={ticket.status === "open" ? "default" : "outline"} onClick={() => startReply(ticket)} disabled={saving} className={`rounded-xl font-bold ${ticket.status === "open" ? "bg-blue-600" : ""}`}><MessageSquareReply className="size-4" />{ticket.status === "open" ? "Reply" : "Edit reply"}</Button></TableCell>
