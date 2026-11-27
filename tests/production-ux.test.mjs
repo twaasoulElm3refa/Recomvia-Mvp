@@ -1602,3 +1602,25 @@ test("assistant preserves ticket errors during new questions and clears them for
   assert.equal(alert(), undefined);
   assert.equal(h.stored.at(-1)[1].reference, "RCV-NEW-ABCDEF");
 });
+
+test("staff reply rejects invalid input locally and sends a corrected trimmed Arabic reply", async () => {
+  const h = staffReplyHarness();
+  h.ticketButton(0).onClick();
+  for (const invalid of ["  ", "abcd", "a".repeat(4001), "رد\u202e للعميل", "hello\u0000world", "\ud800".repeat(3000)]) {
+    h.editor().onChange({ target: { value: invalid } });
+    assert.equal(h.publish().disabled, true);
+    assert.equal(h.editor()["aria-invalid"], true);
+    h.publish().onClick();
+    assert.equal(h.pending.length, 0, "invalid drafts must not reach the endpoint");
+    assert.equal(h.editor().value, invalid);
+  }
+  const valid = "رد عربي واضح\tللعميل\nمع تفاصيل إضافية";
+  h.editor().onChange({ target: { value: "  " + valid + "  " } });
+  assert.equal(h.publish().disabled, false);
+  assert.equal(h.editor()["aria-invalid"], false);
+  h.publish().onClick();
+  assert.deepEqual(h.pending[0].body, { reply: valid });
+  h.pending[0].finish({ ok: true, status: "answered" });
+  await settleAssistantFetch();
+  assert.equal(h.dialog().open, false);
+});
