@@ -8,12 +8,16 @@ const compiled = ts.transpileModule(source, {
   compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
 }).outputText;
 let authenticated = true;
+let authFailure = null;
 let changes = 0;
 let entitlements = 0;
 const loaded = { exports: {} };
 new Function("require", "module", "exports", compiled)((name) => {
   if (name === "@/app/auth") return {
-    getAuthenticatedUser: async () => authenticated ? { userId: "owner" } : null,
+    getAuthenticatedUser: async () => {
+      if (authFailure) throw authFailure;
+      return authenticated ? { userId: "owner" } : null;
+    },
   };
   if (name === "@/db/product") return {
     getEntitlementForUser: async () => { entitlements++; return { canMonitor: true }; },
@@ -165,4 +169,27 @@ test("completed streamed resume clears the deadline and invokes entitlement and 
   } finally {
     t.mock.timers.reset();
   }
+});
+
+test("monitoring identity outages fail closed for pause and resume, then recover", async () => {
+  const before = [changes, entitlements];
+  authFailure = new Error("private session diagnostic owner@example.test");
+  try {
+    for (const action of ["pause", "resume"]) {
+      const req = request(JSON.stringify({ scheduleId: "schedule_1", action }));
+      const response = await POST(req);
+      assert.equal(response.status, 503);
+      assert.deepEqual(await response.json(), { code: "temporarily_unavailable" });
+      assert.equal(response.headers.get("Cache-Control"), "no-store");
+      assert.equal(response.headers.get("X-Content-Type-Options"), "nosniff");
+      assert.equal(req.bodyUsed, false);
+      assert.deepEqual([changes, entitlements], before);
+    }
+  } finally {
+    authFailure = null;
+  }
+  const response = await POST(request(JSON.stringify({ scheduleId: "schedule_1", action: "resume" })));
+  assert.equal(response.status, 200);
+  assert.equal((await response.json()).scanStarted, false);
+  assert.deepEqual([changes, entitlements], before.map((value) => value + 1));
 });
