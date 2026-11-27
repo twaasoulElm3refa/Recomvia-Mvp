@@ -177,15 +177,17 @@ test("support source links stay on the app origin even for backslash or absolute
   }
 
   for (const [pageUrl, expected] of [
-    ["/ar/contact?from=help", "/ar/contact?from=help"],
-    ["https://recomvia.test/blog?from=faq#section", "/blog?from=faq"],
+    ["/ar/contact?from=help", "/ar/contact"],
+    ["https://recomvia.test/blog?from=faq#section", "/blog"],
+    ["/ar/contact?token=private-example&email=user%40example.org#secret", "/ar/contact"],
+    ["/dashboard/reports/123?redirect=https%3A%2F%2Fexample.invalid", "/dashboard/reports/123"],
   ]) {
     const response = await POST(request(JSON.stringify({ ...input, pageUrl })));
     assert.equal(response.status, 201, pageUrl);
     assert.equal(created.at(-1).pageUrl, expected);
     assert.equal(new URL(expected, "https://recomvia.test").origin, "https://recomvia.test");
   }
-  assert.equal(created.length, base + unsafeSources.length + 2);
+  assert.equal(created.length, base + unsafeSources.length + 4);
 });
 
 
