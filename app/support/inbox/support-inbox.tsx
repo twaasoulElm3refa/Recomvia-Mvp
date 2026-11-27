@@ -40,6 +40,7 @@ export function SupportInbox({ initialTickets }: { initialTickets: SupportTicket
   const [error, setError] = useState("");
   const replyInFlight = useRef(false);
   const activeReply = useRef<SupportTicket | null>(null);
+  const currentDraft = useRef("");
   const visible = useMemo(() => tickets.filter((ticket) => filter === "all" || ticket.status === filter), [filter, tickets]);
   const openCount = tickets.filter((ticket) => ticket.status === "open").length;
   const replyValidation = validateReply(reply);
@@ -47,20 +48,23 @@ export function SupportInbox({ initialTickets }: { initialTickets: SupportTicket
 
   function startReply(ticket: SupportTicket) {
     if (replyInFlight.current) return;
-    activeReply.current = ticket;
-    setSelected(ticket);
-    setReply(ticket.humanReply || "");
+    // Each opening gets its own identity, even when reopening the same ticket.
+    const session = { ...ticket };
+    activeReply.current = session;
+    currentDraft.current = ticket.humanReply || "";
+    setSelected(session);
+    setReply(currentDraft.current);
     setError("");
   }
 
   function dismissReply() {
-    if (replyInFlight.current) return;
+    if (!selected || activeReply.current !== selected || replyInFlight.current) return;
     activeReply.current = null;
     setSelected(null);
   }
 
   async function saveReply() {
-    if (!selected || activeReply.current !== selected || replyInFlight.current || replyValidation) return;
+    if (!selected || activeReply.current !== selected || replyInFlight.current || reply !== currentDraft.current || replyValidation) return;
     replyInFlight.current = true;
     setSaving(true);
     setError("");
@@ -126,7 +130,11 @@ export function SupportInbox({ initialTickets }: { initialTickets: SupportTicket
         <DialogContent className="sm:max-w-2xl">
           <DialogHeader><DialogTitle>Reply to {selected?.publicId}</DialogTitle><DialogDescription>The visitor can retrieve this reply securely from the Recomvia Assistant using the ticket credentials stored in their browser.</DialogDescription></DialogHeader>
           {selected && <div className="rounded-xl border border-slate-200 bg-slate-50 p-4"><p className="text-xs font-bold uppercase tracking-[.12em] text-slate-400">Customer question</p><p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-slate-700">{selected.question}</p></div>}
-          <Textarea value={reply} disabled={saving} aria-invalid={showReplyValidation} aria-describedby={showReplyValidation ? "staff-reply-validation" : undefined} onChange={(event) => { if (!replyInFlight.current) setReply(event.target.value); }} minLength={5} maxLength={4000} placeholder="Write a clear, complete human reply…" className="min-h-44 rounded-xl" />
+          <Textarea value={reply} disabled={saving} aria-invalid={showReplyValidation} aria-describedby={showReplyValidation ? "staff-reply-validation" : undefined} onChange={(event) => {
+            if (!selected || activeReply.current !== selected || replyInFlight.current) return;
+            currentDraft.current = event.target.value;
+            setReply(event.target.value);
+          }} minLength={5} maxLength={4000} placeholder="Write a clear, complete human reply…" className="min-h-44 rounded-xl" />
           {showReplyValidation && <p id="staff-reply-validation" className="text-sm font-semibold text-red-700">{replyValidation}</p>}
           {error && <p role="alert" className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm font-semibold text-red-700">{error}</p>}
           <DialogFooter><Button type="button" variant="outline" onClick={dismissReply} disabled={saving} className="rounded-xl">Cancel</Button><Button type="button" onClick={() => void saveReply()} disabled={saving || Boolean(replyValidation)} className="rounded-xl bg-blue-600 font-bold">{saving ? <><Loader2 className="size-4 animate-spin" />Saving…</> : "Publish human reply"}</Button></DialogFooter>
