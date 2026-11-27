@@ -583,7 +583,7 @@ test("completed escalation does not dismiss a newer unanswered question", async 
 });
 
 
-function staffReplyHarness() {
+function staffReplyHarness(questionForTicket = (id) => "Question " + id) {
   const state = [];
   const refs = [];
   const pending = [];
@@ -621,7 +621,7 @@ function staffReplyHarness() {
     inboxMocks[id] ?? require(id), loadedModule, loadedModule.exports, fakeFetch);
   const initialTickets = ["one", "two"].map((id) => ({
     id, publicId: "RCV-" + id, requesterName: "Test", requesterEmail: "test@example.org",
-    question: "Question " + id, status: "open", pageUrl: "/contact",
+    question: questionForTicket(id), status: "open", pageUrl: "/contact",
     createdAt: "2026-11-25T00:00:00Z",
   }));
   const render = () => {
@@ -652,7 +652,7 @@ function staffReplyHarness() {
   const cancel = () => element((node) => node.type === Button && node.props.children === "Cancel");
   const filterButton = (value) => element((node) => node.type === Button && node.props.children === value);
   const summary = () => element((node) => node.props.role === "status");
-  return { pending, ticketButton, editor, dialog, publish, cancel, filterButton, summary };
+  return { pending, ticketButton, editor, dialog, publish, cancel, filterButton, summary, element };
 }
 
 test("staff reply saves only once and keeps the selected draft while the request is pending", async () => {
@@ -1788,4 +1788,24 @@ test("staff inbox exposes filter selection, loaded counts and a named reply edit
   assert.equal(count(), "Showing 1 of 2 loaded tickets");
   h.filterButton("answered").onClick();
   assert.equal(count(), "Showing 1 of 2 loaded tickets");
+});
+
+test("staff reply dialog keeps long mixed-direction questions and the editor usable in a short viewport", () => {
+  const question = "سؤال عن التقرير\n" + "https://example.test/" + "x".repeat(1200);
+  const h = staffReplyHarness(() => question);
+  const preview = h.element((node) => node.props.className?.includes("line-clamp-3") && node.props.children === question);
+  assert.equal(preview.dir, "auto");
+  assert.ok(preview.className.includes("[overflow-wrap:anywhere]"));
+  h.ticketButton(0).onClick();
+  const dialogContent = h.element((node) => node.props.className?.includes("sm:max-w-2xl"));
+  assert.ok(dialogContent.className.includes("max-h-[calc(100dvh-2rem)]"));
+  assert.ok(dialogContent.className.includes("overflow-y-auto"));
+  const fullQuestion = h.element((node) => node.props.className?.includes("whitespace-pre-wrap") && node.props.children === question);
+  assert.equal(fullQuestion.dir, "auto");
+  assert.ok(fullQuestion.className.includes("[overflow-wrap:anywhere]"));
+  assert.equal(h.editor().dir, "auto");
+  h.editor().onChange({ target: { value: "رد عربي واضح" } });
+  assert.equal(h.editor().value, "رد عربي واضح");
+  assert.equal(h.publish().disabled, false);
+  assert.equal(h.pending.length, 0);
 });
