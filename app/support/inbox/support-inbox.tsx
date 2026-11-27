@@ -77,26 +77,35 @@ export function SupportInbox({ initialTickets }: { initialTickets: SupportTicket
   const replyInFlight = useRef(false);
   const activeReply = useRef<SupportTicket | null>(null);
   const currentDraft = useRef("");
+  // Keep only edited drafts for loaded tickets, in memory for this page lifetime.
+  const retainedDrafts = useRef(new Map<SupportTicket["id"], string>());
   const visible = useMemo(() => tickets.filter((ticket) => filter === "all" || ticket.status === filter), [filter, tickets]);
   const openCount = tickets.filter((ticket) => ticket.status === "open").length;
   const replyValidation = validateReply(reply);
   const showReplyValidation = Boolean(reply && replyValidation);
 
   function startReply(ticket: SupportTicket) {
-    if (replyInFlight.current) return;
+    if (replyInFlight.current || activeReply.current) return;
     // Each opening gets its own identity, even when reopening the same ticket.
     const session = { ...ticket };
     activeReply.current = session;
-    currentDraft.current = ticket.humanReply || "";
+    currentDraft.current = retainedDrafts.current.get(ticket.id) ?? (ticket.humanReply || "");
     setSelected(session);
     setReply(currentDraft.current);
     setError("");
   }
 
-  function dismissReply() {
+  function dismissReply(discard = false) {
     if (!selected || activeReply.current !== selected || replyInFlight.current) return;
+    if (discard || currentDraft.current === (selected.humanReply || "")) {
+      retainedDrafts.current.delete(selected.id);
+    } else {
+      retainedDrafts.current.set(selected.id, currentDraft.current);
+    }
     activeReply.current = null;
+    currentDraft.current = "";
     setSelected(null);
+    setReply("");
   }
 
   async function saveReply() {
@@ -123,7 +132,9 @@ export function SupportInbox({ initialTickets }: { initialTickets: SupportTicket
       }
       const updated: SupportTicket = { ...selected, humanReply: reply.trim(), status: "answered", answeredAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
       setTickets((current) => current.map((ticket) => ticket.id === selected.id ? updated : ticket));
+      retainedDrafts.current.delete(selected.id);
       activeReply.current = null;
+      currentDraft.current = "";
       setSelected(null);
       setReply("");
     } catch (caught) {
@@ -173,7 +184,8 @@ export function SupportInbox({ initialTickets }: { initialTickets: SupportTicket
           }} minLength={5} maxLength={4000} placeholder="Write a clear, complete human reply…" className="min-h-44 rounded-xl" />
           {showReplyValidation && <p id="staff-reply-validation" className="text-sm font-semibold text-red-700">{replyValidation}</p>}
           {error && <p role="alert" className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm font-semibold text-red-700">{error}</p>}
-          <DialogFooter><Button type="button" variant="outline" onClick={dismissReply} disabled={saving} className="rounded-xl">Cancel</Button><Button type="button" onClick={() => void saveReply()} disabled={saving || Boolean(replyValidation)} className="rounded-xl bg-blue-600 font-bold">{saving ? <><Loader2 className="size-4 animate-spin" />Saving…</> : "Publish human reply"}</Button></DialogFooter>
+          <p className="text-xs text-slate-500">Closing this dialog keeps unsaved edits until you reload or leave this page. Cancel discards them.</p>
+          <DialogFooter><Button type="button" variant="outline" onClick={() => dismissReply(true)} disabled={saving} className="rounded-xl">Cancel</Button><Button type="button" onClick={() => void saveReply()} disabled={saving || Boolean(replyValidation)} className="rounded-xl bg-blue-600 font-bold">{saving ? <><Loader2 className="size-4 animate-spin" />Saving…</> : "Publish human reply"}</Button></DialogFooter>
         </DialogContent>
       </Dialog>
     </>

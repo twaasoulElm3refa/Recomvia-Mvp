@@ -1809,3 +1809,43 @@ test("staff reply dialog keeps long mixed-direction questions and the editor usa
   assert.equal(h.publish().disabled, false);
   assert.equal(h.pending.length, 0);
 });
+
+test("staff reply retains drafts on incidental dismissal but isolates tickets and honors Cancel", async () => {
+  const h = staffReplyHarness();
+  const draft = "رد عربي غير منشور";
+  h.ticketButton(0).onClick();
+  h.editor().onChange({ target: { value: draft } });
+  // A second open callback cannot replace the active dialog.
+  h.ticketButton(1).onClick();
+  assert.equal(h.editor().value, draft);
+  h.dialog().onOpenChange(false);
+  assert.equal(h.dialog().open, false);
+  assert.equal(h.pending.length, 0);
+  h.ticketButton(1).onClick();
+  assert.equal(h.editor().value, "");
+  h.editor().onChange({ target: { value: "Other ticket draft" } });
+  h.dialog().onOpenChange(false);
+  h.ticketButton(0).onClick();
+  assert.equal(h.editor().value, draft);
+  h.cancel().onClick();
+  h.ticketButton(0).onClick();
+  assert.equal(h.editor().value, "");
+  h.cancel().onClick();
+  h.ticketButton(1).onClick();
+  assert.equal(h.editor().value, "Other ticket draft");
+  h.publish().onClick();
+  assert.deepEqual(h.pending[0].body, { reply: "Other ticket draft" });
+  h.pending[0].finish({ ok: true, status: "answered" });
+  await settleAssistantFetch();
+  h.filterButton("answered").onClick();
+  h.ticketButton(0).onClick();
+  assert.equal(h.editor().value, "Other ticket draft");
+  h.editor().onChange({ target: { value: "Edited again" } });
+  h.dialog().onOpenChange(false);
+  h.ticketButton(0).onClick();
+  assert.equal(h.editor().value, "Edited again");
+  h.cancel().onClick();
+  h.ticketButton(0).onClick();
+  assert.equal(h.editor().value, "Other ticket draft");
+  assert.equal(h.pending.length, 1);
+});
