@@ -240,6 +240,13 @@ export function KnowledgeAssistant() {
     void ask(question);
   }
 
+  // Preserve the submitted draft and ignore queued callbacks from obsolete forms.
+  function editEscalationField(setField: (value: string) => void, value: string) {
+    if (!result || result !== activeEscalationResult.current || escalationInFlight.current ||
+        lastSubmittedQuestionRequest.current === latestQuestionRequest.current) return;
+    setField(value);
+  }
+
   async function sendToHuman(event: FormEvent) {
     event.preventDefault();
     const questionRequestId = latestQuestionRequest.current;
@@ -411,10 +418,10 @@ export function KnowledgeAssistant() {
           {showEscalation && (
             <form onSubmit={sendToHuman} aria-busy={sending} className="mt-4 space-y-3 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm" dir={arabic ? "rtl" : "ltr"}>
               <div><p className="font-extrabold text-slate-900">{arabic ? "إرسال إلى خدمة العملاء" : "Send to customer service"}</p><p className="mt-1 text-xs leading-5 text-slate-500">{arabic ? "سننشئ تذكرة خاصة برقم متابعة، وسيظهر الرد البشري داخل المساعد." : "We’ll create a private ticket with a tracking reference. The human reply will appear here."}</p></div>
-              <Input aria-label={arabic ? "الاسم" : "Name"} autoComplete="name" value={name} onChange={(event) => setName(event.target.value)} placeholder={arabic ? "الاسم" : "Name"} minLength={2} maxLength={80} required className="h-11 rounded-xl" />
-              <Input aria-label={arabic ? "البريد الإلكتروني" : "Email address"} autoComplete="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder={arabic ? "البريد الإلكتروني" : "Email address"} type="email" required className="h-11 rounded-xl" dir="ltr" />
-              <Textarea aria-label={arabic ? "سؤال الدعم" : "Support question"} dir="auto" value={supportQuestion} onChange={(event) => setSupportQuestion(event.target.value)} minLength={10} maxLength={2000} required className="min-h-28 rounded-xl" />
-              <div className="sr-only" aria-hidden="true"><label>Company website<input tabIndex={-1} autoComplete="off" value={honeypot} onChange={(event) => setHoneypot(event.target.value)} /></label></div>
+              <Input aria-label={arabic ? "الاسم" : "Name"} autoComplete="name" value={name} disabled={sending} onChange={(event) => editEscalationField(setName, event.target.value)} placeholder={arabic ? "الاسم" : "Name"} minLength={2} maxLength={80} required className="h-11 rounded-xl" />
+              <Input aria-label={arabic ? "البريد الإلكتروني" : "Email address"} autoComplete="email" value={email} disabled={sending} onChange={(event) => editEscalationField(setEmail, event.target.value)} placeholder={arabic ? "البريد الإلكتروني" : "Email address"} type="email" required className="h-11 rounded-xl" dir="ltr" />
+              <Textarea aria-label={arabic ? "سؤال الدعم" : "Support question"} dir="auto" value={supportQuestion} disabled={sending} onChange={(event) => editEscalationField(setSupportQuestion, event.target.value)} minLength={10} maxLength={2000} required className="min-h-28 rounded-xl" />
+              <div className="sr-only" aria-hidden="true"><label>Company website<input tabIndex={-1} autoComplete="off" value={honeypot} disabled={sending} onChange={(event) => editEscalationField(setHoneypot, event.target.value)} /></label></div>
               <Button type="submit" disabled={sending} className="h-11 w-full rounded-xl bg-blue-600 font-bold">{sending ? <><Loader2 className="size-4 animate-spin" />{arabic ? "جارٍ الإرسال…" : "Sending…"}</> : <><Send className="size-4" />{arabic ? "إنشاء تذكرة" : "Create support ticket"}</>}</Button>
             </form>
           )}
