@@ -943,6 +943,32 @@ test("project rename ignores obsolete cancel callbacks and preserves the active 
   assert.equal(h.refreshes(), 0);
 });
 
+test("project rename cannot submit an older value from the same edit session", async () => {
+  const h = projectRenameHarness();
+  const event = { preventDefault() {} };
+  h.rename().onClick();
+  h.editor().onChange({ target: { value: "Old draft" } });
+  const obsoleteSubmit = h.form().onSubmit;
+  const draft = "مشروع Cafe\u0301";
+  h.editor().onChange({ target: { value: draft } });
+  await obsoleteSubmit(event);
+  assert.equal(h.pending.length, 0);
+  assert.equal(h.editor().value, draft);
+  assert.equal(h.refreshes(), 0);
+
+  const submit = h.form().onSubmit(event);
+  assert.equal(h.pending.length, 1);
+  assert.deepEqual(h.pending[0].body, {
+    projectId: "one", expectedName: "one", displayName: draft,
+  });
+  h.pending[0].finish({
+    projectId: "one", displayName: draft.normalize("NFC"),
+    projectKeyUnchanged: true, quotasReset: false,
+  });
+  await submit;
+  assert.equal(h.refreshes(), 1);
+});
+
 function monitoringControlHarness(canMonitor = true) {
   const state = [];
   const refs = [];
