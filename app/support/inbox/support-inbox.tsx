@@ -18,6 +18,19 @@ function formatDate(value: string) {
   }
 }
 
+// Match the reply endpoint's trimmed character, control-code and upload limits.
+function validateReply(reply: string): string | null {
+  const value = reply.trim();
+  if (value.length < 5 || value.length > 4000) return "Reply must be between 5 and 4,000 characters.";
+  if (/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f\u061c\u200e-\u200f\u202a-\u202e\u2066-\u2069]/.test(value)) {
+    return "Remove invisible control or direction characters from the reply.";
+  }
+  if (new TextEncoder().encode(JSON.stringify({ reply: value })).byteLength > 16_384) {
+    return "Reply is too large to send. Please shorten it.";
+  }
+  return null;
+}
+
 export function SupportInbox({ initialTickets }: { initialTickets: SupportTicket[] }) {
   const [tickets, setTickets] = useState(initialTickets);
   const [filter, setFilter] = useState<"open" | "answered" | "all">("open");
@@ -29,6 +42,8 @@ export function SupportInbox({ initialTickets }: { initialTickets: SupportTicket
   const activeReply = useRef<SupportTicket | null>(null);
   const visible = useMemo(() => tickets.filter((ticket) => filter === "all" || ticket.status === filter), [filter, tickets]);
   const openCount = tickets.filter((ticket) => ticket.status === "open").length;
+  const replyValidation = validateReply(reply);
+  const showReplyValidation = Boolean(reply && replyValidation);
 
   function startReply(ticket: SupportTicket) {
     if (replyInFlight.current) return;
@@ -45,7 +60,7 @@ export function SupportInbox({ initialTickets }: { initialTickets: SupportTicket
   }
 
   async function saveReply() {
-    if (!selected || activeReply.current !== selected || replyInFlight.current || reply.trim().length < 5 || reply.trim().length > 4000) return;
+    if (!selected || activeReply.current !== selected || replyInFlight.current || replyValidation) return;
     replyInFlight.current = true;
     setSaving(true);
     setError("");
@@ -53,7 +68,7 @@ export function SupportInbox({ initialTickets }: { initialTickets: SupportTicket
       const response = await fetch(`/api/support/tickets/${selected.id}/reply`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ reply }),
+        body: JSON.stringify({ reply: reply.trim() }),
       });
       const data: unknown = await response.json();
       const confirmation = data && typeof data === "object" && !Array.isArray(data)
@@ -111,9 +126,10 @@ export function SupportInbox({ initialTickets }: { initialTickets: SupportTicket
         <DialogContent className="sm:max-w-2xl">
           <DialogHeader><DialogTitle>Reply to {selected?.publicId}</DialogTitle><DialogDescription>The visitor can retrieve this reply securely from the Recomvia Assistant using the ticket credentials stored in their browser.</DialogDescription></DialogHeader>
           {selected && <div className="rounded-xl border border-slate-200 bg-slate-50 p-4"><p className="text-xs font-bold uppercase tracking-[.12em] text-slate-400">Customer question</p><p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-slate-700">{selected.question}</p></div>}
-          <Textarea value={reply} disabled={saving} onChange={(event) => { if (!replyInFlight.current) setReply(event.target.value); }} minLength={5} maxLength={4000} placeholder="Write a clear, complete human reply…" className="min-h-44 rounded-xl" />
-          {error && <p className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm font-semibold text-red-700">{error}</p>}
-          <DialogFooter><Button type="button" variant="outline" onClick={dismissReply} disabled={saving} className="rounded-xl">Cancel</Button><Button type="button" onClick={() => void saveReply()} disabled={saving || reply.trim().length < 5} className="rounded-xl bg-blue-600 font-bold">{saving ? <><Loader2 className="size-4 animate-spin" />Saving…</> : "Publish human reply"}</Button></DialogFooter>
+          <Textarea value={reply} disabled={saving} aria-invalid={showReplyValidation} aria-describedby={showReplyValidation ? "staff-reply-validation" : undefined} onChange={(event) => { if (!replyInFlight.current) setReply(event.target.value); }} minLength={5} maxLength={4000} placeholder="Write a clear, complete human reply…" className="min-h-44 rounded-xl" />
+          {showReplyValidation && <p id="staff-reply-validation" className="text-sm font-semibold text-red-700">{replyValidation}</p>}
+          {error && <p role="alert" className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm font-semibold text-red-700">{error}</p>}
+          <DialogFooter><Button type="button" variant="outline" onClick={dismissReply} disabled={saving} className="rounded-xl">Cancel</Button><Button type="button" onClick={() => void saveReply()} disabled={saving || Boolean(replyValidation)} className="rounded-xl bg-blue-600 font-bold">{saving ? <><Loader2 className="size-4 animate-spin" />Saving…</> : "Publish human reply"}</Button></DialogFooter>
         </DialogContent>
       </Dialog>
     </>
