@@ -1,4 +1,4 @@
-import { getAuthenticatedUser } from "@/app/auth";
+import { getAuthenticatedUser, type AuthUser } from "@/app/auth";
 import { ProjectSlotError, renameProjectSlot } from "@/db/project-slots";
 
 export const runtime = "edge";
@@ -7,7 +7,13 @@ const respond = (data: unknown, status: number) => Response.json(data, {
 });
 
 export async function POST(request: Request) {
-  const user = await getAuthenticatedUser();
+  let user: AuthUser | null;
+  try {
+    user = await getAuthenticatedUser();
+  } catch {
+    // Fail closed without exposing private identity diagnostics or reading the upload.
+    return respond({ code: "temporarily_unavailable" }, 503);
+  }
   if (!user) return respond({ code: "sign_in" }, 401);
 
   const origin = request.headers.get("origin");
