@@ -178,8 +178,16 @@ export async function runScanForUser(user: AuthUser, payload: Record<string, unk
     }
   }
 
-  const workspace = await ensureWorkspace(user);
-  const entitlement = await getEntitlementForUser(user);
+  let workspace: Awaited<ReturnType<typeof ensureWorkspace>>;
+  let entitlement: Awaited<ReturnType<typeof getEntitlementForUser>>;
+  try {
+    workspace = await ensureWorkspace(user);
+    entitlement = await getEntitlementForUser(user);
+  } catch {
+    // An account-store outage must not reach quota reservation or provider setup.
+    // Workspace initialization can have partially committed; do not retry here.
+    return json({ code: "temporarily_unavailable" }, 503);
+  }
   if (options.monitoring && !entitlement.canMonitor) return json({ code: "subscription_required" }, 403);
   const policy = analysisPolicy(entitlement.planId);
   let models: string[];
