@@ -12,8 +12,29 @@ export async function monitoringScanStatus(response: Response): Promise<string> 
     void response.body?.cancel().catch(() => {});
     return "completed";
   }
+  // Only small outcome documents are needed. Never buffer a report from an
+  // unexpected success status or an arbitrarily large error response.
+  const maxBytes = 65_536;
+  const length = response.headers.get("content-length");
+  const mime = response.headers.get("content-type")?.split(";")[0].trim().toLowerCase();
+  if (!response.body || (response.ok && response.status !== 202) ||
+      mime !== "application/json" ||
+      (length !== null && (!/^\d+$/.test(length) || Number(length) > maxBytes))) {
+    void response.body?.cancel().catch(() => {});
+    return "monitor_failed";
+  }
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder("utf-8", { fatal: true });
+  let bytes = 0, text = "";
   try {
-    const data: unknown = await response.json();
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      bytes += value.byteLength;
+      if (bytes > maxBytes) throw new Error("Oversized monitoring outcome");
+      text += decoder.decode(value, { stream: true });
+    }
+    const data: unknown = JSON.parse(text + decoder.decode());
     if (!data || typeof data !== "object" || Array.isArray(data)) return "monitor_failed";
     const { code, status } = data as { code?: unknown; status?: unknown };
     const reason = code ?? status;
@@ -21,6 +42,9 @@ export async function monitoringScanStatus(response: Response): Promise<string> 
     // especially "completed" on a failed or incompatible scan response.
     return typeof reason === "string" && failureCodes.has(reason) ? reason : "monitor_failed";
   } catch {
+    void reader.cancel().catch(() => {});
     return "monitor_failed";
+  } finally {
+    reader.releaseLock();
   }
 }
