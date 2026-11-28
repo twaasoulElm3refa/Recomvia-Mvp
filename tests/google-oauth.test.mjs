@@ -656,3 +656,59 @@ test("Google OAuth start safely rejects missing credentials and recovers after c
     globalThis.fetch = originalFetch;
   }
 });
+
+test("Google OAuth discards unsuccessful provider bodies without parsing, retrying or signing sessions", async () => {
+  const origin = "https://recomvia.test";
+  const tokenUrl = "https://oauth2.googleapis.com/token";
+  const profileUrl = "https://openidconnect.googleapis.com/v1/userinfo";
+  const originalFetch = globalThis.fetch;
+  const successfulResponse = (url) => ({
+    ok: true,
+    json: async () => url === tokenUrl
+      ? { access_token: "test-token" }
+      : { sub: "user-789", email: "owner@example.com", email_verified: true, name: "مستخدم تجريبي" },
+  });
+  try {
+    for (const failingUrl of [tokenUrl, profileUrl]) {
+      const started = await start.GET(request(origin + "/auth/google"));
+      const { request: incoming } = callbackRequest(origin, started);
+      const calls = [];
+      let parses = 0;
+      let cancels = 0;
+      globalThis.fetch = async (url) => {
+        calls.push(url);
+        if (url !== failingUrl) return successfulResponse(url);
+        return {
+          ok: false,
+          body: { cancel: async () => {
+            cancels++;
+            // Even an unsuccessful cancellation must not replace the public error.
+            throw new Error("private cancellation diagnostic");
+          } },
+          json: async () => {
+            parses++;
+            throw new Error("private provider diagnostic");
+          },
+        };
+      };
+      const response = await callback.GET(incoming);
+      const reason = failingUrl === tokenUrl ? "token_exchange_failed" : "unverified_google_account";
+      assert.equal(response.location, origin + "/?auth_error=" + reason);
+      assert.equal(response.headers.get("Cache-Control"), "no-store");
+      assert.equal(response.headers.get("Referrer-Policy"), "no-referrer");
+      assert.equal(response.cookies.get(auth.SESSION_COOKIE), undefined);
+      assert.equal(response.cookies.get(auth.OAUTH_STATE_COOKIE).options.maxAge, 0);
+      assert.equal(response.cookies.get(auth.OAUTH_VERIFIER_COOKIE).options.maxAge, 0);
+      assert.equal(parses, 0);
+      assert.equal(cancels, 1);
+      assert.deepEqual(calls, failingUrl === tokenUrl ? [tokenUrl] : [tokenUrl, profileUrl]);
+    }
+    globalThis.fetch = async (url) => successfulResponse(url);
+    const started = await start.GET(request(origin + "/auth/google"));
+    const accepted = await callback.GET(callbackRequest(origin, started).request);
+    assert.equal(accepted.location, origin + "/dashboard");
+    assert.ok(accepted.cookies.get(auth.SESSION_COOKIE)?.value);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
