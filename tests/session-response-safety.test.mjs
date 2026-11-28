@@ -55,3 +55,89 @@ test("identity service failures return private generic 503 and allow recovery", 
   assert.equal(recovered.status, 200);
   assert.deepEqual(await recovered.json(), { signedIn: false });
 });
+
+
+function accountEntryHarness() {
+  const source = readFileSync("hooks/use-account-entry.ts", "utf8");
+  const js = ts.transpileModule(source, {
+    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
+  }).outputText;
+  const updates = [];
+  let effect;
+  const mod = { exports: {} };
+  new Function("require", "module", "exports", js)((name) => {
+    if (name === "react") return {
+      useState: (initial) => [initial, (value) => updates.push(value)],
+      useEffect: (callback) => { effect = callback; },
+    };
+    throw new Error("Unexpected import: " + name);
+  }, mod, mod.exports);
+  assert.equal(mod.exports.useAccountEntry(), false);
+  return { updates, mount: () => effect() };
+}
+
+const flushSession = () => new Promise((resolve) => setImmediate(resolve));
+
+test("public session lookup has one deadline covering headers and body, with no retry or stale update", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const h = accountEntryHarness();
+  let finishBody;
+  const calls = [];
+  const body = new Promise((resolve) => { finishBody = resolve; });
+  t.mock.method(globalThis, "fetch", async (url, options) => {
+    calls.push([url, options]);
+    return { ok: true, json: () => body };
+  });
+  const cleanup = h.mount();
+  try {
+    await flushSession();
+    assert.equal(calls.length, 1);
+    const [url, options] = calls[0];
+    assert.equal(url, "/api/session");
+    assert.equal(options.cache, "no-store");
+    t.mock.timers.tick(4_999);
+    assert.equal(options.signal.aborted, false);
+    t.mock.timers.tick(1);
+    assert.equal(options.signal.aborted, true);
+    // Simulate a response body that still resolves despite cancellation.
+    finishBody({ signedIn: true });
+    await flushSession();
+    assert.deepEqual(h.updates, []);
+    assert.equal(calls.length, 1);
+  } finally {
+    cleanup();
+    t.mock.timers.reset();
+  }
+});
+
+test("public session cleanup ignores a late response and successful remount clears its timer", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const h = accountEntryHarness();
+  const calls = [];
+  t.mock.method(globalThis, "fetch", (url, options) => new Promise((resolve) => {
+    calls.push({ url, signal: options.signal, resolve });
+  }));
+  const firstCleanup = h.mount();
+  firstCleanup();
+  const secondCleanup = h.mount();
+  try {
+    assert.equal(calls.length, 2);
+    assert.equal(calls[0].signal.aborted, true);
+    calls[1].resolve({ ok: true, json: async () => ({ signedIn: true }) });
+    await flushSession();
+    assert.deepEqual(h.updates, [true]);
+    let staleBodyReads = 0;
+    calls[0].resolve({ ok: true, json: async () => {
+      staleBodyReads++;
+      return { signedIn: false };
+    } });
+    await flushSession();
+    assert.equal(staleBodyReads, 0);
+    assert.deepEqual(h.updates, [true]);
+    t.mock.timers.tick(5_000);
+    assert.equal(calls[1].signal.aborted, false, "completed lookup must clear its deadline");
+  } finally {
+    secondCleanup();
+    t.mock.timers.reset();
+  }
+});
