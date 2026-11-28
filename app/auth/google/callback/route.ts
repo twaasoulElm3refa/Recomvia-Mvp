@@ -7,6 +7,43 @@ export const runtime = "edge";
 type GoogleTokenResponse = { access_token?: unknown };
 type GoogleProfile = { sub?: unknown; email?: unknown; email_verified?: unknown; name?: unknown };
 
+// Google returns small JSON documents. Limit decoded bytes even when a
+// successful response omits Content-Length or is compressed in transit.
+const MAX_PROVIDER_BODY_BYTES = 32_768;
+async function readProviderJson(response: Response): Promise<Record<string, unknown>> {
+  const length = response.headers.get("content-length");
+  const mime = response.headers.get("content-type")?.split(";")[0].trim().toLowerCase();
+  if (!response.body || mime !== "application/json" ||
+      (length !== null && (!/^\d+$/.test(length) || Number(length) > MAX_PROVIDER_BODY_BYTES))) {
+    void response.body?.cancel().catch(() => undefined);
+    throw new Error("Invalid authentication response");
+  }
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder("utf-8", { fatal: true });
+  let bytes = 0;
+  let text = "";
+  try {
+    // Fetch's existing abort signal also governs consumption of the body.
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      bytes += value.byteLength;
+      if (bytes > MAX_PROVIDER_BODY_BYTES) throw new Error("Oversized authentication response");
+      text += decoder.decode(value, { stream: true });
+    }
+    const result: unknown = JSON.parse(text + decoder.decode());
+    if (!result || typeof result !== "object" || Array.isArray(result)) {
+      throw new Error("Invalid authentication response");
+    }
+    return result as Record<string, unknown>;
+  } catch {
+    void reader.cancel().catch(() => undefined);
+    throw new Error("Invalid authentication response");
+  } finally {
+    reader.releaseLock();
+  }
+}
+
 export async function GET(request: NextRequest) {
   const appOrigin = getAppOrigin(request);
   // Ignore stale callbacks after a provider change without exchanging tokens
@@ -49,7 +86,7 @@ export async function GET(request: NextRequest) {
       void tokenResponse.body?.cancel().catch(() => undefined);
       return authError(appOrigin, "token_exchange_failed");
     }
-    const token = (await tokenResponse.json()) as GoogleTokenResponse;
+    const token = (await readProviderJson(tokenResponse)) as GoogleTokenResponse;
     // Reject malformed tokens before constructing an outbound Authorization header.
     const accessToken = token.access_token;
     if (typeof accessToken !== "string" ||
@@ -60,7 +97,7 @@ export async function GET(request: NextRequest) {
       void profileResponse.body?.cancel().catch(() => undefined);
       return authError(appOrigin, "unverified_google_account");
     }
-    const profile = (await profileResponse.json()) as GoogleProfile;
+    const profile = (await readProviderJson(profileResponse)) as GoogleProfile;
     // Bound verified identity claims before signing a session or displaying them.
     // Regular Arabic and Latin display names remain valid; invisible controls do not.
     const { sub, email, name } = profile;
