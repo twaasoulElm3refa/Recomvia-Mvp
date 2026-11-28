@@ -12,9 +12,14 @@ const compiled = ts.transpileModule(source, {
 const created = [];
 class MockSupportRateLimitError extends Error {}
 let simulateRateLimit = false;
+let authenticatedUser = null;
+let identityUnavailable = false;
 const compiledModule = { exports: {} };
 new Function("require", "module", "exports", compiled)((name) => {
-  if (name === "@/app/auth") return { getAuthenticatedUser: async () => null };
+  if (name === "@/app/auth") return { getAuthenticatedUser: async () => {
+    if (identityUnavailable) throw new Error("private identity diagnostics");
+    return authenticatedUser;
+  } };
   if (name === "@/db/support") return { SupportRateLimitError: MockSupportRateLimitError, createSupportTicket: async (ticket) => { if (simulateRateLimit) throw new MockSupportRateLimitError(); created.push(ticket); } };
   throw new Error("Unexpected dependency: " + name);
 }, compiledModule, compiledModule.exports);
@@ -364,5 +369,34 @@ test("support clears upload deadline after a valid submission", async (t) => {
     assert.equal(created.at(-1).question, input.question);
   } finally {
     t.mock.timers.reset();
+  }
+});
+
+test("support identity outage cannot create an anonymous ticket or leak diagnostics", async () => {
+  const before = created.length;
+  const input = { name: "عميل عربي", email: "sender@example.org", question: "أرجو توضيح report results" };
+  const submit = () => POST(request(JSON.stringify(input)));
+  identityUnavailable = true;
+  try {
+    const response = await submit();
+    assert.equal(response.status, 503);
+    assert.equal(response.headers.get("Cache-Control"), "no-store");
+    assert.equal(response.headers.get("X-Content-Type-Options"), "nosniff");
+    assert.deepEqual(await response.json(), {
+      error: "Support is temporarily unavailable. Please try again shortly.",
+    });
+    assert.equal(created.length, before);
+    identityUnavailable = false;
+    authenticatedUser = { userId: "test-user" };
+    assert.equal((await submit()).status, 201);
+    assert.equal(created.at(-1).authenticatedUserId, "test-user");
+    assert.equal(created.at(-1).question, input.question);
+    authenticatedUser = null;
+    assert.equal((await submit()).status, 201);
+    assert.equal(created.at(-1).authenticatedUserId, null);
+    assert.equal(created.length, before + 2);
+  } finally {
+    identityUnavailable = false;
+    authenticatedUser = null;
   }
 });
