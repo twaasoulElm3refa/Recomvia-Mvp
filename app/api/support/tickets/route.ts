@@ -160,9 +160,17 @@ export async function POST(request: Request) {
     return json({ error: "Question must be between 10 and 2,000 characters." }, 400);
   }
 
+  let user: Awaited<ReturnType<typeof getAuthenticatedUser>>;
+  try {
+    user = await getAuthenticatedUser();
+  } catch {
+    // An identity outage is not an anonymous submission. Avoid creating an
+    // unowned ticket or exposing internal authentication diagnostics.
+    return json({ error: "Support is temporarily unavailable. Please try again shortly." }, 503);
+  }
+
   const accessKey = randomToken();
   const publicId = `RCV-${Date.now().toString(36).toUpperCase()}-${randomToken(3).toUpperCase()}`;
-  const user = await getAuthenticatedUser();
 
   try {
     await createSupportTicket({
