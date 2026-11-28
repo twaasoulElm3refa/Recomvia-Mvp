@@ -9,7 +9,12 @@ const compiled = ts.transpileModule(source, {
 }).outputText;
 
 let databaseLookups = 0;
-const fixture = { publicId: "RCV-TEST123-ABCDEF", status: "answered", humanReply: "A documented reply" };
+const fixture = {
+  publicId: "RCV-TEST123-ABCDEF", status: "answered", humanReply: "A documented reply",
+  createdAt: "2026-11-28 05:00:00", updatedAt: "2026-11-28 05:10:00", answeredAt: "2026-11-28 05:10:00",
+};
+let storageResult = fixture;
+let storageUnavailable = false;
 const loaded = { exports: {} };
 new Function("require", "module", "exports", compiled)((name) => {
   if (name === "@/db/support") return {
@@ -17,7 +22,8 @@ new Function("require", "module", "exports", compiled)((name) => {
       databaseLookups++;
       assert.equal(reference, fixture.publicId);
       assert.equal(keyHash.length, 64);
-      return fixture;
+      if (storageUnavailable) throw new Error("private database diagnostics");
+      return storageResult;
     },
   };
   throw new Error("Unexpected import: " + name);
@@ -254,4 +260,51 @@ test("completed status upload clears its deadline and preserves authorized looku
   } finally {
     t.mock.timers.reset();
   }
+});
+
+test("ticket tracking exposes only its public response contract even if storage returns extra columns", async () => {
+  const humanReply = "تمت المراجعة — reviewed";
+  storageResult = {
+    ...fixture, humanReply,
+    requesterEmail: "private@example.test",
+    accessKeyHash: "private hash",
+    authenticatedUserId: "private user",
+    answeredBy: "private staff",
+  };
+  try {
+    const response = await POST(request(JSON.stringify({ reference: fixture.publicId, accessKey })));
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get("Cache-Control"), "no-store");
+    assert.equal(response.headers.get("X-Content-Type-Options"), "nosniff");
+    assert.deepEqual(await response.json(), { ...fixture, humanReply });
+  } finally {
+    storageResult = fixture;
+  }
+});
+
+test("ticket tracking rejects mismatched storage identity and recovers privately after an outage", async () => {
+  const valid = JSON.stringify({ reference: fixture.publicId, accessKey });
+  const before = databaseLookups;
+  try {
+    for (const result of [null, { ...fixture, publicId: "RCV-OTHER-ABCDEF" }]) {
+      storageResult = result;
+      const response = await POST(request(valid));
+      assert.equal(response.status, 404);
+      assert.equal(response.headers.get("Cache-Control"), "no-store");
+      assert.deepEqual(await response.json(), { error: "Ticket not found." });
+    }
+    storageUnavailable = true;
+    const response = await POST(request(valid));
+    assert.equal(response.status, 503);
+    assert.equal(response.headers.get("Cache-Control"), "no-store");
+    assert.equal(response.headers.get("X-Content-Type-Options"), "nosniff");
+    assert.deepEqual(await response.json(), { error: "Support status is temporarily unavailable." });
+  } finally {
+    storageUnavailable = false;
+    storageResult = fixture;
+  }
+  const recovered = await POST(request(valid));
+  assert.equal(recovered.status, 200);
+  assert.deepEqual(await recovered.json(), fixture);
+  assert.equal(databaseLookups, before + 4);
 });

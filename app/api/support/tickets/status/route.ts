@@ -87,8 +87,17 @@ export async function POST(request: Request) {
 
   try {
     const ticket = await findTicketForRequester(reference, await hash(accessKey));
-    if (!ticket) return json({ error: "Ticket not found." }, 404);
-    return json(ticket, 200);
+    if (!ticket || ticket.publicId !== reference) return json({ error: "Ticket not found." }, 404);
+    // Keep the public tracking response independent of the storage projection.
+    // Internal columns added to the lookup must never become public by accident.
+    return json({
+      publicId: ticket.publicId,
+      status: ticket.status,
+      humanReply: ticket.humanReply,
+      createdAt: ticket.createdAt,
+      updatedAt: ticket.updatedAt,
+      answeredAt: ticket.answeredAt,
+    }, 200);
   } catch {
     return json({ error: "Support status is temporarily unavailable." }, 503);
   }
