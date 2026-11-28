@@ -1,5 +1,5 @@
 import { env } from "cloudflare:workers";
-import { getAuthenticatedUser } from "@/app/auth";
+import { getAuthenticatedUser, type AuthUser } from "@/app/auth";
 import { replyToSupportTicket } from "@/db/support";
 
 export const runtime = "edge";
@@ -45,7 +45,13 @@ async function readBoundedBody(request: Request): Promise<string | null | typeof
 }
 
 export async function POST(request: Request, context: { params: Promise<{ id: string }> }) {
-  const user = await getAuthenticatedUser();
+  let user: AuthUser | null;
+  try {
+    user = await getAuthenticatedUser();
+  } catch {
+    // Never read or publish a reply when staff identity cannot be verified.
+    return json({ error: "Support is temporarily unavailable." }, 503);
+  }
   if (!user || !env.RECOMVIA_ADMIN_USER_ID || user.userId !== env.RECOMVIA_ADMIN_USER_ID) {
     return json({ error: "Not found." }, 404);
   }
