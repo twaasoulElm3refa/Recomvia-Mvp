@@ -308,3 +308,67 @@ test("ticket tracking rejects mismatched storage identity and recovers privately
   assert.deepEqual(await recovered.json(), fixture);
   assert.equal(databaseLookups, before + 4);
 });
+
+
+test("header-rejected ticket tracking uploads are cancelled without reads or private lookups", async () => {
+  const before = databaseLookups;
+  const validHeaders = { Origin: "https://recomvia.test", "Content-Type": "application/json" };
+  const cases = [
+    [{ "Content-Type": "application/json" }, 403],
+    [{ ...validHeaders, Origin: "https://evil.example" }, 403],
+    [{ ...validHeaders, "Content-Type": "text/plain" }, 415],
+    [{ ...validHeaders, "Content-Length": "01" }, 400],
+    [{ ...validHeaders, "Content-Length": "513" }, 413],
+  ];
+  for (const [headers, status] of cases) {
+    let reads = 0;
+    let cancelled = false;
+    let finishCleanup;
+    const cleanup = new Promise((resolve) => { finishCleanup = resolve; });
+    const body = new ReadableStream({
+      pull() { reads++; },
+      cancel() { cancelled = true; return cleanup; },
+    }, { highWaterMark: 0 });
+    const pending = POST(new Request("https://recomvia.test/api/support/tickets/status", {
+      method: "POST", duplex: "half", headers, body,
+    }));
+    try {
+      const response = await Promise.race([pending, new Promise((resolve) => setImmediate(() => resolve(null)))]);
+      assert.ok(response, "header rejection must not await upstream cancellation");
+      assert.equal(response.status, status);
+      assert.equal(response.headers.get("Cache-Control"), "no-store");
+      assert.equal(response.headers.get("X-Content-Type-Options"), "nosniff");
+      assert.equal(cancelled, true);
+      assert.equal(reads, 0);
+      assert.equal(body.locked, false);
+      assert.equal(databaseLookups, before);
+    } finally {
+      finishCleanup();
+      await pending;
+    }
+  }
+});
+
+test("ticket tracking suppresses cancellation failures and preserves Arabic reply recovery", async () => {
+  const before = databaseLookups;
+  const body = new ReadableStream({
+    cancel() { return Promise.reject(new Error("private upload cleanup diagnostic")); },
+  }, { highWaterMark: 0 });
+  const response = await POST(new Request("https://recomvia.test/api/support/tickets/status", {
+    method: "POST", duplex: "half", body,
+    headers: { Origin: "https://recomvia.test", "Content-Type": "text/plain" },
+  }));
+  assert.equal(response.status, 415);
+  assert.deepEqual(await response.json(), { error: "JSON content type required." });
+  assert.equal(databaseLookups, before);
+  const humanReply = "تمت مراجعة التقرير، شكرًا لتواصلك معنا.";
+  storageResult = { ...fixture, humanReply };
+  try {
+    const recovered = await POST(request(JSON.stringify({ reference: fixture.publicId, accessKey })));
+    assert.equal(recovered.status, 200);
+    assert.deepEqual(await recovered.json(), { ...fixture, humanReply });
+    assert.equal(databaseLookups, before + 1);
+  } finally {
+    storageResult = fixture;
+  }
+});
