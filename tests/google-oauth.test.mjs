@@ -113,8 +113,8 @@ test("callback exchanges with the exact request-specific redirect URI and return
   const calls = [];
   globalThis.fetch = async (url, options) => {
     calls.push({ url, options });
-    if (url === "https://oauth2.googleapis.com/token") return { ok: true, json: async () => ({ access_token: "test-access-token" }) };
-    if (url === "https://openidconnect.googleapis.com/v1/userinfo") return { ok: true, json: async () => ({ sub: "user-123", email: "TEST@example.com", email_verified: true, name: "Test User" }) };
+    if (url === "https://oauth2.googleapis.com/token") return Response.json({ access_token: "test-access-token" });
+    if (url === "https://openidconnect.googleapis.com/v1/userinfo") return Response.json({ sub: "user-123", email: "TEST@example.com", email_verified: true, name: "Test User" });
     throw new Error(`Unexpected URL: ${url}`);
   };
   try {
@@ -405,10 +405,10 @@ test("Google callback bounds both identity provider requests with separate 10-se
       assert.equal(options.signal, signals[signals.length - 1], `Missing timeout on ${url}`);
       assert.equal(options.redirect, "error", `Provider redirects must be blocked on ${url}`);
       if (url === "https://oauth2.googleapis.com/token") {
-        return { ok: true, json: async () => ({ access_token: "test-token" }) };
+        return Response.json({ access_token: "test-token" });
       }
       if (url === "https://openidconnect.googleapis.com/v1/userinfo") {
-        return { ok: true, json: async () => ({ sub: "user-789", email: "owner@example.com", email_verified: true }) };
+        return Response.json({ sub: "user-789", email: "owner@example.com", email_verified: true });
       }
       throw new Error(`Unexpected identity provider URL: ${url}`);
     };
@@ -438,7 +438,7 @@ test("Google callback fails closed and clears transient OAuth cookies when eithe
         assert.ok(options.signal instanceof AbortSignal, "Provider fetch must carry a timeout signal");
         if (url === failingUrl) throw new DOMException("Identity provider timeout", "TimeoutError");
         if (url === "https://oauth2.googleapis.com/token") {
-          return { ok: true, json: async () => ({ access_token: "test-token" }) };
+          return Response.json({ access_token: "test-token" });
         }
         throw new Error(`Unexpected URL: ${url}`);
       };
@@ -467,7 +467,7 @@ test("Google callback rejects malformed or oversized access tokens before userin
       globalThis.fetch = async (url) => {
         requests.push(url);
         if (url === "https://oauth2.googleapis.com/token") {
-          return { ok: true, json: async () => ({ access_token: accessToken }) };
+          return Response.json({ access_token: accessToken });
         }
         throw new Error("Malformed token must not be sent to userinfo");
       };
@@ -509,9 +509,9 @@ test("Google callback rejects malformed identity claims without creating session
       globalThis.fetch = async (url) => {
         requests++;
         if (url === "https://oauth2.googleapis.com/token")
-          return { ok: true, json: async () => ({ access_token: "safe-token" }) };
+          return Response.json({ access_token: "safe-token" });
         if (url === "https://openidconnect.googleapis.com/v1/userinfo")
-          return { ok: true, json: async () => profile };
+          return Response.json(profile);
         throw new Error("Unexpected identity URL");
       };
       const response = await callback.GET(incoming);
@@ -523,10 +523,8 @@ test("Google callback rejects malformed identity claims without creating session
     }
     const started = await start.GET(request(origin + "/auth/google"));
     const { request: incoming } = callbackRequest(origin, started);
-    globalThis.fetch = async (url) => ({
-      ok: true, json: async () => url === "https://oauth2.googleapis.com/token"
-        ? { access_token: "safe-token" } : baseline,
-    });
+    globalThis.fetch = async (url) => Response.json(url === "https://oauth2.googleapis.com/token"
+      ? { access_token: "safe-token" } : baseline);
     const accepted = await callback.GET(incoming);
     assert.equal(accepted.location, origin + "/dashboard");
     assert.ok(accepted.cookies.get(auth.SESSION_COOKIE)?.value, "Arabic display name must remain supported");
@@ -604,7 +602,7 @@ test("Google OAuth rejects redirects at either provider endpoint without followi
         assert.equal(options.redirect, "error");
         // Fetch with redirect:error rejects an HTTP redirect before following it.
         if (url === redirectingUrl) throw new TypeError("Unexpected redirect");
-        if (url === tokenUrl) return { ok: true, json: async () => ({ access_token: "test-token" }) };
+        if (url === tokenUrl) return Response.json({ access_token: "test-token" });
         throw new Error("Unexpected provider request");
       };
       const response = await callback.GET(incoming);
@@ -662,12 +660,9 @@ test("Google OAuth discards unsuccessful provider bodies without parsing, retryi
   const tokenUrl = "https://oauth2.googleapis.com/token";
   const profileUrl = "https://openidconnect.googleapis.com/v1/userinfo";
   const originalFetch = globalThis.fetch;
-  const successfulResponse = (url) => ({
-    ok: true,
-    json: async () => url === tokenUrl
-      ? { access_token: "test-token" }
-      : { sub: "user-789", email: "owner@example.com", email_verified: true, name: "مستخدم تجريبي" },
-  });
+  const successfulResponse = (url) => Response.json(url === tokenUrl
+    ? { access_token: "test-token" }
+    : { sub: "user-789", email: "owner@example.com", email_verified: true, name: "مستخدم تجريبي" });
   try {
     for (const failingUrl of [tokenUrl, profileUrl]) {
       const started = await start.GET(request(origin + "/auth/google"));
@@ -749,6 +744,61 @@ test("authentication entry and signout redirects never forward the initiating UR
   } finally {
     credentials.AUTH_PROVIDER = originalProvider;
     credentials.GOOGLE_CLIENT_ID = originalClientId;
+    globalThis.fetch = originalFetch;
+  }
+});
+
+
+test("Google OAuth bounds successful provider bodies before creating a session", async () => {
+  const origin = "https://recomvia.test";
+  const tokenUrl = "https://oauth2.googleapis.com/token";
+  const profileUrl = "https://openidconnect.googleapis.com/v1/userinfo";
+  const originalFetch = globalThis.fetch;
+  const success = (url) => Response.json(url === tokenUrl
+    ? { access_token: "test-token" }
+    : { sub: "user-789", email: "owner@example.com", email_verified: true, name: "مستخدم تجريبي" });
+  try {
+    for (const failingUrl of [tokenUrl, profileUrl]) {
+      for (const mode of ["declared", "streamed", "wrong-type", "invalid-utf8", "null"]) {
+        let cancels = 0;
+        const calls = [];
+        const started = await start.GET(request(origin + "/auth/google"));
+        globalThis.fetch = async (url) => {
+          calls.push(url);
+          if (url !== failingUrl) return success(url);
+          if (mode === "null") return Response.json(null);
+          const headers = { "content-type": mode === "wrong-type" ? "text/html" : "application/json" };
+          if (mode === "declared") headers["content-length"] = "32769";
+          if (mode === "streamed") headers["content-length"] = "10";
+          return new Response(new ReadableStream({
+            start(controller) {
+              if (mode === "streamed") {
+                controller.enqueue(new Uint8Array(16_384).fill(32));
+                controller.enqueue(new Uint8Array(16_385).fill(32));
+              } else if (mode === "invalid-utf8") {
+                controller.enqueue(Uint8Array.of(0xff));
+              }
+            },
+            cancel() { cancels++; },
+          }), { headers });
+        };
+        const rejected = await callback.GET(callbackRequest(origin, started).request);
+        assert.equal(rejected.location, origin + "/?auth_error=authentication_failed");
+        assert.equal(rejected.headers.get("Cache-Control"), "no-store");
+        assert.equal(rejected.headers.get("Referrer-Policy"), "no-referrer");
+        assert.equal(rejected.cookies.get(auth.SESSION_COOKIE), undefined);
+        assert.equal(rejected.cookies.get(auth.OAUTH_STATE_COOKIE).options.maxAge, 0);
+        assert.equal(rejected.cookies.get(auth.OAUTH_VERIFIER_COOKIE).options.maxAge, 0);
+        assert.equal(cancels, mode === "null" ? 0 : 1);
+        assert.deepEqual(calls, failingUrl === tokenUrl ? [tokenUrl] : [tokenUrl, profileUrl]);
+      }
+    }
+    globalThis.fetch = async (url) => success(url);
+    const started = await start.GET(request(origin + "/auth/google"));
+    const accepted = await callback.GET(callbackRequest(origin, started).request);
+    assert.equal(accepted.location, origin + "/dashboard");
+    assert.ok(accepted.cookies.get(auth.SESSION_COOKIE)?.value);
+  } finally {
     globalThis.fetch = originalFetch;
   }
 });
