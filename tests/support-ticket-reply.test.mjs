@@ -10,12 +10,16 @@ const compiled = ts.transpileModule(source, {
 
 const env = { RECOMVIA_ADMIN_USER_ID: "admin-123" };
 let user = { userId: "admin-123" };
+let identityError = null;
 const writes = [];
 let found = true;
 const loaded = { exports: {} };
 new Function("require", "module", "exports", compiled)((name) => {
   if (name === "cloudflare:workers") return { env };
-  if (name === "@/app/auth") return { getAuthenticatedUser: async () => user };
+  if (name === "@/app/auth") return { getAuthenticatedUser: async () => {
+    if (identityError) throw identityError;
+    return user;
+  } };
   if (name === "@/db/support") return {
     replyToSupportTicket: async (...args) => { writes.push(args); return found; },
   };
@@ -260,4 +264,29 @@ test("completed Arabic admin reply clears its deadline and saves exactly once", 
   } finally {
     t.mock.timers.reset();
   }
+});
+
+test("staff reply identity outages are private, prevent body access and writes, and permit recovery", async () => {
+  const before = writes.length;
+  const req = request(valid);
+  Object.defineProperty(req, "body", { get() { throw new Error("reply body must not be read"); } });
+  const inaccessibleContext = {};
+  Object.defineProperty(inaccessibleContext, "params", { get() { throw new Error("ticket selector must not be read"); } });
+  identityError = new Error("private staff identity diagnostic");
+  try {
+    const response = await POST(req, inaccessibleContext);
+    assert.equal(response.status, 503);
+    assert.deepEqual(await response.json(), { error: "Support is temporarily unavailable." });
+    assert.equal(response.headers.get("Cache-Control"), "no-store");
+    assert.equal(response.headers.get("X-Content-Type-Options"), "nosniff");
+    assert.equal(writes.length, before);
+  } finally {
+    identityError = null;
+  }
+  const reply = "شكرًا لتواصلك معنا بشأن تقرير Recomvia.";
+  const recovered = await POST(request(JSON.stringify({ reply })), context());
+  assert.equal(recovered.status, 200);
+  assert.deepEqual(await recovered.json(), { ok: true, status: "answered" });
+  assert.equal(writes.length, before + 1);
+  assert.deepEqual(writes.at(-1), [12, reply, "admin-123"]);
 });
