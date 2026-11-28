@@ -12,8 +12,12 @@ let authenticated = true;
 let authFailure = null;
 let reportFailure = null;
 let workspaceCalls = 0;
+let entitlementCalls = 0;
+let policyCalls = 0;
+let workspaceFailure = true;
+let entitlementFailure = false;
 let reportReads = [];
-const boundaryError = new Error("Scan workspace boundary reached");
+const boundaryError = new Error("private workspace diagnostic for customer-1");
 const loaded = { exports: {} };
 new Function("require", "module", "exports", compiled)((specifier) => {
   if (specifier === "@/app/auth") return {
@@ -23,7 +27,16 @@ new Function("require", "module", "exports", compiled)((specifier) => {
     },
   };
   if (specifier === "@/db/product") return {
-    ensureWorkspace: async () => { workspaceCalls++; throw boundaryError; },
+    ensureWorkspace: async () => {
+      workspaceCalls++;
+      if (workspaceFailure) throw boundaryError;
+      return { userId: "customer-1", organizationId: "org_customer-1" };
+    },
+    getEntitlementForUser: async () => {
+      entitlementCalls++;
+      if (entitlementFailure) throw new Error("private entitlement diagnostic");
+      return { planId: "essential", canMonitor: true };
+    },
     getReportForUser: async (userId, scanId) => {
       reportReads.push([userId, scanId]);
       if (reportFailure) throw reportFailure;
@@ -42,12 +55,22 @@ new Function("require", "module", "exports", compiled)((specifier) => {
         websiteUrl: payload.kind === "website" ? value.trim() : null, context: "" };
     },
   };
-  // Other imports are not used until after the deliberately stopped workspace boundary.
+  if (specifier === "@/lib/analysis-policy") return {
+    analysisPolicy: () => { policyCalls++; return { plan: "essential" }; },
+    configuredModels: () => [],
+  };
+  // No provider or quota reservation is configured in these ingress tests.
   if (specifier.startsWith("@/")) return {};
   throw new Error("Unexpected import " + specifier);
 }, loaded, loaded.exports);
 
 const { POST, GET } = loaded.exports;
+async function assertUnavailable(response) {
+  assert.equal(response.status, 503);
+  assert.equal(response.headers.get("Cache-Control"), "no-store");
+  assert.equal(response.headers.get("X-Content-Type-Options"), "nosniff");
+  assert.deepEqual(await response.json(), { code: "temporarily_unavailable" });
+}
 const valid = JSON.stringify({ input: "https://example.com", kind: "website", language: "en" });
 function request(body = valid, { headers = {}, noOrigin = false } = {}) {
   return new Request("https://recomvia.test/api/scans", {
@@ -160,7 +183,7 @@ test("billable scans accept valid Arabic UTF-8 split across stream chunks", asyn
     method: "POST", duplex: "half", body,
     headers: { Origin: "https://recomvia.test", "Content-Type": "application/json" },
   });
-  await assert.rejects(POST(req), /Scan workspace boundary reached/);
+  await assertUnavailable(await POST(req));
   assert.equal(workspaceCalls, before + 1);
 });
 
@@ -185,10 +208,7 @@ test("invalid scan targets return 400 before workspace reads or provider setup",
 
 test("valid JSON with charset passes the ingress gate without starting a provider", async () => {
   const before = workspaceCalls;
-  await assert.rejects(
-    POST(request(valid, { headers: { "Content-Type": "application/json; charset=utf-8" } })),
-    /Scan workspace boundary reached/,
-  );
+  await assertUnavailable(await POST(request(valid, { headers: { "Content-Type": "application/json; charset=utf-8" } })));
   assert.equal(workspaceCalls, before + 1);
 });
 
@@ -232,10 +252,7 @@ test("orphan identity candidates never start a new billable scan", async () => {
 
 test("valid identity confirmation selectors reach the existing authenticated workflow", async () => {
   const before = workspaceCalls;
-  await assert.rejects(
-    POST(request(JSON.stringify({ scanId: "scan_abc", candidateId: "candidate_2" }))),
-    /Scan workspace boundary reached/,
-  );
+  await assertUnavailable(await POST(request(JSON.stringify({ scanId: "scan_abc", candidateId: "candidate_2" }))));
   assert.equal(workspaceCalls, before + 1, "valid IDs must not be rejected by ingress validation");
 });
 
@@ -371,7 +388,7 @@ test("a completed scan upload clears its deadline before entering the workspace"
   t.mock.timers.enable({ apis: ["setTimeout"] });
   try {
     const req = request(JSON.stringify({ input: "موضوع عربي", kind: "topic", language: "ar" }));
-    await assert.rejects(POST(req), /Scan workspace boundary reached/);
+    await assertUnavailable(await POST(req));
     assert.equal(req.body.locked, false);
     t.mock.timers.tick(5000);
     assert.equal(workspaceCalls, before + 1);
@@ -423,4 +440,31 @@ test("private report store outages return generic non-cacheable 503 and recover"
     scan: { id: "scan_abc" }, entitlement: { reportLevel: "full" },
   });
   assert.deepEqual(reportReads, [["customer-1", "scan_abc"], ["customer-1", "scan_abc"]]);
+});
+
+test("scan account-store outages fail closed before provider setup and do not retry", async () => {
+  const before = [workspaceCalls, entitlementCalls, policyCalls];
+  const body = JSON.stringify({ input: "موضوع عربي", kind: "topic", language: "ar" });
+  try {
+    await assertUnavailable(await POST(request(body)));
+    assert.deepEqual([workspaceCalls, entitlementCalls, policyCalls],
+      [before[0] + 1, before[1], before[2]]);
+
+    workspaceFailure = false;
+    entitlementFailure = true;
+    await assertUnavailable(await POST(request(body)));
+    assert.deepEqual([workspaceCalls, entitlementCalls, policyCalls],
+      [before[0] + 2, before[1] + 1, before[2]]);
+
+    entitlementFailure = false;
+    const recovered = await POST(request(body));
+    // With no configured engines, the recovered preflight stops safely here.
+    assert.equal(recovered.status, 503);
+    assert.deepEqual(await recovered.json(), { code: "engine_unavailable" });
+    assert.deepEqual([workspaceCalls, entitlementCalls, policyCalls],
+      [before[0] + 3, before[1] + 2, before[2] + 1]);
+  } finally {
+    workspaceFailure = true;
+    entitlementFailure = false;
+  }
 });
