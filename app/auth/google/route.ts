@@ -10,6 +10,7 @@ export async function GET(request: Request) {
   if (authProvider() !== "google") {
     const response = NextResponse.redirect(new URL("/auth/start", getAppOrigin(request)));
     response.headers.set("Cache-Control", "private, no-store, max-age=0");
+    response.headers.set("Referrer-Policy", "no-referrer");
     response.headers.set("X-Content-Type-Options", "nosniff");
     return response;
   }
@@ -21,6 +22,7 @@ export async function GET(request: Request) {
     // or leave a previously started OAuth exchange usable.
     const response = NextResponse.redirect(new URL("/?auth_error=authentication_failed", getAppOrigin(request)));
     response.headers.set("Cache-Control", "no-store");
+    response.headers.set("Referrer-Policy", "no-referrer");
     response.headers.set("X-Content-Type-Options", "nosniff");
     for (const name of [OAUTH_STATE_COOKIE, OAUTH_VERIFIER_COOKIE]) {
       response.cookies.set(name, "", { httpOnly: true, secure: true, sameSite: "lax", path: "/", maxAge: 0 });
@@ -41,6 +43,8 @@ export async function GET(request: Request) {
   const response = NextResponse.redirect(authorizationUrl);
   // OAuth state and PKCE verifier are single-use secrets: never cache this redirect.
   response.headers.set("Cache-Control", "no-store");
+  response.headers.set("Referrer-Policy", "no-referrer");
+  response.headers.set("X-Content-Type-Options", "nosniff");
   const options = { httpOnly: true, secure: true, sameSite: "lax" as const, path: "/", maxAge: 600 };
   response.cookies.set(OAUTH_STATE_COOKIE, state, options);
   response.cookies.set(OAUTH_VERIFIER_COOKIE, verifier, options);

@@ -9,6 +9,7 @@ export function GET(request: Request) {
   // previously cached redirect from a different configuration.
   const response = NextResponse.redirect(new URL(signInPath(), getAppOrigin(request)));
   response.headers.set("Cache-Control", "private, no-store, max-age=0");
+  response.headers.set("Referrer-Policy", "no-referrer");
   response.headers.set("X-Content-Type-Options", "nosniff");
   return response;
 }

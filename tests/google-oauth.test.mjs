@@ -712,3 +712,43 @@ test("Google OAuth discards unsuccessful provider bodies without parsing, retryi
     globalThis.fetch = originalFetch;
   }
 });
+
+test("authentication entry and signout redirects never forward the initiating URL", async () => {
+  const origin = "https://recomvia.test";
+  const originalProvider = credentials.AUTH_PROVIDER;
+  const originalClientId = credentials.GOOGLE_CLIENT_ID;
+  const originalFetch = globalThis.fetch;
+  let calls = 0;
+  globalThis.fetch = async () => { calls++; throw new Error("Redirects must not contact a provider"); };
+  try {
+    for (const provider of ["google", "chatgpt"]) {
+      credentials.AUTH_PROVIDER = provider;
+      const entry = authStart.GET(request(origin + "/auth/start?private=example"));
+      const google = await start.GET(request(origin + "/auth/google?private=example"));
+      const exit = await signout.GET(request(origin + "/auth/signout?private=example"));
+      for (const response of [entry, google, exit]) {
+        assert.equal(response.headers.get("Referrer-Policy"), "no-referrer");
+        assert.equal(response.headers.get("X-Content-Type-Options"), "nosniff");
+        assert.match(response.headers.get("Cache-Control"), /no-store/);
+        assert.equal(new URL(response.location).searchParams.has("private"), false);
+      }
+      assert.equal(entry.location, origin + (provider === "google"
+        ? "/auth/google" : "/signin-with-chatgpt?return_to=%2Fdashboard"));
+      assert.equal(new URL(google.location).origin, provider === "google" ? "https://accounts.google.com" : origin);
+      assert.equal(exit.location, provider === "google" ? origin : origin + "/signout-with-chatgpt?return_to=%2F");
+    }
+    credentials.AUTH_PROVIDER = "google";
+    credentials.GOOGLE_CLIENT_ID = "";
+    const unavailable = await start.GET(request(origin + "/auth/google?private=example"));
+    assert.equal(unavailable.location, origin + "/?auth_error=authentication_failed");
+    assert.equal(unavailable.headers.get("Referrer-Policy"), "no-referrer");
+    assert.equal(unavailable.headers.get("X-Content-Type-Options"), "nosniff");
+    assert.equal(unavailable.cookies.get(auth.OAUTH_STATE_COOKIE).options.maxAge, 0);
+    assert.equal(unavailable.cookies.get(auth.OAUTH_VERIFIER_COOKIE).options.maxAge, 0);
+    assert.equal(calls, 0);
+  } finally {
+    credentials.AUTH_PROVIDER = originalProvider;
+    credentials.GOOGLE_CLIENT_ID = originalClientId;
+    globalThis.fetch = originalFetch;
+  }
+});
