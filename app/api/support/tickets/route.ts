@@ -9,6 +9,12 @@ const BODY_TIMED_OUT = Symbol("body timed out");
 const noStore = { "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff" };
 const json = (body: unknown, status: number) => Response.json(body, { status, headers: noStore });
 
+function rejectUpload(request: Request, error: string, status: number): Response {
+  // Reject unread uploads without waiting for upstream stream cleanup.
+  void request.body?.cancel().catch(() => undefined);
+  return json({ error }, status);
+}
+
 async function readBoundedBody(request: Request): Promise<string | null | typeof BODY_TIMED_OUT> {
   if (!request.body) return "";
   const reader = request.body.getReader();
@@ -113,18 +119,18 @@ export async function POST(request: Request) {
   // Browser-only support submissions must declare this origin before a ticket is created.
   // Missing or opaque origins are not proof of a first-party request.
   if (!origin || origin !== new URL(request.url).origin) {
-    return json({ error: "Invalid request origin." }, 403);
+    return rejectUpload(request, "Invalid request origin.", 403);
   }
   const mediaType = request.headers.get("content-type")?.split(";")[0].trim().toLowerCase();
   if (mediaType !== "application/json") {
-    return json({ error: "JSON content type required." }, 415);
+    return rejectUpload(request, "JSON content type required.", 415);
   }
   const declaredLength = request.headers.get("content-length");
   if (declaredLength !== null && !/^(0|[1-9]\d*)$/.test(declaredLength)) {
-    return json({ error: "Invalid request size." }, 400);
+    return rejectUpload(request, "Invalid request size.", 400);
   }
   if (declaredLength !== null && Number(declaredLength) > MAX_BODY_BYTES) {
-    return json({ error: "Request body is too large." }, 413);
+    return rejectUpload(request, "Request body is too large.", 413);
   }
 
   let payload: TicketRequest;
