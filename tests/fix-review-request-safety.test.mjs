@@ -8,11 +8,15 @@ const compiled = ts.transpileModule(readFileSync("app/api/fix-reviews/route.ts",
 }).outputText;
 
 let user = { userId: "customer-1" };
+let identityUnavailable = false;
 const writes = [];
 class FixReviewNotAllowed extends Error {}
 const loaded = { exports: {} };
 new Function("require", "module", "exports", compiled)((name) => {
-  if (name === "@/app/auth") return { getAuthenticatedUser: async () => user };
+  if (name === "@/app/auth") return { getAuthenticatedUser: async () => {
+    if (identityUnavailable) throw new Error("private identity diagnostics");
+    return user;
+  } };
   if (name === "@/db/fix-review") return {
     FixReviewNotAllowed,
     requestFindingReview: async (...args) => {
@@ -198,4 +202,38 @@ test("completed review clears its deadline without changing planning-only behavi
   } finally {
     t.mock.timers.reset();
   }
+});
+
+test("review intake fails closed before body access during identity outage and recovers", async () => {
+  const before = writes.length;
+  let bodyReads = 0;
+  const blocked = new Proxy(request(), {
+    get(target, property) {
+      if (property === "body" || property === "headers" || property === "url") {
+        bodyReads++;
+        throw new Error("request must not be read");
+      }
+      return Reflect.get(target, property, target);
+    },
+  });
+  identityUnavailable = true;
+  try {
+    const response = await POST(blocked);
+    assert.equal(response.status, 503);
+    privateResponse(response);
+    assert.deepEqual(await response.json(), { code: "temporarily_unavailable" });
+    assert.equal(bodyReads, 0);
+    assert.equal(writes.length, before);
+  } finally {
+    identityUnavailable = false;
+  }
+  const response = await POST(request());
+  assert.equal(response.status, 201);
+  privateResponse(response);
+  const result = await response.json();
+  assert.equal(result.executionEnabled, false);
+  assert.equal(result.approved, false);
+  assert.equal(result.creditsCharged, 0);
+  assert.equal(writes.length, before + 1);
+  assert.deepEqual(writes.at(-1), ["customer-1", "scan-1", "finding_1"]);
 });

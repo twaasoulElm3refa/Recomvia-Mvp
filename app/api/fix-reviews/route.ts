@@ -7,7 +7,13 @@ const noStore = { "Cache-Control": "no-store", "X-Content-Type-Options": "nosnif
 const json = (body: unknown, status: number) => Response.json(body, { status, headers: noStore });
 
 export async function POST(request: Request) {
-  const user = await getAuthenticatedUser();
+  let user: Awaited<ReturnType<typeof getAuthenticatedUser>>;
+  try {
+    user = await getAuthenticatedUser();
+  } catch {
+    // An identity outage must not read the request body or create a review.
+    return json({ code: "temporarily_unavailable" }, 503);
+  }
   if (!user) return json({ code: "sign_in", error: "Sign in is required." }, 401);
   const origin = request.headers.get("origin");
   if (!origin || origin !== new URL(request.url).origin) {
