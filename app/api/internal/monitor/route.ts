@@ -24,7 +24,13 @@ export async function POST(request: Request) {
   const [a, b] = await Promise.all([digest(supplied), digest(expected)]);
   let difference = 0; for (let i = 0; i < a.length; i++) difference |= a[i] ^ b[i];
   if (difference) return respond({ code: "unauthorized" }, 401);
-  const job = await claimMonitoringJob();
+  let job: Awaited<ReturnType<typeof claimMonitoringJob>>;
+  try {
+    job = await claimMonitoringJob();
+  } catch {
+    // A failed claim may already have written a lease. Do not retry or scan.
+    return respond({ code: "monitor_unavailable" }, 503);
+  }
   if (!job) return respond({ processed: 0 });
   let status = "monitor_failed", pause = false;
   try {
@@ -38,6 +44,12 @@ export async function POST(request: Request) {
       pause = ["subscription_required", "project_limit", "needs_confirmation", "identity_unresolved", "plan_changed"].includes(status);
     }
   } catch { status = "monitor_failed"; }
-  finally { await releaseMonitoringJob(job, status, pause); }
+  try {
+    await releaseMonitoringJob(job, status, pause);
+  } catch {
+    // A release may have committed despite the error. Never repeat the scan
+    // or release here; the existing lease and next-run policy govern recovery.
+    return respond({ code: "monitor_unavailable" }, 503);
+  }
   return respond({ processed: 1, status });
 }

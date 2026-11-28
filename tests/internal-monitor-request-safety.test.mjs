@@ -20,6 +20,9 @@ new Function("module", "exports", classifierCompiled)(classifier, classifier.exp
 const env = { MONITORING_SECRET: "s".repeat(48) };
 let claimCalls = 0;
 let scanCalls = 0;
+let claimFailure = false;
+let releaseFailure = false;
+let releaseAttempts = 0;
 let digests = 0;
 let pendingJob = null;
 let scanResponse = null;
@@ -37,9 +40,15 @@ new Function("require", "module", "exports", "crypto", compiled)((name) => {
   if (name === "cloudflare:workers") return { env };
   if (name === "@/lib/monitoring-scan-status") return classifier.exports;
   if (name === "@/db/analysis") return {
-    claimMonitoringJob: async () => { claimCalls++; return pendingJob; },
+    claimMonitoringJob: async () => {
+      claimCalls++;
+      if (claimFailure) throw new Error("private claim diagnostics");
+      return pendingJob;
+    },
     releaseMonitoringJob: async (job, status, pause) => {
+      releaseAttempts++;
       assert.equal(job, pendingJob);
+      if (releaseFailure) throw new Error("private release diagnostics");
       releases.push({ status, pause });
     },
   };
@@ -130,4 +139,48 @@ test("authenticated monitoring releases a claimed job with only a trusted result
     pendingJob = null;
     scanResponse = null;
   }
+});
+
+test("monitoring claim outage returns a private 503 without scanning or retrying", async () => {
+  const before = [claimCalls, scanCalls, releaseAttempts];
+  claimFailure = true;
+  try {
+    const response = await POST(request("Bearer " + env.MONITORING_SECRET));
+    privateResponse(response, 503);
+    assert.deepEqual(await response.json(), { code: "monitor_unavailable" });
+    assert.deepEqual([claimCalls, scanCalls, releaseAttempts], [before[0] + 1, before[1], before[2]]);
+  } finally {
+    claimFailure = false;
+  }
+  const recovery = await POST(request("Bearer " + env.MONITORING_SECRET));
+  privateResponse(recovery, 200);
+  assert.deepEqual(await recovery.json(), { processed: 0 });
+});
+
+test("monitoring release outage never repeats a scan or reports success", async () => {
+  const before = [claimCalls, scanCalls, releaseAttempts, releases.length];
+  pendingJob = {
+    userId: "test-user", email: "test@example.invalid", displayName: "Test",
+    organizationId: "test-org",
+    inputJson: JSON.stringify({ input: "Example", kind: "entity", language: "en" }),
+    targetJson: "{}",
+  };
+  scanResponse = Response.json({ privateReport: "not returned" }, { status: 201 });
+  releaseFailure = true;
+  try {
+    const response = await POST(request("Bearer " + env.MONITORING_SECRET));
+    privateResponse(response, 503);
+    assert.deepEqual(await response.json(), { code: "monitor_unavailable" });
+    assert.deepEqual([claimCalls, scanCalls, releaseAttempts, releases.length],
+      [before[0] + 1, before[1] + 1, before[2] + 1, before[3]]);
+  } finally {
+    releaseFailure = false;
+    pendingJob = null;
+    scanResponse = null;
+  }
+  // The next tick can be idle when storage still holds a lease or future date.
+  const recovery = await POST(request("Bearer " + env.MONITORING_SECRET));
+  privateResponse(recovery, 200);
+  assert.deepEqual(await recovery.json(), { processed: 0 });
+  assert.equal(scanCalls, before[1] + 1);
 });
