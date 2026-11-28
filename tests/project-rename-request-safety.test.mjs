@@ -257,3 +257,65 @@ test("project rename fails closed during identity outages and recovers without c
   assert.equal(writes.length, before + 1);
   assert.deepEqual(writes.at(-1), [{ userId: "owner" }, validData.projectId, validData.expectedName, displayName]);
 });
+
+test("project rename cancels header-rejected uploads without reading or waiting for cleanup", async () => {
+  const before = writes.length;
+  for (const [headers, status, code] of [
+    [{ Origin: "https://evil.example" }, 403, "invalid_origin"],
+    [{ "Content-Type": "application/jsonp" }, 415, "invalid_request"],
+    [{ "Content-Length": "01" }, 400, "invalid_request"],
+    [{ "Content-Length": "2049" }, 413, "invalid_request"],
+  ]) {
+    let reads = 0;
+    let cancelled = false;
+    let finishCleanup;
+    const cleanup = new Promise((resolve) => { finishCleanup = resolve; });
+    const body = new ReadableStream({
+      pull() { reads += 1; },
+      cancel() { cancelled = true; return cleanup; },
+    }, { highWaterMark: 0 });
+    const req = new Request("https://recomvia.test/api/projects/rename", {
+      method: "POST", duplex: "half", body,
+      headers: { Origin: "https://recomvia.test", "Content-Type": "application/json", ...headers },
+    });
+    const pending = POST(req);
+    try {
+      const response = await Promise.race([pending, new Promise((resolve) => setImmediate(() => resolve(null)))]);
+      assert.ok(response, "header rejection must not wait for cancellation");
+      assert.equal(response.status, status);
+      assert.deepEqual(await response.json(), { code });
+      assert.equal(response.headers.get("Cache-Control"), "no-store");
+      assert.equal(response.headers.get("X-Content-Type-Options"), "nosniff");
+      assert.equal(cancelled, true);
+      assert.equal(reads, 0);
+      assert.equal(writes.length, before);
+    } finally {
+      finishCleanup();
+      await pending;
+    }
+  }
+});
+
+test("project rename suppresses cancellation diagnostics and preserves Arabic labels and quotas", async () => {
+  const before = writes.length;
+  const body = new ReadableStream({
+    cancel() { return Promise.reject(new Error("private transport diagnostic")); },
+  }, { highWaterMark: 0 });
+  const req = new Request("https://recomvia.test/api/projects/rename", {
+    method: "POST", duplex: "half", body,
+    headers: { Origin: "https://recomvia.test", "Content-Type": "text/plain" },
+  });
+  const rejected = await POST(req);
+  assert.equal(rejected.status, 415);
+  assert.deepEqual(await rejected.json(), { code: "invalid_request" });
+  assert.equal(writes.length, before);
+  const displayName = "مشروع الرياض";
+  const recovered = await POST(request(JSON.stringify({ ...validData, displayName })));
+  assert.equal(recovered.status, 200);
+  assert.deepEqual(await recovered.json(), {
+    projectId: validData.projectId, displayName, changed: true,
+    projectKeyUnchanged: true, quotasReset: false,
+  });
+  assert.equal(writes.length, before + 1);
+  assert.deepEqual(writes.at(-1), [{ userId: "owner" }, validData.projectId, validData.expectedName, displayName]);
+});
