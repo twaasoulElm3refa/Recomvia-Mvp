@@ -400,3 +400,62 @@ test("support identity outage cannot create an anonymous ticket or leak diagnost
     authenticatedUser = null;
   }
 });
+
+test("support cancels header-rejected uploads without reading or waiting for cleanup", async () => {
+  const before = created.length;
+  for (const [headers, status] of [
+    [{ Origin: "https://external.example" }, 403],
+    [{ Origin: "" }, 403],
+    [{ "Content-Type": "application/jsonp" }, 415],
+    [{ "Content-Length": "01" }, 400],
+    [{ "Content-Length": "16385" }, 413],
+  ]) {
+    let reads = 0;
+    let cancels = 0;
+    let finishCleanup;
+    const cleanup = new Promise((resolve) => { finishCleanup = resolve; });
+    const body = new ReadableStream({
+      pull() { reads++; },
+      cancel() { cancels++; return cleanup; },
+    }, { highWaterMark: 0 });
+    const pending = POST(new Request("https://recomvia.test/api/support/tickets", {
+      method: "POST", body, duplex: "half",
+      headers: { Origin: "https://recomvia.test", "Content-Type": "application/json", ...headers },
+    }));
+    try {
+      const response = await Promise.race([
+        pending,
+        new Promise((resolve) => setImmediate(() => resolve(null))),
+      ]);
+      assert.ok(response, "header rejection must not wait for cleanup");
+      assert.equal(response.status, status);
+      assert.equal(response.headers.get("Cache-Control"), "no-store");
+      assert.equal(response.headers.get("X-Content-Type-Options"), "nosniff");
+      assert.equal(reads, 0);
+      assert.equal(cancels, 1);
+      assert.equal(body.locked, false);
+      assert.equal(created.length, before);
+    } finally {
+      finishCleanup();
+      await pending;
+    }
+  }
+});
+
+test("support ignores early cancellation failure and accepts the next valid Arabic ticket", async () => {
+  const before = created.length;
+  const body = new ReadableStream({
+    cancel() { throw new Error("private upload cleanup diagnostic"); },
+  }, { highWaterMark: 0 });
+  const rejected = await POST(new Request("https://recomvia.test/api/support/tickets", {
+    method: "POST", body, duplex: "half",
+    headers: { Origin: "https://recomvia.test", "Content-Type": "text/plain" },
+  }));
+  assert.equal(rejected.status, 415);
+  assert.deepEqual(await rejected.json(), { error: "JSON content type required." });
+  assert.equal(created.length, before);
+  const input = { name: "عميل عربي", email: "sender@example.org", question: "أرجو توضيح نتائج التقرير" };
+  assert.equal((await POST(request(JSON.stringify(input)))).status, 201);
+  assert.equal(created.length, before + 1);
+  assert.equal(created.at(-1).question, input.question);
+});
