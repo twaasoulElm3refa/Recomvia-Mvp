@@ -468,3 +468,64 @@ test("scan account-store outages fail closed before provider setup and do not re
     entitlementFailure = false;
   }
 });
+
+test("scan preflight cancels rejected uploads without reading or awaiting transport cleanup", async () => {
+  const before = [workspaceCalls, entitlementCalls, policyCalls];
+  for (const [headers, status, code] of [
+    [{ Origin: "https://evil.example" }, 403, "invalid_origin"],
+    [{ "Content-Type": "application/jsonp" }, 415, "invalid_input"],
+    [{ "Content-Length": "01" }, 400, "invalid_input"],
+    [{ "Content-Length": "4001" }, 413, "invalid_input"],
+    [{}, 401, "sign_in"],
+    [{}, 503, "temporarily_unavailable"],
+  ]) {
+    let reads = 0;
+    let cancelled = false;
+    let finishCleanup;
+    const cleanup = new Promise((resolve) => { finishCleanup = resolve; });
+    const body = new ReadableStream({
+      pull() { reads += 1; },
+      cancel() { cancelled = true; return cleanup; },
+    }, { highWaterMark: 0 });
+    const req = new Request("https://recomvia.test/api/scans", {
+      method: "POST", duplex: "half", body,
+      headers: { Origin: "https://recomvia.test", "Content-Type": "application/json", ...headers },
+    });
+    authenticated = status !== 401;
+    authFailure = status === 503 ? new Error("private session diagnostic") : null;
+    const pending = POST(req);
+    try {
+      const response = await Promise.race([pending, new Promise((resolve) => setImmediate(() => resolve(null)))]);
+      assert.ok(response, "preflight must not wait for cancellation");
+      assert.equal(response.status, status);
+      assert.equal((await response.json()).code, code);
+      assert.equal(response.headers.get("Cache-Control"), "no-store");
+      assert.equal(response.headers.get("X-Content-Type-Options"), "nosniff");
+      assert.equal(cancelled, true);
+      assert.equal(reads, 0);
+      assert.deepEqual([workspaceCalls, entitlementCalls, policyCalls], before);
+    } finally {
+      authenticated = true;
+      authFailure = null;
+      finishCleanup();
+      await pending;
+    }
+  }
+});
+
+test("scan preflight suppresses cancellation failures and allows subsequent Arabic input", async () => {
+  const before = [workspaceCalls, entitlementCalls, policyCalls];
+  const body = new ReadableStream({
+    cancel() { return Promise.reject(new Error("private transport diagnostic")); },
+  }, { highWaterMark: 0 });
+  const req = new Request("https://recomvia.test/api/scans", {
+    method: "POST", duplex: "half", body,
+    headers: { Origin: "https://recomvia.test", "Content-Type": "text/plain" },
+  });
+  const rejected = await POST(req);
+  assert.equal(rejected.status, 415);
+  assert.deepEqual(await rejected.json(), { code: "invalid_input", error: "JSON content type required." });
+  assert.deepEqual([workspaceCalls, entitlementCalls, policyCalls], before);
+  await assertUnavailable(await POST(request(JSON.stringify({ input: "موضوع عربي", kind: "topic", language: "ar" }))));
+  assert.deepEqual([workspaceCalls, entitlementCalls, policyCalls], [before[0] + 1, before[1], before[2]]);
+});

@@ -101,16 +101,22 @@ export async function GET(request: Request) {
   }
 }
 
+function rejectUpload(request: Request, body: unknown, status: number) {
+  // Reject unread uploads without waiting for upstream transport cleanup.
+  void request.body?.cancel().catch(() => undefined);
+  return json(body, status);
+}
+
 export async function POST(request: Request) {
   let user: AuthUser | null;
   try {
     user = await getAuthenticatedUser();
   } catch {
     // Fail closed before reading the body, accessing a workspace or starting a provider.
-    return json({ code: "temporarily_unavailable" }, 503);
+    return rejectUpload(request, { code: "temporarily_unavailable" }, 503);
   }
   if (!user)
-    return json(
+    return rejectUpload(request, 
       { code: "sign_in", error: "Sign in before starting an analysis." },
       401,
     );
@@ -118,18 +124,18 @@ export async function POST(request: Request) {
   // Scan execution can incur provider costs. Accept only browser requests from this origin.
   const origin = request.headers.get("origin");
   if (!origin || origin !== new URL(request.url).origin)
-    return json({ code: "invalid_origin", error: "Invalid request origin." }, 403);
+    return rejectUpload(request, { code: "invalid_origin", error: "Invalid request origin." }, 403);
   const mediaType = request.headers.get("content-type")?.split(";")[0].trim().toLowerCase();
   if (mediaType !== "application/json")
-    return json({ code: "invalid_input", error: "JSON content type required." }, 415);
+    return rejectUpload(request, { code: "invalid_input", error: "JSON content type required." }, 415);
 
   const declaredLength = request.headers.get("content-length");
   if (declaredLength !== null) {
     // Only canonical decimal lengths are valid; stream bytes remain the authoritative cap.
     if (!/^(0|[1-9]\d*)$/.test(declaredLength))
-      return json({ code: "invalid_input", error: "Invalid request size." }, 400);
+      return rejectUpload(request, { code: "invalid_input", error: "Invalid request size." }, 400);
     if (Number(declaredLength) > MAX_SCAN_BODY_BYTES)
-      return json({ code: "invalid_input", error: "Request is too large." }, 413);
+      return rejectUpload(request, { code: "invalid_input", error: "Request is too large." }, 413);
   }
 
   let payload: Record<string, unknown>;
