@@ -290,3 +290,61 @@ test("staff reply identity outages are private, prevent body access and writes, 
   assert.equal(writes.length, before + 1);
   assert.deepEqual(writes.at(-1), [12, reply, "admin-123"]);
 });
+
+test("staff reply rejects unread uploads without waiting for upstream cleanup", async () => {
+  const before = writes.length;
+  for (const [headers, id, status] of [
+    [{ Origin: "https://evil.example" }, "12", 403],
+    [{ "Content-Type": "text/plain" }, "12", 415],
+    [{ "Content-Length": "01" }, "12", 400],
+    [{ "Content-Length": "16385" }, "12", 413],
+    [{}, "0", 400],
+  ]) {
+    let reads = 0;
+    let cancelled = false;
+    let finishCleanup;
+    const cleanup = new Promise((resolve) => { finishCleanup = resolve; });
+    const body = new ReadableStream({
+      pull() { reads += 1; },
+      cancel() { cancelled = true; return cleanup; },
+    }, { highWaterMark: 0 });
+    const req = new Request("https://recomvia.test/api/support/tickets/12/reply", {
+      method: "POST", duplex: "half", body,
+      headers: { Origin: "https://recomvia.test", "Content-Type": "application/json", ...headers },
+    });
+    const pending = POST(req, context(id));
+    try {
+      const response = await Promise.race([pending, new Promise((resolve) => setImmediate(() => resolve(null)))]);
+      assert.ok(response, "header or ID rejection must not wait for cleanup");
+      assert.equal(response.status, status);
+      assert.equal(response.headers.get("Cache-Control"), "no-store");
+      assert.equal(response.headers.get("X-Content-Type-Options"), "nosniff");
+      assert.equal(cancelled, true);
+      assert.equal(reads, 0);
+      assert.equal(writes.length, before);
+    } finally {
+      finishCleanup();
+      await pending;
+    }
+  }
+});
+
+test("staff reply cancellation failure stays private and valid Arabic replies still save", async () => {
+  const before = writes.length;
+  const body = new ReadableStream({
+    cancel() { return Promise.reject(new Error("private transport diagnostic")); },
+  }, { highWaterMark: 0 });
+  const req = new Request("https://recomvia.test/api/support/tickets/12/reply", {
+    method: "POST", duplex: "half", body,
+    headers: { Origin: "https://recomvia.test", "Content-Type": "text/plain" },
+  });
+  const rejected = await POST(req, context());
+  assert.equal(rejected.status, 415);
+  assert.deepEqual(await rejected.json(), { error: "JSON content type required." });
+  assert.equal(writes.length, before);
+  const reply = "شكرًا لتواصلك معنا، سنراجع التقرير.";
+  const recovered = await POST(request(JSON.stringify({ reply })), context());
+  assert.equal(recovered.status, 200);
+  assert.equal(writes.length, before + 1);
+  assert.deepEqual(writes.at(-1), [12, reply, "admin-123"]);
+});
