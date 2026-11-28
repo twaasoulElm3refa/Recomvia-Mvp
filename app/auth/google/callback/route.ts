@@ -44,20 +44,28 @@ export async function GET(request: NextRequest) {
       signal: AbortSignal.timeout(10_000),
       body: new URLSearchParams({ code, client_id: clientId, client_secret: clientSecret, redirect_uri: getGoogleCallbackUrl(request), grant_type: "authorization_code", code_verifier: verifier }),
     });
+    // Error bodies are not needed for authentication; release them without parsing.
+    if (!tokenResponse.ok) {
+      void tokenResponse.body?.cancel().catch(() => undefined);
+      return authError(appOrigin, "token_exchange_failed");
+    }
     const token = (await tokenResponse.json()) as GoogleTokenResponse;
     // Reject malformed tokens before constructing an outbound Authorization header.
     const accessToken = token.access_token;
-    if (!tokenResponse.ok || typeof accessToken !== "string" ||
+    if (typeof accessToken !== "string" ||
         accessToken.length < 1 || accessToken.length > 4_096 ||
         !/^[\x21-\x7e]+$/.test(accessToken)) return authError(appOrigin, "token_exchange_failed");
     const profileResponse = await fetch("https://openidconnect.googleapis.com/v1/userinfo", { headers: { authorization: `Bearer ${accessToken}` }, redirect: "error", signal: AbortSignal.timeout(10_000) });
+    if (!profileResponse.ok) {
+      void profileResponse.body?.cancel().catch(() => undefined);
+      return authError(appOrigin, "unverified_google_account");
+    }
     const profile = (await profileResponse.json()) as GoogleProfile;
     // Bound verified identity claims before signing a session or displaying them.
     // Regular Arabic and Latin display names remain valid; invisible controls do not.
     const { sub, email, name } = profile;
     const unsafeText = /[\u0000-\u001f\u007f\u202a-\u202e\u2066-\u2069]/;
-    if (!profileResponse.ok ||
-        typeof sub !== "string" || !/^[A-Za-z0-9_-]{1,255}$/.test(sub) ||
+    if (typeof sub !== "string" || !/^[A-Za-z0-9_-]{1,255}$/.test(sub) ||
         typeof email !== "string" || email.length > 254 ||
         !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || unsafeText.test(email) ||
         profile.email_verified !== true ||
