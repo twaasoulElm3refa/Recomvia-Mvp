@@ -9,6 +9,7 @@ const compiled = ts.transpileModule(source, {
 }).outputText;
 
 let authenticated = true;
+let identityUnavailable = false;
 let databaseError = "";
 const writes = [];
 class FixReviewNotAllowed extends Error {}
@@ -16,7 +17,10 @@ class FixProposalDecisionConflict extends Error {}
 const loaded = { exports: {} };
 new Function("require", "module", "exports", compiled)((name) => {
   if (name === "@/app/auth") return {
-    getAuthenticatedUser: async () => authenticated ? { userId: "owner" } : null,
+    getAuthenticatedUser: async () => {
+      if (identityUnavailable) throw new Error("private identity diagnostics");
+      return authenticated ? { userId: "owner" } : null;
+    },
   };
   if (name === "@/db/fix-review") return {
     FixReviewNotAllowed,
@@ -256,4 +260,41 @@ test("completed fix decision clears the upload deadline and records only once", 
   } finally {
     t.mock.timers.reset();
   }
+});
+
+test("proposal decision identity outage blocks request access and writes, then recovers", async () => {
+  const before = writes.length;
+  let requestReads = 0;
+  const blocked = new Proxy(request(), {
+    get(target, property) {
+      if (property === "headers" || property === "url" || property === "body") {
+        requestReads++;
+        throw new Error("request must not be read");
+      }
+      return Reflect.get(target, property, target);
+    },
+  });
+  identityUnavailable = true;
+  try {
+    const response = await POST(blocked);
+    assert.equal(response.status, 503);
+    assert.equal(response.headers.get("Cache-Control"), "no-store");
+    assert.equal(response.headers.get("X-Content-Type-Options"), "nosniff");
+    assert.deepEqual(await response.json(), { code: "temporarily_unavailable" });
+    assert.equal(requestReads, 0);
+    assert.equal(writes.length, before);
+  } finally {
+    identityUnavailable = false;
+  }
+  const comment = "مراجعة النطاق — scope confirmed";
+  const response = await POST(request(JSON.stringify({ ...validData, comment })));
+  assert.equal(response.status, 201);
+  assert.deepEqual(await response.json(), {
+    proposalId: validData.proposalId, alreadyRecorded: false,
+    applied: false, approvedForExecution: false, creditsCharged: 0,
+  });
+  assert.equal(writes.length, before + 1);
+  assert.deepEqual(writes.at(-1), [
+    "owner", validData.scanId, validData.proposalId, validData.decision, comment,
+  ]);
 });
