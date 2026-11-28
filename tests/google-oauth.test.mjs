@@ -127,6 +127,8 @@ test("callback exchanges with the exact request-specific redirect URI and return
     assert.equal(body.get("code_verifier"), verifier);
     assert.equal(response.location, `${origin}/dashboard`);
     assert.equal(response.headers.get("Cache-Control"), "no-store");
+    assert.equal(response.headers.get("Referrer-Policy"), "no-referrer");
+    assert.equal(response.headers.get("X-Content-Type-Options"), "nosniff");
     assert.match(response.cookies.get(auth.SESSION_COOKIE).value, /^[^.]+\.[^.]+$/);
     assert.deepEqual(
       { httpOnly: response.cookies.get(auth.SESSION_COOKIE).options.httpOnly, secure: response.cookies.get(auth.SESSION_COOKIE).options.secure, sameSite: response.cookies.get(auth.SESSION_COOKIE).options.sameSite },
@@ -147,6 +149,8 @@ test("invalid OAuth state returns to staging with an error without exchanging a 
     const response = await callback.GET(request(`${origin}/auth/google/callback?code=test-code&state=bad`));
     assert.equal(response.location, `${origin}/?auth_error=invalid_oauth_state`);
     assert.equal(response.headers.get("Cache-Control"), "no-store");
+    assert.equal(response.headers.get("Referrer-Policy"), "no-referrer");
+    assert.equal(response.headers.get("X-Content-Type-Options"), "nosniff");
     assert.equal(response.cookies.get(auth.OAUTH_STATE_COOKIE).options.maxAge, 0);
   } finally {
     globalThis.fetch = originalFetch;
@@ -163,6 +167,8 @@ test("Google token errors return to the staging origin", async () => {
     const response = await callback.GET(incoming);
     assert.equal(response.location, `${origin}/?auth_error=token_exchange_failed`);
     assert.equal(response.headers.get("Cache-Control"), "no-store");
+    assert.equal(response.headers.get("Referrer-Policy"), "no-referrer");
+    assert.equal(response.headers.get("X-Content-Type-Options"), "nosniff");
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -551,6 +557,7 @@ test("Sites blocks direct and stale Google OAuth routes before credentials or ne
     }
     assert.equal(direct.cookies.get(auth.OAUTH_STATE_COOKIE), undefined);
     assert.equal(direct.cookies.get(auth.OAUTH_VERIFIER_COOKIE), undefined);
+    assert.equal(stale.headers.get("Referrer-Policy"), "no-referrer");
     assert.equal(stale.cookies.get(auth.OAUTH_STATE_COOKIE).options.maxAge, 0);
     assert.equal(stale.cookies.get(auth.OAUTH_VERIFIER_COOKIE).options.maxAge, 0);
     assert.equal(calls, 0);
