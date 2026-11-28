@@ -12,7 +12,13 @@ const json = (data: unknown, status: number) => Response.json(data, {
 });
 
 export async function POST(request: Request) {
-  const user = await getAuthenticatedUser();
+  let user: Awaited<ReturnType<typeof getAuthenticatedUser>>;
+  try {
+    user = await getAuthenticatedUser();
+  } catch {
+    // Do not read or record a planning decision if identity lookup fails.
+    return json({ code: "temporarily_unavailable" }, 503);
+  }
   if (!user) return json({ code: "sign_in" }, 401);
   const origin = request.headers.get("origin");
   if (!origin || origin !== new URL(request.url).origin) return json({ code: "invalid_origin" }, 403);
