@@ -9,11 +9,15 @@ const compiled = ts.transpileModule(source, {
 }).outputText;
 
 let authenticated = true;
+let identityError = null;
 const writes = [];
 const loaded = { exports: {} };
 new Function("require", "module", "exports", compiled)((name) => {
   if (name === "@/app/auth") return {
-    getAuthenticatedUser: async () => authenticated ? { userId: "owner" } : null,
+    getAuthenticatedUser: async () => {
+      if (identityError) throw identityError;
+      return authenticated ? { userId: "owner" } : null;
+    },
   };
   if (name === "@/db/project-slots") return {
     ProjectSlotError: class ProjectSlotError extends Error {},
@@ -225,4 +229,31 @@ test("completed Arabic project rename clears its deadline and preserves mutation
   } finally {
     t.mock.timers.reset();
   }
+});
+
+test("project rename fails closed during identity outages and recovers without changing the rename contract", async () => {
+  const before = writes.length;
+  const req = request();
+  // Accessing the body during an identity outage is unnecessary and unsafe.
+  Object.defineProperty(req, "body", { get() { throw new Error("upload must not be read"); } });
+  identityError = new Error("private authentication diagnostic");
+  try {
+    const response = await POST(req);
+    assert.equal(response.status, 503);
+    assert.deepEqual(await response.json(), { code: "temporarily_unavailable" });
+    assert.equal(response.headers.get("Cache-Control"), "no-store");
+    assert.equal(response.headers.get("X-Content-Type-Options"), "nosniff");
+    assert.equal(writes.length, before);
+  } finally {
+    identityError = null;
+  }
+  const displayName = "مشروع Recomvia";
+  const recovered = await POST(request(JSON.stringify({ ...validData, displayName })));
+  assert.equal(recovered.status, 200);
+  assert.deepEqual(await recovered.json(), {
+    projectId: validData.projectId, displayName, changed: true,
+    projectKeyUnchanged: true, quotasReset: false,
+  });
+  assert.equal(writes.length, before + 1);
+  assert.deepEqual(writes.at(-1), [{ userId: "owner" }, validData.projectId, validData.expectedName, displayName]);
 });
