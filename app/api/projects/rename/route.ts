@@ -6,6 +6,12 @@ const respond = (data: unknown, status: number) => Response.json(data, {
   status, headers: { "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff" },
 });
 
+function rejectUpload(request: Request, code: string, status: number): Response {
+  // Reject before parsing without waiting for upstream transport cleanup.
+  void request.body?.cancel().catch(() => undefined);
+  return respond({ code }, status);
+}
+
 export async function POST(request: Request) {
   let user: AuthUser | null;
   try {
@@ -18,17 +24,17 @@ export async function POST(request: Request) {
 
   const origin = request.headers.get("origin");
   if (!origin || origin !== new URL(request.url).origin) {
-    return respond({ code: "invalid_origin" }, 403);
+    return rejectUpload(request, "invalid_origin", 403);
   }
   if (!/^application\/json(?:\s*;|\s*$)/i.test(request.headers.get("content-type") ?? "")) {
-    return respond({ code: "invalid_request" }, 415);
+    return rejectUpload(request, "invalid_request", 415);
   }
   // Bounded UTF-8 intake avoids buffering arbitrary request bodies and permits valid Unicode names.
   const maxBodyBytes = 2_048;
   const declaredLength = request.headers.get("content-length");
   if (declaredLength !== null) {
-    if (!/^(0|[1-9]\d*)$/.test(declaredLength)) return respond({ code: "invalid_request" }, 400);
-    if (Number(declaredLength) > maxBodyBytes) return respond({ code: "invalid_request" }, 413);
+    if (!/^(0|[1-9]\d*)$/.test(declaredLength)) return rejectUpload(request, "invalid_request", 400);
+    if (Number(declaredLength) > maxBodyBytes) return rejectUpload(request, "invalid_request", 413);
   }
 
   let input: unknown;
