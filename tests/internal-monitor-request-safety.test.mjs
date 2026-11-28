@@ -184,3 +184,45 @@ test("monitoring release outage never repeats a scan or reports success", async 
   assert.deepEqual(await recovery.json(), { processed: 0 });
   assert.equal(scanCalls, before[1] + 1);
 });
+
+
+test("monitor outcome classification discards unexpected success and oversized or malformed bodies", async () => {
+  const { monitoringScanStatus } = classifier.exports;
+  for (const mode of ["unexpected-success", "declared", "streamed", "invalid-utf8", "wrong-type"]) {
+    let cancelled = 0;
+    const headers = { "content-type": mode === "wrong-type" ? "text/html" : "application/json" };
+    if (mode === "declared") headers["content-length"] = "65537";
+    if (mode === "streamed") headers["content-length"] = "10";
+    const body = new ReadableStream({
+      start(controller) {
+        if (mode === "streamed") {
+          controller.enqueue(new Uint8Array(32768).fill(32));
+          controller.enqueue(new Uint8Array(32769).fill(32));
+        } else if (mode === "invalid-utf8") {
+          controller.enqueue(Uint8Array.of(255));
+        }
+      },
+      cancel() { cancelled++; },
+    });
+    const result = await monitoringScanStatus(new Response(body, {
+      status: mode === "unexpected-success" ? 200 : 500,
+      headers,
+    }));
+    assert.equal(result, "monitor_failed", mode);
+    assert.equal(cancelled, 1, mode);
+    assert.equal(body.locked, false, mode);
+  }
+});
+
+test("bounded monitor outcomes preserve recognized decisions and Unicode", async () => {
+  const { monitoringScanStatus } = classifier.exports;
+  assert.equal(await monitoringScanStatus(Response.json({
+    status: "needs_confirmation", candidates: [{ name: "اسم تجريبي" }],
+  }, { status: 202 })), "needs_confirmation");
+  assert.equal(await monitoringScanStatus(Response.json({
+    code: "subscription_required",
+  }, { status: 403 })), "subscription_required");
+  assert.equal(await monitoringScanStatus(Response.json({
+    code: "subscription_required",
+  }, { status: 200 })), "monitor_failed");
+});
