@@ -239,3 +239,61 @@ test("assistant clears the upload deadline after a complete valid request", asyn
   assert.deepEqual(searched, ["Valid text"]);
   t.mock.timers.reset();
 });
+
+
+test("assistant cancels header-rejected uploads without reading or awaiting cleanup", async () => {
+  searched = [];
+  for (const [headers, status] of [
+    [{ Origin: "https://evil.example" }, 403],
+    [{ "Content-Type": "text/plain" }, 415],
+    [{ "Content-Length": "01" }, 400],
+    [{ "Content-Length": "3001" }, 413],
+  ]) {
+    let pulls = 0;
+    let cancelled = 0;
+    let finishCleanup;
+    const cleanup = new Promise((resolve) => { finishCleanup = resolve; });
+    const body = new ReadableStream({
+      pull() { pulls++; },
+      cancel() { cancelled++; return cleanup; },
+    }, { highWaterMark: 0 });
+    const pending = POST(new Request("https://recomvia.test/api/assistant", {
+      method: "POST", body, duplex: "half",
+      headers: { Origin: "https://recomvia.test", "Content-Type": "application/json", ...headers },
+    }));
+    try {
+      const response = await Promise.race([
+        pending,
+        new Promise((resolve) => setImmediate(() => resolve(null))),
+      ]);
+      assert.ok(response, "header rejection must not wait for upstream cleanup");
+      assert.equal(response.status, status);
+      assert.equal(response.headers.get("Cache-Control"), "no-store");
+      assert.equal(response.headers.get("X-Content-Type-Options"), "nosniff");
+      assert.equal(pulls, 0);
+      assert.equal(cancelled, 1);
+      assert.equal(body.locked, false);
+    } finally {
+      finishCleanup();
+      await pending;
+    }
+  }
+  assert.deepEqual(searched, []);
+});
+
+test("assistant ignores failed header-rejection cleanup and accepts later valid questions", async () => {
+  searched = [];
+  const body = new ReadableStream({
+    cancel() { return Promise.reject(new Error("private upstream cleanup failure")); },
+  }, { highWaterMark: 0 });
+  const response = await POST(new Request("https://recomvia.test/api/assistant", {
+    method: "POST", body, duplex: "half",
+    headers: { "Content-Type": "text/plain" },
+  }));
+  assert.equal(response.status, 415);
+  assert.deepEqual(await response.json(), { error: "JSON content type required." });
+  assert.deepEqual(searched, []);
+  const question = "ما هي باقات Recomvia؟";
+  assert.equal((await POST(request(JSON.stringify({ question })))).status, 200);
+  assert.deepEqual(searched, [question]);
+});
