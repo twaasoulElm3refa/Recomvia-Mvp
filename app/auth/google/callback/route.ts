@@ -15,6 +15,7 @@ export async function GET(request: NextRequest) {
     const response = NextResponse.redirect(new URL("/auth/start", appOrigin));
     response.headers.set("Cache-Control", "private, no-store, max-age=0");
     response.headers.set("X-Content-Type-Options", "nosniff");
+    response.headers.set("Referrer-Policy", "no-referrer");
     clearOAuthCookies(response);
     return response;
   }
@@ -65,8 +66,10 @@ export async function GET(request: NextRequest) {
     }
 
     const response = NextResponse.redirect(`${appOrigin}/dashboard`);
-    // Session-bearing authentication redirects must never be cached.
+    // Never cache the session redirect or forward the callback URL (code and state).
     response.headers.set("Cache-Control", "no-store");
+    response.headers.set("Referrer-Policy", "no-referrer");
+    response.headers.set("X-Content-Type-Options", "nosniff");
     response.cookies.set(SESSION_COOKIE, await createSession({ sub, email: email.toLowerCase(), name: typeof name === "string" ? name.trim() || null : null }), {
       httpOnly: true, secure: true, sameSite: "lax", path: "/", maxAge: SESSION_MAX_AGE,
     });
@@ -80,6 +83,8 @@ export async function GET(request: NextRequest) {
 function authError(appOrigin: string, reason: string) {
   const response = NextResponse.redirect(`${appOrigin}/?auth_error=${encodeURIComponent(reason)}`);
   response.headers.set("Cache-Control", "no-store");
+  response.headers.set("Referrer-Policy", "no-referrer");
+  response.headers.set("X-Content-Type-Options", "nosniff");
   clearOAuthCookies(response);
   return response;
 }
