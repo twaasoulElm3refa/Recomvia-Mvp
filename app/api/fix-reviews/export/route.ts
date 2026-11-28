@@ -1,4 +1,4 @@
-import { getAuthenticatedUser } from "@/app/auth";
+import { getAuthenticatedUser, type AuthUser } from "@/app/auth";
 import { getReportForUser } from "@/db/product";
 import { listFixProposalHistoryForScan, listFixReviewRequests } from "@/db/fix-review";
 
@@ -19,7 +19,13 @@ function error(status: number, code: string) {
  * This is NOT a backup of the customer website or authorization to deploy.
  */
 export async function GET(request: Request) {
-  const user = await getAuthenticatedUser();
+  let user: AuthUser | null;
+  try {
+    user = await getAuthenticatedUser();
+  } catch {
+    // Fail closed before reading the private scan selector or any evidence.
+    return error(503, "temporarily_unavailable");
+  }
   if (!user) return error(401, "sign_in");
 
   // Reject ambiguous scan selectors before any customer report or proposal reads.

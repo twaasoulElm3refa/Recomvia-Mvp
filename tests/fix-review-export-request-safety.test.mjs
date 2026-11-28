@@ -11,6 +11,7 @@ const compiled = ts.transpileModule(
 ).outputText;
 
 let user = { userId: "owner-1" };
+let identityError = null;
 let entitled = true;
 const reportReads = [];
 const reviewReads = [];
@@ -21,7 +22,10 @@ const additionalReviews = [];
 const additionalProposals = [];
 const loaded = { exports: {} };
 new Function("require", "module", "exports", compiled)((name) => {
-  if (name === "@/app/auth") return { getAuthenticatedUser: async () => user };
+  if (name === "@/app/auth") return { getAuthenticatedUser: async () => {
+    if (identityError) throw identityError;
+    return user;
+  } };
   if (name === "@/db/product") return {
     getReportForUser: async (userId, scanId) => {
       reportReads.push([userId, scanId]);
@@ -191,4 +195,30 @@ test("evidence export groups many owned reviews without repeated full-history sc
     additionalReviews.length = 0;
     additionalProposals.length = 0;
   }
+});
+
+test("evidence export identity outage is private and prevents selector and evidence reads until recovery", async () => {
+  const before = [reportReads.length, reviewReads.length, historyReads.length];
+  const req = request("?scan=scan_1");
+  Object.defineProperty(req, "url", { get() { throw new Error("private selector must not be read"); } });
+  identityError = new Error("private identity diagnostic");
+  try {
+    const response = await GET(req);
+    assert.equal(response.status, 503);
+    assert.deepEqual(await response.json(), { code: "temporarily_unavailable" });
+    privateResponse(response);
+    assert.equal(response.headers.get("Content-Disposition"), null);
+    assert.deepEqual([reportReads.length, reviewReads.length, historyReads.length], before);
+  } finally {
+    identityError = null;
+  }
+  const recovered = await GET(request("?scan=scan_1"));
+  assert.equal(recovered.status, 200);
+  privateResponse(recovered);
+  const payload = await recovered.json();
+  assert.equal(payload.scanId, "scan_1");
+  assert.equal(payload.executionEnabled, false);
+  assert.equal(payload.creditsCharged, 0);
+  assert.deepEqual([reportReads.length, reviewReads.length, historyReads.length], before.map((count) => count + 1));
+  assert.deepEqual(reportReads.at(-1), ["owner-1", "scan_1"]);
 });
