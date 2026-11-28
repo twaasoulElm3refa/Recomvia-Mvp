@@ -17,7 +17,13 @@ function bounded(value: unknown, min: number, max: number): string | null {
 }
 
 export async function POST(request: Request) {
-  const user = await getAuthenticatedUser();
+  let user: Awaited<ReturnType<typeof getAuthenticatedUser>>;
+  try {
+    user = await getAuthenticatedUser();
+  } catch {
+    // Identity outages must not read drafts or register staff workspace records.
+    return json({ code: "temporarily_unavailable" }, 503);
+  }
   if (!user) return json({ code: "sign_in" }, 401);
   if (!env.RECOMVIA_ADMIN_USER_ID || user.userId !== env.RECOMVIA_ADMIN_USER_ID) {
     return json({ code: "not_found" }, 404);

@@ -10,6 +10,7 @@ const compiled = ts.transpileModule(source, {
 
 const env = { RECOMVIA_ADMIN_USER_ID: "staff-owner" };
 let user = { userId: "staff-owner" };
+let identityUnavailable = false;
 let workspaces = 0;
 const saves = [];
 let databaseError = false;
@@ -17,7 +18,10 @@ class FixProposalNotAllowed extends Error {}
 const loaded = { exports: {} };
 new Function("require", "module", "exports", compiled)((name) => {
   if (name === "cloudflare:workers") return { env };
-  if (name === "@/app/auth") return { getAuthenticatedUser: async () => user };
+  if (name === "@/app/auth") return { getAuthenticatedUser: async () => {
+    if (identityUnavailable) throw new Error("private identity diagnostics");
+    return user;
+  } };
   if (name === "@/db/product") return {
     ensureWorkspace: async () => { workspaces++; return { organizationId: "staff-org" }; },
   };
@@ -295,4 +299,43 @@ test("completed staff proposal clears its deadline and remains a free planning d
   } finally {
     t.mock.timers.reset();
   }
+});
+
+test("staff proposal identity outages reject drafts before request access or writes and recover", async () => {
+  const beforeWorkspaces = workspaces;
+  const beforeSaves = saves.length;
+  let requestReads = 0;
+  const blocked = new Proxy(request(), {
+    get() {
+      requestReads++;
+      throw new Error("request must not be read");
+    },
+  });
+  identityUnavailable = true;
+  try {
+    const response = await POST(blocked);
+    assert.equal(response.status, 503);
+    assertPrivate(response);
+    assert.deepEqual(await response.json(), { code: "temporarily_unavailable" });
+    assert.equal(requestReads, 0);
+    assert.equal(workspaces, beforeWorkspaces);
+    assert.equal(saves.length, beforeSaves);
+  } finally {
+    identityUnavailable = false;
+  }
+  const scope = "مراجعة وصف الخدمة — service metadata";
+  const response = await POST(request(JSON.stringify({ ...draft, scope })));
+  assert.equal(response.status, 201);
+  assertPrivate(response);
+  assert.deepEqual(await response.json(), {
+    proposal: { id: "proposal_1", version: 1 },
+    applied: false, approved: false, creditsCharged: 0,
+  });
+  assert.equal(workspaces, beforeWorkspaces + 1);
+  assert.equal(saves.length, beforeSaves + 1);
+  assert.deepEqual(saves.at(-1), [
+    "staff-owner", draft.fixId,
+    { scope, proposedText: draft.proposedText,
+      rationale: draft.rationale, rollbackPlan: draft.rollbackPlan },
+  ]);
 });
