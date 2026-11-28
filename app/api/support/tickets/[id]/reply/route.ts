@@ -9,6 +9,12 @@ const BODY_TIMEOUT = Symbol("body_timeout");
 const noStore = { "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff" };
 const json = (body: unknown, status: number) => Response.json(body, { status, headers: noStore });
 
+function rejectUpload(request: Request, error: string, status: number): Response {
+  // Do not wait for upstream cleanup of an upload rejected before body parsing.
+  void request.body?.cancel().catch(() => undefined);
+  return json({ error }, status);
+}
+
 async function readBoundedBody(request: Request): Promise<string | null | typeof BODY_TIMEOUT> {
   if (!request.body) return "";
   const reader = request.body.getReader();
@@ -58,28 +64,28 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
 
   const origin = request.headers.get("origin");
   if (!origin || origin !== new URL(request.url).origin) {
-    return json({ error: "Invalid request origin." }, 403);
+    return rejectUpload(request, "Invalid request origin.", 403);
   }
   if (request.headers.get("content-type")?.split(";")[0].trim().toLowerCase() !== "application/json") {
-    return json({ error: "JSON content type required." }, 415);
+    return rejectUpload(request, "JSON content type required.", 415);
   }
   const declaredLength = request.headers.get("content-length");
   if (declaredLength !== null) {
     if (!/^(0|[1-9]\d*)$/.test(declaredLength)) {
-      return json({ error: "Invalid request size." }, 400);
+      return rejectUpload(request, "Invalid request size.", 400);
     }
     if (Number(declaredLength) > MAX_BODY_BYTES) {
-      return json({ error: "Request body is too large." }, 413);
+      return rejectUpload(request, "Request body is too large.", 413);
     }
   }
 
   const { id: rawId } = await context.params;
   if (!/^[1-9][0-9]*$/.test(rawId) || rawId.length > 15) {
-    return json({ error: "Invalid ticket." }, 400);
+    return rejectUpload(request, "Invalid ticket.", 400);
   }
   const id = Number(rawId);
   if (!Number.isSafeInteger(id)) {
-    return json({ error: "Invalid ticket." }, 400);
+    return rejectUpload(request, "Invalid ticket.", 400);
   }
 
   let reply = "";
