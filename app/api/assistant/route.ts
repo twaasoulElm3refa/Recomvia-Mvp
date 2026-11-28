@@ -8,6 +8,13 @@ const BODY_TIMED_OUT = Symbol("body timed out");
 const headers = { "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff" };
 const json = (body: unknown, status = 200) => Response.json(body, { status, headers });
 
+function rejectUpload(request: Request, error: string, status: number): Response {
+  // Header-level rejections must not leave a potentially stalled upload active.
+  // Do not wait on upstream cleanup or expose its failure to the caller.
+  void request.body?.cancel().catch(() => undefined);
+  return json({ error }, status);
+}
+
 async function readBoundedBody(request: Request): Promise<string | null | typeof BODY_TIMED_OUT> {
   if (!request.body) return null;
   const reader = request.body.getReader();
@@ -48,21 +55,21 @@ async function readBoundedBody(request: Request): Promise<string | null | typeof
 export async function POST(request: Request) {
   const origin = request.headers.get("origin");
   if (origin && origin !== new URL(request.url).origin) {
-    return json({ error: "Invalid request origin." }, 403);
+    return rejectUpload(request, "Invalid request origin.", 403);
   }
   const mediaType = request.headers.get("content-type")?.split(";")[0].trim().toLowerCase();
   if (mediaType !== "application/json") {
-    return json({ error: "JSON content type required." }, 415);
+    return rejectUpload(request, "JSON content type required.", 415);
   }
 
   const declaredLength = request.headers.get("content-length");
   // Accept only canonical unsigned decimal lengths, as on the authenticated JSON APIs.
   // Ambiguous representations can be interpreted differently by intermediaries.
   if (declaredLength !== null && !/^(0|[1-9]\d*)$/.test(declaredLength)) {
-    return json({ error: "Invalid request size." }, 400);
+    return rejectUpload(request, "Invalid request size.", 400);
   }
   if (declaredLength !== null && Number(declaredLength) > MAX_BODY_BYTES) {
-    return json({ error: "Request body is too large." }, 413);
+    return rejectUpload(request, "Request body is too large.", 413);
   }
   let payload: unknown;
   try {
